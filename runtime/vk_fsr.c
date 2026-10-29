@@ -152,7 +152,7 @@ static void bind_pass(VkCommandBuffer cb, VkPipeline p, VkImageView in, VkImageV
 }
 
 int vk_fsr_record(VkCommandBuffer cb, unsigned slot, VkImage src, VkFormat fmt, int sw, int sh, const int crop[4],
-                  VkImage dst, uint32_t dw, uint32_t dh) {
+                  VkImage dst, int dx, int dy, uint32_t dw, uint32_t dh) {
     int cw = crop[2], ch = crop[3];
     if (strcmp(cfg_value("TOTK_UPSCALER"), "fsr") || (dw <= (uint32_t)cw && dh <= (uint32_t)ch) || !fmt) return 0;
     VkCtx *c = vk_ctx();
@@ -204,7 +204,7 @@ int vk_fsr_record(VkCommandBuffer cb, unsigned slot, VkImage src, VkFormat fmt, 
     VkImageBlit region = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                           .srcOffsets = {{0, 0, 0}, {(int)dw, (int)dh, 1}},
                           .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                          .dstOffsets = {{0, 0, 0}, {(int)dw, (int)dh, 1}}};
+                          .dstOffsets = {{dx, dy, 0}, {dx + (int)dw, dy + (int)dh, 1}}};
     vkCmdBlitImage(cb, F.img[last], VK_IMAGE_LAYOUT_GENERAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
                    VK_FILTER_NEAREST);
     return 1;

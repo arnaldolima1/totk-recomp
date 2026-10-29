@@ -35,13 +35,13 @@ static const char *const known[] = {
     "BIND_LSTICK_RIGHT", "BIND_LSTICK_UP", "BIND_MINUS",
     "BIND_PLUS", "BIND_R", "BIND_RCLICK", "BIND_RIGHT", "BIND_RSTICK_DOWN", "BIND_RSTICK_LEFT", "BIND_RSTICK_RIGHT", "BIND_RSTICK_UP",
     "BIND_SKIP", "BIND_STATS", "BIND_UP", "BIND_X", "BIND_Y",
-    "BIND_ZL", "BIND_ZR", "CLOTH_REALTIME", "CORE_DIAG", "CRIT", "CRIT_OUT", "DESC_TEMPLATE", "DUMP", "DUMP_BUF", "DUMP_DIR", "DUMP_LOG",
+    "BIND_ZL", "BIND_ZR", "CLOTH_REALTIME", "CORE_DIAG", "CRIT", "CRIT_OUT", "DESC_TEMPLATE", "DEVICE_PROFILE", "DUMP", "DUMP_BUF", "DUMP_DIR", "DUMP_LOG",
     "EXEFS", "FEEDBACK", "FIX_C0", "FIX_ZERO", "FLIGHT", "FLIGHT_AT", "FLIGHT_DIR", "FLIGHT_FRAMES", "FLIGHT_SPIKE_MS",
     "FLIGHT_THUMBS", "FPS60", "FPS_LIMIT", "FREEZE_IDLE", "FREE_CORES", "FULLSCREEN", "GPL", "GPL_DRAW_BUILD", "GPU",
     "GPU_INDEX", "GPU_NAME", "HIGHFPS_FIX", "INPUT", "INPUT_RECORD", "INPUT_SCRIPT", "LANG", "LIB_PREBUILD",
     "LIB_PREBUILD_KEEP", "LIB_PREBUILD_THREADS", "LOCALE", "LOD_GUARD", "MEMORY", "MENU_LANG", "MENU_TEST",
     "MENU_TEST_DIR", "MENU_TEST_SET", "MINIMAL_LAYOUT", "MIRROR_GAP", "MOTION", "MOUSE_SENS", "MOVIE_HOST", "MOVIE_PACE",
-    "ONE_PER_CORE", "OPERATION_MODE", "OUTPUT_RES", "PAD_LAYOUT", "PATCH_OUTPUT", "PATCH_SCENE", "PERF_OVERLAY", "PERF_SLOW_MS", "PIPELINE_CACHE", "PIPE_MEMO", "PIPE_PREBUILD", "PIPE_SKIP", "PIPE_SYNC", "PIPE_WAIT",
+    "ONE_PER_CORE", "OPERATION_MODE", "OUTPUT_RES", "PAD_LAYOUT", "PATCH_OUTPUT", "PATCH_SCENE", "PERF_OVERLAY", "PERF_SLOW_MS", "PICTURE_FIT", "PIPELINE_CACHE", "PIPE_MEMO", "PIPE_PREBUILD", "PIPE_SKIP", "PIPE_SYNC", "PIPE_WAIT",
     "PREWARM_XLATE", "PROBE_MOVIE", "PROBE_MOVIE_SHOT", "PROFILE", "PROFILE_CHAINS", "PROFILE_DIR", "PROFILE_FRAMES",
     "PROFILE_MAIN", "PROFILE_RENDER", "PUSH_SKIP", "PUSH_STAGE", "RDOC", "RDOC_DIR", "RDOC_DLL", "REALTIME", "REEXEC",
     "RENDER_SCALE", "REPLAY_ASYNC",
@@ -59,7 +59,8 @@ static const struct { const char *key, *section; } sections[] = {
     {"REALTIME", "frame rate"}, {"CLOTH_REALTIME", "frame rate"}, {"HIGHFPS_FIX", "frame rate"},
     {"FULLSCREEN", "display"}, {"WINDOW_SIZE", "display"}, {"PERF_OVERLAY", "display"}, {"VK_PRESENT", "display"},
     {"GPU_INDEX", "display"}, {"OUTPUT_RES", "display"}, {"RENDER_SCALE", "display"}, {"UPSCALER", "display"},
-    {"SHARPNESS", "display"},
+    {"SHARPNESS", "display"}, {"PICTURE_FIT", "display"},
+    {"DEVICE_PROFILE", "display"},
     {"MENU_LANG", "language"}, {"LANG", "language"}, {"OPERATION_MODE", "language"},
     {"VOLUME", "audio"},
     {"MOTION", "input"}, {"RUMBLE_STRENGTH", "input"}, {"RUMBLE_CURVE", "input"}, {"RUMBLE_TRIGGERS", "input"},
@@ -93,8 +94,10 @@ static const CfgMeta metas[] = {
     {"PERF_OVERLAY", "off", "off|fps|full", LIVE},
     {"OUTPUT_RES", "1920x1080", NULL, RESTART}, {"RENDER_SCALE", "game", "game|50|67|75|100|125|150|200", RESTART},
     {"UPSCALER", "fsr", "fsr|bilinear", LIVE}, {"SHARPNESS", "80", "0..100", LIVE},
+    {"PICTURE_FIT", "keep", "keep|stretch", LIVE},
+    {"DEVICE_PROFILE", "auto", "auto|desktop|deck", RESTART},
     // Game
-    {"FPS_LIMIT", "60", "30|60|120|144|display", LIVE}, {"FPS60", "1", "0|1", LIVE},
+    {"FPS_LIMIT", "60", "30|40|45|60|90|120|144|display", LIVE}, {"FPS60", "1", "0|1", LIVE},
     {"REALTIME", "1", "0|1", RESTART}, {"CLOTH_REALTIME", "1", "0|1", RESTART},
     {"HIGHFPS_FIX", "1", "0|1", RESTART},
     {"LANG", "", "ja|en-US|fr|de|it|es|zh-CN|ko|nl|pt|ru|zh-TW|en-GB|fr-CA|es-419|zh-Hans|zh-Hant|pt-BR", RESTART},
@@ -196,7 +199,55 @@ int cfg_load(const char *path) {
     return 1;
 }
 
-const char *cfg_get(const char *name) {
+// ---- device profiles: defaults for a known machine, below the environment and totk.ini and above the table, so any
+// key the player sets wins and resetting a key in the menu returns to the profile's value. TOTK_DEVICE_PROFILE = auto
+// (default: the Steam Deck when the firmware says so), desktop (none) or deck.
+//
+// The Steam Deck (LCD Jupiter, OLED Galileo; 1280x800, 16:10, 4 Zen 2 cores, RDNA 2 with 8 CUs sharing 16 GB): the game
+// at 1280x720 with its own 5/6 scene, letterboxed in the 16:10 screen (TOTK_PICTURE_FIT) until the game draws 16:10
+// itself; fullscreen and vsync, as gamescope composes Game Mode; 40 fps, which divides 40 Hz (and 120 Hz on the OLED).
+// Starting points to replace with measured ones (docs/tester-guide.md, Steam Deck).
+static const struct { const char *key, *value; } DECK[] = {
+    {"FULLSCREEN", "1"}, {"WINDOW_SIZE", "1280x800"}, {"OUTPUT_RES", "1280x720"}, {"RENDER_SCALE", "game"},
+    {"VK_PRESENT", "fifo"}, {"FPS_LIMIT", "40"},
+};
+static int profile = -1;   // 0 none, 1 Steam Deck
+
+static int read_line(const char *path, char *out, size_t n) {
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    int ok = fgets(out, (int)n, f) != NULL;
+    fclose(f);
+    out[ok ? strcspn(out, "\r\n") : 0] = 0;
+    return ok;
+}
+
+// The Steam Deck: Valve's board, product Jupiter or Galileo (/sys/class/dmi/id); SteamDeck=1, which Steam sets on it.
+static int on_steam_deck(void) {
+    const char *env = getenv("SteamDeck");
+    if (env && !strcmp(env, "1")) return 1;
+    char vendor[64], product[64];
+    return read_line("/sys/class/dmi/id/board_vendor", vendor, sizeof vendor) && !strcmp(vendor, "Valve") &&
+           read_line("/sys/class/dmi/id/product_name", product, sizeof product) &&
+           (!strcmp(product, "Jupiter") || !strcmp(product, "Galileo"));
+}
+
+static const char *raw_get(const char *name);
+
+static int profile_of(void) {
+    int p = __atomic_load_n(&profile, __ATOMIC_ACQUIRE);
+    if (p >= 0) return p;
+    const char *set = raw_get(PREFIX "DEVICE_PROFILE");
+    if (set && !strcmp(set, "deck")) p = 1;
+    else if (set && *set && strcmp(set, "auto")) p = 0;
+    else p = on_steam_deck();
+    __atomic_store_n(&profile, p, __ATOMIC_RELEASE);
+    return p;
+}
+
+const char *cfg_device_profile(void) { return profile_of() ? "deck" : "desktop"; }
+
+static const char *raw_get(const char *name) {
     const char *e = getenv(name);
     if (e || strncmp(name, PREFIX, PREFIX_LEN)) return e;
     int n = __atomic_load_n(&n_entries, __ATOMIC_ACQUIRE);
@@ -204,6 +255,17 @@ const char *cfg_get(const char *name) {
         if (!strcasecmp(entries[i].key, name + PREFIX_LEN)) return __atomic_load_n(&entries[i].value, __ATOMIC_ACQUIRE);
     return NULL;
 }
+
+const char *cfg_get(const char *name) {
+    const char *v = raw_get(name);
+    if (v || strncmp(name, PREFIX, PREFIX_LEN) || !profile_of()) return v;
+    for (size_t i = 0; i < sizeof DECK / sizeof *DECK; i++)
+        if (!strcasecmp(DECK[i].key, name + PREFIX_LEN)) return DECK[i].value;
+    return NULL;
+}
+
+// Whether name's value comes from the player (the environment or totk.ini), not a profile or the table.
+int cfg_is_set(const char *name) { return raw_get(name) != NULL; }
 
 unsigned cfg_version(void) { return __atomic_load_n(&version, __ATOMIC_ACQUIRE); }
 
@@ -554,7 +616,7 @@ int cfg_save(void) {
     return 0;
 }
 
-void cfg_init(void) {
+static void load_ini(void) {
     if (!find_ini()) return;
     if (!cfg_load(ini_path)) {
         rt_log("cfg: no settings file at %s", ini_path);
@@ -566,4 +628,11 @@ void cfg_init(void) {
         snprintf(var, sizeof var, PREFIX "%s", entries[i].key);
         if (getenv(var)) rt_log("cfg: %s is set in the environment and overrides totk.ini", var);
     }
+}
+
+void cfg_init(void) {
+    load_ini();
+    if (profile_of())
+        rt_log("cfg: device profile Steam Deck: defaults for the keys totk.ini does not set (TOTK_DEVICE_PROFILE=desktop "
+               "turns it off)");
 }

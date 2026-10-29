@@ -63,6 +63,26 @@ The line `vk: using gpu N: <name>` says which one ran.
 5. For a bug you can trigger again: a recording of your input (`set TOTK_INPUT_RECORD=input.txt`, see
    [controls.md](controls.md), "Scripted input") and the save you started from.
 
+## Steam Deck
+
+Build or install on Linux ([installer.md](installer.md), "Linux release"), in Desktop Mode. The game then runs in either
+mode; for Game Mode, add `totk` from the install folder to Steam as a non-Steam game.
+
+The game recognises the Deck (LCD and OLED) and uses its device profile for every setting `totk.ini` does not set:
+fullscreen, game resolution 1280x720 letterboxed in the 1280x800 screen, the game's own 3D scale, vsync and a 40 fps
+limit. These are starting points, not measurements. What helps most:
+
+1. The performance overlay (F10, or both stick clicks L3 + R3) in full mode: the frame rate, mean and longest frame
+   time over a minute in Lookout Landing, in the Depths and in the Sky, with the settings named.
+2. The same with `fps_limit` 30, 45 and 60 and `render_scale` 50, 67 and game, so the defaults can be picked from
+   measurements. Steam's own performance overlay (the ... button) adds power draw and temperatures.
+3. LCD or OLED, SteamOS version (`uname -r` in Desktop Mode's terminal), and the game update.
+4. Anything that looks stretched or cut off: the game draws 16:9 only, so the profile keeps black bars above and
+   below; `picture_fit = stretch` fills the screen instead.
+
+`device_profile = desktop` in `totk.ini` turns the profile off; `deck` turns it on elsewhere, to try the Deck's
+settings on a PC.
+
 ## Switches for the developer's questions
 
 Only set these when asked; each forces a fallback the build picks by itself on GPUs that need it.

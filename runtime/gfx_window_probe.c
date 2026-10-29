@@ -112,14 +112,19 @@ static int present_and_check(Source *s, int first, int i, int *w_out, int *h_out
     else if (fmt == VK_FORMAT_R8G8B8A8_UNORM) { want[0] = rgb[0]; want[1] = rgb[1]; want[2] = rgb[2]; }
     else { printf("probe-window: swapchain format %d is not UNORM RGBA/BGRA\n", (int)fmt); return 3; }
     want[3] = 255;
-    uint32_t wv;
+    uint32_t wv, black = 0xff000000u;   // opaque black in both byte orders
     memcpy(&wv, want, 4);
+    int r[4];   // the picture's rectangle; bars of black around it when the window's shape differs
+    gfx_fit_rect(SRC_W, SRC_H, w, h, r);
     const uint32_t *p = (const uint32_t *)px;
-    for (long k = 0, n = (long)w * h; k < n; k++)
-        if (p[k] != wv) {
-            printf("probe-window: frame %d pixel %ld is %08x, expected %08x\n", i, k, p[k], wv);
+    for (long k = 0, n = (long)w * h; k < n; k++) {
+        int x = (int)(k % w), y = (int)(k / w);
+        uint32_t e = x >= r[0] && x < r[0] + r[2] && y >= r[1] && y < r[1] + r[3] ? wv : black;
+        if (p[k] != e) {
+            printf("probe-window: frame %d pixel %ld (%d, %d) is %08x, expected %08x\n", i, k, x, y, p[k], e);
             return 4;
         }
+    }
     *w_out = w;
     *h_out = h;
     return 0;
