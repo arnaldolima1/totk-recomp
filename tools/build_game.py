@@ -3,6 +3,11 @@
 Writes build/<version>/build.ninja and runs MSYS2 UCRT64 Ninja on it. Ninja keeps the build incremental: a chunk is
 recompiled only when it, a header it includes or its flags change.
 
+On Linux the same steps make build/<version>/totk with the clang, lld and ninja on PATH (or the clang and lld in --toolchain DIR/bin): the
+runtime's *_sdl.* and platform/linux.c take the place of its *_win.*, platform/win32.c and totk.rc, the libraries are
+the system's (Vulkan, SDL3, Opus, libvpx, zstd; libstdc++ static), and the executable finds a libSDL3.so.0 beside it
+first (rpath $ORIGIN). docs/building.md lists the packages.
+
     .venv\\Scripts\\python tools\\build_game.py                     # generated/v121 -> build/v121/totk.exe
     .venv\\Scripts\\python tools\\build_game.py --modules subsdk0   # one module (links if it has no calls into others)
     .venv\\Scripts\\python tools\\build_game.py --jobs 8
@@ -50,7 +55,7 @@ Standard library only.
 """
 import argparse
 import ctypes
-import ctypes.wintypes as wt
+import ctypes.wintypes as wt   # the job-object structures below; importing it works on every OS
 import hashlib
 import json
 import os
@@ -64,22 +69,42 @@ import romfs_index
 from build_shaders import stale as stale_shaders
 from check_content import GENERATED_MARKER
 
+WIN = os.name == 'nt'
+if not WIN:
+    import resource
 ROOT = Path(__file__).resolve().parent.parent
 # In a git worktree (tools/worktree.py) build/ and generated/ are junctions into the main checkout, and resolve() follows
 # them. MAIN_ROOT is where they land, so resolved paths still print and compare relative to a root.
 MAIN_ROOT = (ROOT / 'build').resolve().parent
 UCRT = Path(r'C:\msys64\ucrt64\bin')
-CLANG = UCRT / 'clang.exe'
-NINJA = UCRT / 'ninja.exe'
-SDL3_DLLS = [UCRT / 'SDL3.dll', UCRT / 'libiconv-2.dll', UCRT / 'libopus-0.dll']
+EXE = 'totk.exe' if WIN else 'totk'
+
+
+def on_path(name):
+    """name on PATH, else a path that does not exist (the tool check below names it)."""
+    found = shutil.which(name)
+    return Path(found) if found else Path('/usr/bin') / name
+
+
+CLANG = UCRT / 'clang.exe' if WIN else on_path('clang')
+NINJA = UCRT / 'ninja.exe' if WIN else on_path('ninja')
+SDL3_DLLS = [UCRT / 'SDL3.dll', UCRT / 'libiconv-2.dll', UCRT / 'libopus-0.dll'] if WIN else []
 
 # Flags for generated code as LAS Recomp builds it (Makefile GENFLAGS, Windows), plus -march for the FP/SIMD lowering.
 GEN_FLAGS = ['-O1', '-fno-strict-aliasing', '-Wno-return-type', '-Wno-unused-label', '-fvisibility=hidden',
              '-march=x86-64-v3']
 RT_FLAGS = ['-O2', '-g', '-Wall', '-fno-strict-aliasing', '-march=x86-64-v3']
-LINK_FLAGS = ['-fuse-ld=lld', '-Wl,--stack,16777216', '"-Wl,--Map=$builddir/totk.map"']   # the map feeds tools/prof_report.py
-LINK_LIBS = ['-lpsapi', '-lbcrypt', '-lvulkan-1', '-luser32', '-lgdi32', '-ldwmapi', '-lwinmm', '-lSDL3', '-lopus', '-l:libvpx.a', '-l:libzstd.a', '-l:libstdc++.a', '-l:libwinpthread.a']   # Vulkan back end; libvpx static (movies); libzstd static (resolution.c)
-VMA_INCLUDE = UCRT.parent / 'include' / 'vma'   # vk_mem_alloc.h; MSYS2 package vulkan-memory-allocator
+if WIN:
+    LINK_FLAGS = ['-fuse-ld=lld', '-Wl,--stack,16777216', '"-Wl,--Map=$builddir/totk.map"']   # the map feeds tools/prof_report.py
+    LINK_LIBS = ['-lpsapi', '-lbcrypt', '-lvulkan-1', '-luser32', '-lgdi32', '-ldwmapi', '-lwinmm', '-lSDL3', '-lopus', '-l:libvpx.a', '-l:libzstd.a', '-l:libstdc++.a', '-l:libwinpthread.a']   # Vulkan back end; libvpx static (movies); libzstd static (resolution.c)
+    VMA_INCLUDE = UCRT.parent / 'include' / 'vma'   # vk_mem_alloc.h; MSYS2 package vulkan-memory-allocator
+else:
+    # -no-pie: the lifted modules' function tables (hundreds of thousands of pointers) need no load-time relocation.
+    # $ORIGIN: a libSDL3.so.0 next to totk comes before the system's (the release's portable folder).
+    LINK_FLAGS = ['-fuse-ld=lld', '-no-pie', '-Wl,-z,noexecstack', "'-Wl,-rpath,$$ORIGIN'",
+                  '"-Wl,-Map=$builddir/totk.map"']
+    LINK_LIBS = ['-lvulkan', '-lSDL3', '-lopus', '-lvpx', '-lzstd', '-l:libstdc++.a', '-lm', '-lpthread', '-ldl']
+    VMA_INCLUDE = Path('/usr/include')   # vk_mem_alloc.h; Arch package vulkan-memory-allocator, Debian libvulkan-memory-allocator-dev
 # --toolchain: an llvm-mingw tree. The libraries, headers and DLLs MSYS2 supplies come from the deps directory instead.
 LLVM_LINK_LIBS = ['-lpsapi', '-lbcrypt', '-luser32', '-lgdi32', '-ldwmapi', '-lwinmm', '-lvulkan-1', '-lSDL3', '-lopus',
                   '-l:libvpx.a', '-l:libzstd.a', '-l:libc++.a', '-l:libc++abi.a', '-l:libunwind.a', '-l:libwinpthread.a']
@@ -89,7 +114,7 @@ DEFAULT_DEPS = ROOT / 'toolchain' / 'deps-mingw'
 # functions sit on it).
 INSTALL_SIDE = {'romfs.c', 'patches.c', 'ov_zstd.c'}
 LIB_NAME = 'libtotkrt.a'
-AR = UCRT / 'llvm-ar.exe'
+AR = UCRT / 'llvm-ar.exe' if WIN else on_path('llvm-ar')
 WINDRES = UCRT / 'windres.exe'   # runtime/totk.rc: the manifest of totk.exe
 TOOLCHAIN_BIN = None   # llvm-mingw bin directory, set by main() for --toolchain
 DEPS = None            # the deps directory of an llvm-mingw build
@@ -190,12 +215,21 @@ def c_string(s):
 RUNTIME = ROOT / 'runtime'   # --runtime: a copy of runtime/ lets a task build without touching the shared tree
 
 
+def other_os(name):
+    """A runtime file for another OS: Win32 ones (*_win.*, platform/win32.c, totk.rc) off Windows, the SDL window's
+    (*_sdl.*) and platform/linux.c on Windows."""
+    stem = name.rsplit('.', 1)[0]
+    if WIN:
+        return stem.endswith('_sdl') or name == 'linux.c'
+    return stem.endswith('_win') or name in ('win32.c', 'totk.rc')
+
+
 def runtime_sources(skip=()):
-    """Every runtime/*.c, *.cpp, platform/*.c, *.rc, the in-game menu (ui/*.cpp) and Dear ImGui except the names in skip,
-    so a task adds a file without editing this script."""
+    """Every runtime/*.c, *.cpp, platform/*.c, *.rc, the in-game menu (ui/*.cpp) and Dear ImGui of this OS except the
+    names in skip, so a task adds a file without editing this script."""
     pats = ('*.c', '*.cpp', 'platform/*.c', '*.rc', 'ui/*.cpp', 'third_party/imgui/*.cpp',
             'third_party/imgui/backends/*.cpp')
-    return sorted(p for pat in pats for p in RUNTIME.glob(pat) if p.name not in skip)
+    return sorted(p for pat in pats for p in RUNTIME.glob(pat) if p.name not in skip and not other_os(p.name))
 
 
 def runtime_object(out, src):
@@ -251,7 +285,7 @@ def ninja_file(gen, out, mods, pool_depth, skip=(), prebuilt=False, runtime_lib=
     vma = f'{cmd_path(DEPS / "include")} -I {cmd_path(DEPS / "include" / "vma")}' if DEPS else cmd_path(VMA_INCLUDE)
     imgui = cmd_path(RUNTIME / 'third_party' / 'imgui')
     rt_inc = f'{inc} -I {cmd_path(out)} -I {vma} -I {imgui}'   # romfs_config.h, vk_mem_alloc.h (+ deps headers), imgui.h
-    libs = [f'-L {cmd_path(DEPS / "lib")}'] + LLVM_LINK_LIBS if DEPS else LINK_LIBS
+    libs = [f'-L {cmd_path(DEPS / "lib")}'] + (LLVM_LINK_LIBS if WIN else LINK_LIBS) if DEPS else LINK_LIBS
     lines = [
         '# Written by tools/build_game.py; do not edit.',
         'ninja_required_version = 1.10',
@@ -315,7 +349,7 @@ def ninja_file(gen, out, mods, pool_depth, skip=(), prebuilt=False, runtime_lib=
         rt.append(o)
     objs['runtime'] = rt
     every = [o for v in objs.values() for o in v]
-    exe = out / 'totk.exe'
+    exe = out / EXE
     if make_lib:
         exe = out / LIB_NAME
         lines += ['', 'rule ar', f'  command = {cmd_arg(AR.as_posix())} rcs $out $in', '  description = AR $out', '', f'build {ninja_path(exe)}: ar ' + ' '.join(ninja_path(o) for o in every),
@@ -361,7 +395,7 @@ def main_objects(gen, main_out, rt_dir, mods):
             pairs[o] = theirs
     # Ninja runs in the main checkout: the main build.ninja is relative to it, and the worktree's runtime/ files carry newer
     # mtimes that would make every object look stale. Header equality is checked byte for byte below.
-    env = dict(os.environ, PATH=str(UCRT) + os.pathsep + os.environ.get('PATH', ''))
+    env = dict(os.environ, PATH=str(UCRT) + os.pathsep + os.environ.get('PATH', '')) if WIN else dict(os.environ)
     targets = [ninja_path(t) for t in pairs.values()]
     for i in range(0, len(targets), 200):
         r = subprocess.run([str(NINJA), '-f', str(main_ninja), '-n', '-d', 'explain'] + targets[i:i + 200], cwd=MAIN_ROOT,
@@ -530,7 +564,13 @@ CREATE_SUSPENDED = 0x4
 
 
 def run_measured(cmd, env):
-    """Run cmd in its own job object. Returns (exit code, seconds, peak bytes of one process, peak bytes of all)."""
+    """Run cmd in its own job object. Returns (exit code, seconds, peak bytes of one process, peak bytes of all).
+    Off Windows: the largest resident set of one child process, and 0 for all of them (no job accounting)."""
+    if not WIN:
+        t0 = time.monotonic()
+        code = subprocess.call(cmd, cwd=ROOT, env=env)
+        peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss * 1024   # KiB on Linux
+        return code, time.monotonic() - t0, peak, 0
     k32 = ctypes.WinDLL('kernel32', use_last_error=True)
     k32.CreateJobObjectW.restype = wt.HANDLE
     k32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wt.LPCWSTR]
@@ -564,6 +604,9 @@ def run_measured(cmd, env):
 
 
 def total_ram():
+    if not WIN:
+        return os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
+
     class MemStatus(ctypes.Structure):
         _fields_ = [('dwLength', wt.DWORD), ('dwMemoryLoad', wt.DWORD)] + \
                    [(n, ctypes.c_ulonglong) for n in ('total', 'avail', 'tpf', 'apf', 'tv', 'av', 'aev')]
@@ -586,6 +629,30 @@ def pe_sections(path):
         s = data[table + 40 * i:table + 40 * (i + 1)]
         out[s[:8].rstrip(b'\0').decode(errors='replace')] = int.from_bytes(s[8:12], 'little')
     return out, image
+
+
+def elf_sections(path):
+    """{section name: size} of the allocated sections of an ELF64 file, and the extent they span in memory."""
+    with open(path, 'rb') as f:
+        head = f.read(64)
+        shoff = int.from_bytes(head[0x28:0x30], 'little')
+        shentsize, shnum, shstrndx = (int.from_bytes(head[o:o + 2], 'little') for o in (0x3A, 0x3C, 0x3E))
+        f.seek(shoff)
+        table = f.read(shentsize * shnum)
+        sh = [table[i * shentsize:(i + 1) * shentsize] for i in range(shnum)]
+        f.seek(int.from_bytes(sh[shstrndx][0x18:0x20], 'little'))
+        names = f.read(int.from_bytes(sh[shstrndx][0x20:0x28], 'little'))
+    out, lo, hi = {}, None, 0
+    for s in sh:
+        flags = int.from_bytes(s[0x08:0x10], 'little')
+        addr, size = int.from_bytes(s[0x10:0x18], 'little'), int.from_bytes(s[0x20:0x28], 'little')
+        if not flags & 2 or not size:   # SHF_ALLOC
+            continue
+        name = names[int.from_bytes(s[0:4], 'little'):].split(b'\0', 1)[0].decode(errors='replace')
+        out[name] = out.get(name, 0) + size
+        lo = addr if lo is None else min(lo, addr)
+        hi = max(hi, addr + size)
+    return out, hi - (lo or 0)
 
 
 def mib(n):
@@ -614,7 +681,8 @@ def main():
                                                  "build/profile-<version> otherwise, so trying another version leaves "
                                                  "the main profile alone; saves load on 1.2.1 and 1.4.3 alike)")
     ap.add_argument('--toolchain', type=Path, help='llvm-mingw directory (with bin/clang.exe) to build with instead of '
-                                                   'MSYS2 UCRT64 clang')
+                                                   'MSYS2 UCRT64 clang; on Linux an LLVM directory (bin/clang, '
+                                                   'bin/llvm-ar) instead of the clang on PATH')
     ap.add_argument('--ninja', type=Path, help='ninja.exe to build with (default: MSYS2 UCRT64, else bin/ninja.exe of the '
                                                'release folder)')
     ap.add_argument('--deps', type=Path, help=f'with --toolchain: include/, lib/ and bin/ of Vulkan, SDL3, Opus, libvpx '
@@ -646,16 +714,19 @@ def main():
     elif not NINJA.is_file() and (ROOT / 'bin' / 'ninja.exe').is_file():
         NINJA = ROOT / 'bin' / 'ninja.exe'   # the release folder (tools/make_release.py)
     dlls = SDL3_DLLS
+    suffix = '.exe' if WIN else ''
     if args.toolchain:
         TOOLCHAIN_BIN = (args.toolchain / 'bin').resolve()
-        CLANG = TOOLCHAIN_BIN / 'clang.exe'
-        AR = TOOLCHAIN_BIN / 'llvm-ar.exe'
+        CLANG = TOOLCHAIN_BIN / f'clang{suffix}'
+        AR = TOOLCHAIN_BIN / f'llvm-ar{suffix}'
         WINDRES = TOOLCHAIN_BIN / 'llvm-windres.exe'
+    if args.toolchain and WIN or args.deps and (args.toolchain or not WIN):   # Linux: --deps only, never deps-mingw
         DEPS = (args.deps or DEFAULT_DEPS).resolve()
-        dlls = sorted((DEPS / 'bin').glob('*.dll'))
+        dlls = sorted((DEPS / 'bin').glob('*.dll')) if WIN else []
     for tool in (CLANG, NINJA):
         if not tool.is_file():
-            sys.exit(f'{tool} not found: install MSYS2 UCRT64 clang, lld and ninja (docs/building.md)')
+            sys.exit(f'{tool} not found: install ' + ('MSYS2 UCRT64 clang, lld and ninja' if WIN else 'clang, lld and ninja')
+                     + ' (docs/building.md)')
     if not (gen / 'layout.json').is_file():
         sys.exit(f'{gen / "layout.json"} not found: run the generator first')
 
@@ -680,7 +751,7 @@ def main():
         print(f'romfs index: {count} files, {mib(size)}, {dt:.1f} s')
     else:
         romfs_index.write_placeholder(out)
-        print(f'build_game: warning: no {paths["romfs"] / "index.json"}; totk.exe will have no RomFS', file=sys.stderr)
+        print(f'build_game: warning: no {paths["romfs"] / "index.json"}; {EXE} will have no RomFS', file=sys.stderr)
     copy_romfs_patches(args.version, out)
     global RUNTIME
     RUNTIME = (args.runtime or RUNTIME).resolve()
@@ -715,13 +786,15 @@ def main():
                                  args.make_runtime_lib)
     write_if_changed(out / 'build.ninja', text)
 
-    env = dict(os.environ, PATH=str(TOOLCHAIN_BIN or UCRT) + os.pathsep + os.environ.get('PATH', ''))
+    env = dict(os.environ)
+    if WIN or TOOLCHAIN_BIN:
+        env['PATH'] = str(TOOLCHAIN_BIN or UCRT) + os.pathsep + os.environ.get('PATH', '')
     base = [str(NINJA), '-f', str(out / 'build.ninja'), '-j', str(jobs)]
     nfiles = sum(len(v) for v in mods.values())
     print(f'build_game: {nfiles} generated files in {len(linked)} modules ({", ".join(linked)}), {jobs} jobs', flush=True)
 
     code, dt, peak_one, peak_all = run_measured(base + ['objects'], env)
-    print(f'compile: {dt:.1f} s, peak {mib(peak_one)} per process, {mib(peak_all)} all processes')
+    print(f'compile: {dt:.1f} s, peak {mib(peak_one)} per process' + (f', {mib(peak_all)} all processes' if WIN else ''))
     if code:
         sys.exit(code)
     for mod, files in objs.items():
@@ -743,7 +816,7 @@ def main():
         return
     for dll in dlls:   # dynamic SDL3 (zlib) and its libiconv (LGPL, unmodified DLL), found next to totk.exe
         shutil.copy2(dll, exe.parent / dll.name)
-    sections, image = pe_sections(exe)
+    sections, image = pe_sections(exe) if WIN else elf_sections(exe)
     print(f'{below_root(exe)}: file {mib(exe.stat().st_size)}, '
           f'image {mib(image)}; ' + ', '.join(f'{k} {mib(v)}' for k, v in sections.items() if k.startswith('.') and v))
     if image > 3 * GiB // 2:

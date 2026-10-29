@@ -17,7 +17,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <windows.h>
 
 #include "cfg.h"
 #include "gfx.h"
@@ -28,6 +27,7 @@
 #include "tex.h"
 #include "vk.h"
 #include "vk_exec.h"
+#include "platform/platform.h"
 
 typedef struct {
     uint64_t addr;
@@ -75,8 +75,8 @@ typedef struct {
 typedef struct { samp_par p; VkSampler s, sp; uint8_t used; } SampSlot;   // s: vk_sampler_for(&p) once looked up; sp:
                                                                            // its point-sampled form (vk_sampler_point_by_id_locked)
 
-static CRITICAL_SECTION tex_lock;
-static INIT_ONCE tex_once = INIT_ONCE_STATIC_INIT;
+static PlatRMutex tex_lock;
+static PlatOnce tex_once = PLAT_ONCE_INIT;
 static nvn_hmap by_key = {.klen = sizeof(TexKey)};
 static nvn_hmap by_addr = {.klen = 8};
 static TexSlot *tslots;
@@ -96,7 +96,7 @@ static uint64_t n_alias_copied, n_alias_upload, n_alias_uninit;
 static uint32_t submit_epoch = 1;   // bumped per queue submit: draw bindings check a texture's storage once per submit
 // Mirrored textures the GPU wrote into, sorted by address (vk_texture_cpu_stale, vk_texture_write_back). Changed under
 // tex_lock and owned_lock; read under either.
-static SRWLOCK owned_lock = SRWLOCK_INIT;
+static PlatMutex owned_lock = PLAT_MUTEX_INIT;
 static Tex **owned;
 static int nowned, cowned;
 static uint64_t max_owned;   // largest storage size in owned[]
@@ -129,18 +129,17 @@ static void tex_gen_bump(uint64_t addr) {
     __atomic_store_n(g, *g + 1, __ATOMIC_RELEASE);
 }
 
-static volatile long tex_ready;
-static BOOL CALLBACK tex_init(PINIT_ONCE o, PVOID p, PVOID *ctx) {
-    (void)o, (void)p, (void)ctx;
-    InitializeCriticalSection(&tex_lock);
+static volatile int32_t tex_ready;
+static void tex_init(void *p) {
+    (void)p;
     __atomic_store_n(&tex_ready, 1, __ATOMIC_RELEASE);
-    return TRUE;
+    return;
 }
 static void lock(void) {
-    if (!__atomic_load_n(&tex_ready, __ATOMIC_ACQUIRE)) InitOnceExecuteOnce(&tex_once, tex_init, NULL, NULL);
-    EnterCriticalSection(&tex_lock);
+    if (!__atomic_load_n(&tex_ready, __ATOMIC_ACQUIRE)) plat_once(&tex_once, tex_init, NULL);
+    plat_rmutex_lock(&tex_lock);
 }
-static void unlock(void) { LeaveCriticalSection(&tex_lock); }
+static void unlock(void) { plat_rmutex_unlock(&tex_lock); }
 
 static uint32_t umax(uint32_t a, uint32_t b) { return a > b ? a : b; }
 static uint32_t mip(uint32_t v, unsigned lv) { return umax(v >> lv, 1); }
@@ -176,9 +175,9 @@ static int tex_mirrored(const tex_t *t) {
     return 1;
 }
 
-static void log_limited(volatile long *n, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
-static void log_limited(volatile long *n, const char *fmt, ...) {
-    if (InterlockedIncrement(n) > 16) return;
+static void log_limited(volatile int32_t *n, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+static void log_limited(volatile int32_t *n, const char *fmt, ...) {
+    if (plat_inc32(n) > 16) return;
     char buf[512];
     va_list ap;
     va_start(ap, fmt);
@@ -275,7 +274,7 @@ static void init_image(Tex *e, VkCommandBuffer cb) {
 
 // defer_init: the caller records the image's first transition (init_image or alias_copy).
 static Tex *create_tex(const tex_t *t, const TexKey *k, int defer_init) {
-    static volatile long n_unmapped, n_unsupported, n_failed, n_unbound;
+    static volatile int32_t n_unmapped, n_unsupported, n_failed, n_unbound;
     VkCtx *c = vk_ctx();
     const nvn_texdesc *d = &t->d;
     if (!c || d->target == NVN_TEXTURE_TARGET_BUFFER) return NULL;
@@ -404,7 +403,7 @@ static int owned_lower(uint64_t a) {
 
 static void own_add(Tex *e) {
     if (e->listed) return;
-    AcquireSRWLockExclusive(&owned_lock);
+    plat_mutex_lock(&owned_lock);
     if (nowned == cowned) {
         cowned = cowned ? 2 * cowned : 256;
         if (!(owned = realloc(owned, sizeof *owned * (size_t)cowned))) rt_fatal("vk: out of memory for the owned-texture list");
@@ -415,12 +414,12 @@ static void own_add(Tex *e) {
     __atomic_store_n(&nowned, nowned + 1, __ATOMIC_RELEASE);
     if (e->t.L.size > max_owned) max_owned = e->t.L.size;
     e->listed = 1;
-    ReleaseSRWLockExclusive(&owned_lock);
+    plat_mutex_unlock(&owned_lock);
 }
 
 static void own_remove(Tex *e) {
     if (!e->listed) return;
-    AcquireSRWLockExclusive(&owned_lock);
+    plat_mutex_lock(&owned_lock);
     for (int i = owned_lower(e->pub.addr); i < nowned && owned[i]->pub.addr == e->pub.addr; i++)
         if (owned[i] == e) {
             memmove(owned + i, owned + i + 1, sizeof *owned * (size_t)(nowned - i - 1));
@@ -428,7 +427,7 @@ static void own_remove(Tex *e) {
             break;
         }
     e->listed = 0;
-    ReleaseSRWLockExclusive(&owned_lock);
+    plat_mutex_unlock(&owned_lock);
 }
 
 static void rel_append(Tex *e) {
@@ -508,7 +507,7 @@ static void shrink_rgb(int format, const uint8_t *src, uint8_t *dst, size_t n) {
 // TOTK_ASTC=check: the compute decoder's texels of n regions (gpu: the regions one after the other) against
 // astc_decode_ldr of the same raw blocks (raw: the staging bytes the regions point into).
 static void astc_check(const Tex *e, const uint8_t *raw, const VkAstcRegion *ar, int n, const uint8_t *gpu) {
-    static volatile long n_bad;
+    static volatile int32_t n_bad;
     static uint64_t n_tex, n_texels, n_diff_tex;
     uint32_t bw = e->f.astc_bw, bh = e->f.astc_bh;
     uint64_t diff = 0, first = UINT64_MAX;
@@ -547,7 +546,7 @@ static void astc_check(const Tex *e, const uint8_t *raw, const VkAstcRegion *ar,
 
 // Copies the whole storage into the image (every level and layer the image has).
 static void upload(Tex *e) {
-    static volatile long n_bad, n_undecoded;
+    static volatile int32_t n_bad, n_undecoded;
     const tex_t *t = &e->t;
     const nvn_texdesc *d = &t->d;
     int bw, bh, bpb = nvn_fmt_bpb(d->format, &bw, &bh);
@@ -1100,7 +1099,7 @@ static int read_aspect(const Tex *e, VkImageAspectFlags *a) {
 
 // Image <-> caller rows through a staging buffer; the GPU copy is waited for.
 static int image_texels(Tex *e, const Region *g, const NVNcopyRegion *r, uint8_t *mem, int write) {
-    static volatile long n_astc, n_ds;
+    static volatile int32_t n_astc, n_ds;
     VkCtx *c = vk_ctx();
     VkImageAspectFlags aspect;
     if (e->f.astc_bw && !write) {
@@ -1212,7 +1211,7 @@ int vk_texture_read_image(const tex_t *t, const view_t *v, const NVNcopyRegion *
 // ReadTexels: the pool bytes are the content of a mirrored texture the GPU has not rendered into; every other texture
 // is read back from its image.
 void vk_read_texels(const tex_t *t, const view_t *v, const NVNcopyRegion *r, uint8_t *dst, uint64_t row, uint64_t img) {
-    static volatile long n_bad;
+    static volatile int32_t n_bad;
     Region g;
     if (!region_of(t, v, r, row, img, &g)) {
         log_limited(&n_bad, "ReadTexels: invalid region %d,%d,%d %dx%dx%d (format %#x)", r->xoffset, r->yoffset,
@@ -1234,7 +1233,7 @@ void vk_read_texels(const tex_t *t, const view_t *v, const NVNcopyRegion *r, uin
 // WriteTexels: a mirrored texture gets the texels in its pool bytes (and in its image once the GPU owns it); every
 // other texture in its image.
 void vk_write_texels(const tex_t *t, const view_t *v, const NVNcopyRegion *r, const uint8_t *src, uint64_t row, uint64_t img) {
-    static volatile long n_bad;
+    static volatile int32_t n_bad;
     Region g;
     if (!region_of(t, v, r, row, img, &g) || (v && v->set_format && v->format != t->d.format)) {
         log_limited(&n_bad, "WriteTexels: invalid region %d,%d,%d %dx%dx%d or view format (format %#x)", r->xoffset,
@@ -1316,9 +1315,9 @@ size_t vk_texture_texel_span(const tex_t *t, const view_t *v, const NVNcopyRegio
 
 int vk_texture_cpu_stale(uint64_t addr, uint64_t size) {
     if (!size || !__atomic_load_n(&nowned, __ATOMIC_ACQUIRE)) return 0;
-    AcquireSRWLockShared(&owned_lock);
+    plat_mutex_lock_shared(&owned_lock);
     int dirty = owned_dirty(addr, size, NULL);
-    ReleaseSRWLockShared(&owned_lock);
+    plat_mutex_unlock_shared(&owned_lock);
     return dirty;
 }
 
@@ -1374,7 +1373,7 @@ int vk_texture_small_dirty(void) { return __atomic_load_n(&small_pending, __ATOM
 void vk_texture_write_back_small(uint64_t fence) {
     lock();
     __atomic_store_n(&small_pending, 0, __ATOMIC_RELAXED);
-    AcquireSRWLockShared(&owned_lock);
+    plat_mutex_lock_shared(&owned_lock);
     int n = 0, later = 0;
     for (int i = 0; i < nowned; i++) n += owned[i]->gpu_dirty && owned[i]->t.L.size <= WB_SMALL;
     Tex **hit = n ? malloc(sizeof *hit * (size_t)n) : NULL;
@@ -1386,7 +1385,7 @@ void vk_texture_write_back_small(uint64_t fence) {
         if (e->gpu_fence > fence) later = 1;
         else hit[n++] = e;
     }
-    ReleaseSRWLockShared(&owned_lock);
+    plat_mutex_unlock_shared(&owned_lock);
     if (later) __atomic_store_n(&small_pending, 1, __ATOMIC_RELEASE);
     int k = 0;
     for (int i = 0; i < n; i++) {

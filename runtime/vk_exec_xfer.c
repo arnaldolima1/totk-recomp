@@ -48,7 +48,7 @@
 enum { W_FORMAT, W_REGION, W_BUFFER, W_OVERLAP, W_COPY, W_CLEAR, W_QUERY, W_COUNT };
 
 static void warn_once(int key, const char *fmt, ...) {
-    static volatile long seen[W_COUNT];
+    static volatile int32_t seen[W_COUNT];
     if (__atomic_exchange_n(&seen[key], 1, __ATOMIC_RELAXED)) return;
     char msg[256];
     va_list ap;

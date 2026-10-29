@@ -10,20 +10,21 @@
 #include <immintrin.h>
 #include <stdlib.h>
 #include <string.h>
-#include <windows.h>
 
 #include "host.h"
 #include "vk.h"
+#include "platform/platform.h"
 
 #define RING_WORDS (1u << 21)   // 16 MiB: a part of a submission is ~1-2 MiB of packets in the town
 static uint64_t ring[RING_WORDS];
 static volatile uint64_t head, tail;   // words published by the producer / consumed by the recorder
-static volatile LONG sleeping;         // the recorder waits for wake_ev
-static HANDLE wake_ev;                 // auto-reset
+static volatile int32_t sleeping;         // the recorder waits for wake_ev
+static PlatEvent wake_ev;              // auto-reset
 static uint64_t put_h;                 // producer: words written (published up to head)
 static VkCommandBuffer rec_cb;         // the part being recorded (set while the recorder is idle)
 static int rec_live;                   // producer: rec_begin started the recorder for rec_cb
-static HANDLE rec_thread;
+static PlatThread *rec_thread;
+static int rec_prio;                   // the submitting thread's priority, which the recorder takes
 
 // Producer statistics, logged by rec_stats_log.
 static struct { uint64_t packets, words, drains, fallbacks, drain_ns, full_waits, parts, parts_on; } RS_;
@@ -40,18 +41,15 @@ enum {
     R_PushTpl, R_Push, R_VertexInput, R_Bool, R_PolygonMode, R_BlendEnable, R_BlendEquation, R_WriteMask,
 };
 
-static uint64_t now_ns(void) {
-    LARGE_INTEGER c, f;
-    QueryPerformanceCounter(&c), QueryPerformanceFrequency(&f);
-    return (uint64_t)((double)c.QuadPart * 1e9 / (double)f.QuadPart);
-}
+static uint64_t now_ns(void) { return plat_now_ns(); }
 
 // ---- consumer
 
 static void exec_packet(uint32_t op, void *p);
 
-static DWORD WINAPI rec_main(void *arg) {
+static void rec_main(void *arg) {
     (void)arg;
+    plat_thread_priority(rec_prio);
     uint64_t t = 0;
     for (;;) {
         uint64_t h = __atomic_load_n(&head, __ATOMIC_ACQUIRE);
@@ -60,7 +58,7 @@ static DWORD WINAPI rec_main(void *arg) {
             if (t == h) {
                 __atomic_store_n(&sleeping, 1, __ATOMIC_SEQ_CST);
                 h = __atomic_load_n(&head, __ATOMIC_SEQ_CST);
-                if (t == h) WaitForSingleObject(wake_ev, 2);   // a missed wake costs at most 2 ms
+                if (t == h) plat_event_wait_ns(&wake_ev, 2000000);   // a missed wake costs at most 2 ms
                 __atomic_store_n(&sleeping, 0, __ATOMIC_RELAXED);
                 continue;
             }
@@ -74,14 +72,14 @@ static DWORD WINAPI rec_main(void *arg) {
         }
         __atomic_store_n(&tail, t, __ATOMIC_RELEASE);
     }
-    return 0;
+    return;
 }
 
 // ---- producer
 
 static void wake(void) {
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
-    if (__atomic_load_n(&sleeping, __ATOMIC_RELAXED)) SetEvent(wake_ev);
+    if (__atomic_load_n(&sleeping, __ATOMIC_RELAXED)) plat_event_set(&wake_ev);
 }
 
 static void wait_space(uint64_t need) {
@@ -111,7 +109,7 @@ static void *put(uint32_t op, size_t bytes) {
 
 static void pub(void) {
     __atomic_store_n(&head, put_h, __ATOMIC_RELEASE);
-    if (__atomic_load_n(&sleeping, __ATOMIC_RELAXED)) SetEvent(wake_ev);
+    if (__atomic_load_n(&sleeping, __ATOMIC_RELAXED)) plat_event_set(&wake_ev);
 }
 
 void rec_drain(void) {
@@ -121,7 +119,7 @@ void rec_drain(void) {
     wake();
     for (int i = 0; __atomic_load_n(&tail, __ATOMIC_ACQUIRE) != put_h; i++)
         if (i < 20000) _mm_pause();
-        else SwitchToThread();
+        else plat_yield();
     RS_.drains++, RS_.drain_ns += now_ns() - t0;
 }
 
@@ -130,13 +128,13 @@ void rec_begin(VkCommandBuffer cb) {
     if (mode < 0) {
         mode = rt_knob("VK_RECORDER", "1");
         if (mode) {
-            wake_ev = CreateEventA(NULL, FALSE, FALSE, NULL);
-            rec_thread = wake_ev ? CreateThread(NULL, 0, rec_main, NULL, 0, NULL) : NULL;
+            plat_event_init(&wake_ev, 0, 0);
+            rec_prio = plat_thread_priority_get();
+            rec_thread = plat_thread_new(rec_main, NULL, "vk recorder");
             if (!rec_thread) {
-                rt_log("vk_rec: no recorder thread (error %lu): the replay makes its Vulkan calls itself", GetLastError());
+                rt_log("vk_rec: no recorder thread: the replay makes its Vulkan calls itself");
                 mode = 0;
             } else {
-                SetThreadPriority(rec_thread, GetThreadPriority(GetCurrentThread()));
                 rt_log("vk_rec: the replay's Vulkan commands are made by a recorder thread%s",
                        mode == 2 ? " in the B blocks (TOTK_AB)" : "");
             }

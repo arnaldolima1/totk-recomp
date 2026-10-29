@@ -1,6 +1,6 @@
 // The in-game menu core: Dear ImGui state, the event queue the window adapter fills, gamepad navigation, the Vulkan back
 // end on our device and the menu's pages. Free of any window system (menu.h). ImGui runs on the present path only,
-// under gfx_window.c's present lock; the event functions only queue.
+// under gfx_present.c's present lock; the event functions only queue.
 //
 // The Vulkan set-up follows LAS Recomp's runtime/nvn/vulkan/imgui_glue.cpp (https://github.com/peiikai/LASRecomp @
 // da35b83a9611d046a9a681aae668d7085954d37f, MIT, Copyright (c) 2026 Peiikai): dynamic rendering into the swapchain
@@ -233,7 +233,7 @@ static int vk_up(const MenuTarget *t) {
     ii.Queue = t->queue;
     ii.DescriptorPoolSize = 16;
     ii.MinImageCount = 2;
-    ii.ImageCount = 4;   // vertex buffers rotate per recorded frame: more than gfx_window.c's 2 frames in flight
+    ii.ImageCount = 4;   // vertex buffers rotate per recorded frame: more than gfx_present.c's 2 frames in flight
     ii.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
     ii.UseDynamicRendering = true;
     g_vk_fmt = t->format;
@@ -690,7 +690,7 @@ static void tab_advanced(float scale) {
     static char rec_path[600];   // the recording goes beside the log
     if (!rec_path[0]) {
         char dir[512];
-        snprintf(rec_path, sizeof rec_path, "%s\\input-record.txt", sysinfo_log_folder(dir, sizeof dir) ? dir : ".");
+        snprintf(rec_path, sizeof rec_path, "%s/input-record.txt", sysinfo_log_folder(dir, sizeof dir) ? dir : ".");
     }
     row_set_or_not("TOTK_INPUT_RECORD", UI_MENU_INPUT_RECORD, UI_MENU_INPUT_RECORD_DESC, rec_path);
     if (opt_button("##open_log", UI_MENU_OPEN_LOG, UI_MENU_OPEN_LOG_DESC, action_value(log_note, UI_MENU_OPEN_LOG))) {
@@ -935,7 +935,7 @@ static void perf_label(UiTextId label, const ImVec4 &c) {
 static float perf_gb(float mb) { return mb < 0 ? -1 : mb / 1024; }
 
 // The picture lines: the window, the game image the present shows and the 3D scene it holds (resolution.c), how the
-// present scales the image to the window (gfx_window.c, the last present), the frame limit and the presentation mode
+// present scales the image to the window (gfx_present.c, the last present), the frame limit and the presentation mode
 // in use.
 static void perf_picture(const MenuTarget *t, const ImVec4 &c) {
     unsigned out[2], scene[2];

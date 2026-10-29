@@ -117,6 +117,33 @@ your machines without MSYS2, Python or .NET. `romfs.bin` stays out unless you pa
 `romfs\` next to the exe or point `TOTK_ROMFS` at its folder. Run `totk.exe --prepare-shaders` once in the copied
 folder. The folder holds code and data derived from your game: for your own machines only.
 
+## Linux (in progress)
+
+The runtime builds and runs on x86-64 Linux with a window, input and menu on SDL3 (`*_sdl.c`) in place of the Win32
+files (`*_win.c`); `runtime/platform/linux.c` implements `platform.h`. Status: the selftest and the probes that need no
+game files pass on RADV. `--probe-vkmem` still fails, because watched guest memory cannot be imported on Linux (below);
+playing the game is not verified yet.
+
+Requirements:
+
+- Linux 6.7 or later: the write watch uses userfaultfd write protection with `PAGEMAP_SCAN`. SteamOS 3.8 qualifies.
+- A Vulkan 1.3 driver with `VK_EXT_external_memory_host` (RADV, NVIDIA).
+- Packages on Arch:
+
+  ```sh
+  pacman -S --needed clang lld ninja make sdl3 opus libvpx zstd vulkan-headers vulkan-icd-loader \
+      vulkan-memory-allocator vulkan-validation-layers shaderc spirv-tools dotnet-sdk uv git
+  ```
+
+The steps are the Windows ones with POSIX paths: `.venv/bin/python` in place of `.venv\Scripts\python`, and `totk` in
+place of `totk.exe`. `build_game.py` takes clang, lld and Ninja from PATH (or the ones in `<dir>/bin` with `--toolchain <dir>`) and links against
+the system libraries, with `libstdc++` static and an `$ORIGIN` rpath; `build_hactool.py` builds `hactool` with make.
+
+Memory: on Windows the GPU imports guest memory and `GetWriteWatch` tracks the CPU's writes to it. On Linux,
+re-protecting imported memory invalidates the driver's userptr buffer on every submit (about 1.3 ms per 16 MiB on
+amdgpu), and importing pins the pages, which drops their write protection. Watched guest memory is therefore copied to
+host-visible buffers instead of being imported; that part of `runtime/vk_memory.c` is the next step.
+
 ## Checks
 
 Before a commit:

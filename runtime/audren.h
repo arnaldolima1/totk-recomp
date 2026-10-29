@@ -3,10 +3,10 @@
 // audren:u, the audio renderer service: RequestUpdate wire formats, the server-side
 // renderer state, and the mixer interface (audio_mixer.c: the real mixer with SDL3 output).
 #pragma once
-#include <windows.h>
 #include <stdint.h>
 
 #include "ipc.h"
+#include "platform/platform.h"
 
 typedef struct {
     int32_t sample_rate, sample_count, mix_buffer_count, submix_count, voice_count, sink_count, effect_count,
@@ -150,9 +150,9 @@ enum { SV_STOPPED, SV_STARTED, SV_PAUSED, SV_STOPPING };
 
 typedef struct AudioRenderer {
     AudrenParameter param;
-    SRWLOCK lock;
-    HANDLE thread;
-    volatile long running;
+    PlatMutex lock;
+    PlatThread *thread;
+    volatile int32_t running;
     uint32_t state, revision, time_limit, event;   // state 0 started, 1 stopped; event: writable handle
     int logged;
     uint64_t behavior_flags, elapsed_frames;
