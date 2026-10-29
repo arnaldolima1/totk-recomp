@@ -273,7 +273,9 @@ static CmdSlot *take_slot(VkCtx *c, uint64_t fence) {
 // The copies the replay's first accesses to VRAM mirrors queued (vk_memory.c), in a command buffer of their own that is
 // submitted right before the part that needs them and timed like a part; VK_NULL_HANDLE when there are none. After the
 // part was recorded, sub_lock held; may move slots[].
+// First brings the shadow storage up to date with the CPU's writes, which needs no command buffer.
 static VkCommandBuffer prologue(VkCtx *c, uint64_t fence) {
+    vk_mem_shadow_sync();   // shadow storage: the CPU's writes go in before the part is submitted
     if (!vk_mem_mirror_pending()) return VK_NULL_HANDLE;
     int i = claim_slot(c, fence);   // before reading slots: the claim may move it
     VkCommandBuffer cb = slots[i].cb;

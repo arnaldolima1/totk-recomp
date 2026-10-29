@@ -7,7 +7,7 @@
 //
 // Per command buffer the replay keeps transient memory (support buffers, copied uniform ranges, generated indices),
 // descriptor pools, image views and the storage-buffer ranges the GPU may write; all of it is freed, and the ranges are
-// reported with vk_guest_written, from one completion callback once the submission's fence is done (the write watch
+// reported with vk_gpu_written, from one completion callback once the submission's fence is done (the write watch
 // does not see GPU writes). Nothing here locks: it runs on the submitting thread under vk_sync_submit's lock.
 //
 // Provenance: the op semantics (bind ops, program and slot conventions, draw and dispatch flow, vertex streams with a
@@ -175,7 +175,7 @@ static uint64_t bind_gen = 1;            // bumped by every bind op that writes 
 static void cb_done(void *arg) {   // completion thread
     CbRes *r = arg;
     VkCtx *c = vk_ctx();
-    for (int i = 0; i < r->nwritten; i++) vk_guest_written(r->written[i].addr, r->written[i].size);
+    for (int i = 0; i < r->nwritten; i++) vk_gpu_written(r->written[i].addr, r->written[i].size);
     for (int i = 0; i < r->npools; i++) {
         vkResetDescriptorPool(c->device, r->pools[i], 0);
         plat_mutex_lock(&spare_lock);
@@ -253,6 +253,7 @@ static void note_written(VkExec *ex, uint64_t addr, uint64_t size) {
         if (r->written[i].addr == addr && r->written[i].size == size) return;
     if (r->nwritten == r->cwritten) r->written = grow(r->written, &r->cwritten, sizeof *r->written);
     r->written[r->nwritten++] = (Range){addr, size};
+    vk_mem_gpu_pending(addr, size);
 }
 
 // ---- stand-ins for what a binding names but the game did not bind (zeros, a 1x1 image, the default sampler)

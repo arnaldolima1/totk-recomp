@@ -318,7 +318,9 @@ static void copy_wait(VkBuffer src, VkDeviceSize so, VkBuffer dst, VkDeviceSize 
 }
 
 // A CPU-visible pool over the guest heap: GPU writes land in guest memory, CPU writes are read by the GPU, write watch
-// reports the CPU writes and the explicit ones.
+// reports the CPU writes and the explicit ones. GPU writes are noted and reported as the replay does
+// (vk_mem_gpu_pending, vk_gpu_written at the fence), and a GPU read follows vk_mem_shadow_sync as a submit does: with
+// shadow storage that is what moves the bytes; with an import they are already in place.
 static int test_import(pool_t *pool) {
     VkCtx *c = vk_ctx();
     uint8_t *m = pool->mem;
@@ -338,7 +340,9 @@ static int test_import(pool_t *pool) {
     vmaFlushAllocation(c->vma, sa, 0, VK_WHOLE_SIZE);
     vk_mem_resolve(a + 0x1000, 0x20000, &sp);
     mem_written_pages(a, pool->size, pages, 64);
+    vk_mem_gpu_pending(a + 0x1000, 0x20000);
     copy_wait(sb, 0, sp.buffer, sp.offset, 0x20000);
+    vk_gpu_written(a + 0x1000, 0x20000);
     GCHECK(!memcmp(m + 0x1000, s, 0x20000), "GPU copy into the imported heap range differs from the source");
     n = mem_written_pages(a, pool->size, pages, 64);
     g_gpu_seen = n;
@@ -347,10 +351,11 @@ static int test_import(pool_t *pool) {
 
     // CPU writes: reported exactly, and the GPU reads them through the same buffer
     for (int i = 0; i < 0x4000; i++) m[0x30000 + i] = rnd8();
-    n = mem_written_pages(a, pool->size, pages, 64);
+    n = mem_written_peek(a, pool->size, pages, 64);
     GCHECK(n == 4 && pages[0] == a + 0x30000 && pages[3] == a + 0x33000, "CPU writes to 4 pages: %llu reported",
            (unsigned long long)n);
     vk_mem_resolve(a + 0x30000, 0x4000, &sp);
+    vk_mem_shadow_sync();
     copy_wait(sp.buffer, sp.offset, sb, 0, 0x4000);
     vmaInvalidateAllocation(c->vma, sa, 0, VK_WHOLE_SIZE);
     GCHECK(!memcmp(s, m + 0x30000, 0x4000), "GPU read of CPU-written heap differs");

@@ -104,7 +104,34 @@ else:
     LINK_FLAGS = ['-fuse-ld=lld', '-no-pie', '-Wl,-z,noexecstack', "'-Wl,-rpath,$$ORIGIN'",
                   '"-Wl,-Map=$builddir/totk.map"']
     LINK_LIBS = ['-lvulkan', '-lSDL3', '-lopus', '-lvpx', '-lzstd', '-l:libstdc++.a', '-lm', '-lpthread', '-ldl']
-    VMA_INCLUDE = Path('/usr/include')   # vk_mem_alloc.h; Arch package vulkan-memory-allocator, Debian libvulkan-memory-allocator-dev
+    VMA_INCLUDE = Path('/usr/include')   # vk_mem_alloc.h; Arch (AUR) vulkan-memory-allocator, Debian libvulkan-memory-allocator-dev
+# Without a system vk_mem_alloc.h, the header the Windows release pins (tools/make_release.py, VMA 3.4.0) is fetched once
+# into toolchain/vma: one MIT header (THIRD_PARTY_NOTICES.md), checked against its hash.
+VMA_FETCH = ('https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/v3.4.0/include/vk_mem_alloc.h',
+             '8487b7995ad3b263eb73bc5b9a77d71aa69b6bef5d58a715c02d2663afd81f1a')
+VMA_LOCAL = ROOT / 'toolchain' / 'vma'
+
+
+def vma_include():
+    """The directory holding vk_mem_alloc.h: the system's, else toolchain/vma, fetched there on first use."""
+    if (VMA_INCLUDE / 'vk_mem_alloc.h').is_file():
+        return VMA_INCLUDE
+    dst = VMA_LOCAL / 'vk_mem_alloc.h'
+    if not dst.is_file():
+        import urllib.request
+        url, sha = VMA_FETCH
+        print(f'build_game: no {VMA_INCLUDE / "vk_mem_alloc.h"}; fetching VMA 3.4.0 into {VMA_LOCAL}')
+        try:
+            data = urllib.request.urlopen(url, timeout=60).read()
+        except OSError as e:
+            sys.exit(f'build_game: fetching {url} failed ({e}); install VMA or put vk_mem_alloc.h in {VMA_LOCAL}')
+        if hashlib.sha256(data).hexdigest() != sha:
+            sys.exit(f'build_game: {url} does not match the pinned hash')
+        VMA_LOCAL.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(data)
+    return VMA_LOCAL
+
+
 # --toolchain: an llvm-mingw tree. The libraries, headers and DLLs MSYS2 supplies come from the deps directory instead.
 LLVM_LINK_LIBS = ['-lpsapi', '-lbcrypt', '-luser32', '-lgdi32', '-ldwmapi', '-lwinmm', '-lvulkan-1', '-lSDL3', '-lopus',
                   '-l:libvpx.a', '-l:libzstd.a', '-l:libc++.a', '-l:libc++abi.a', '-l:libunwind.a', '-l:libwinpthread.a']
@@ -282,7 +309,7 @@ def ninja_file(gen, out, mods, pool_depth, skip=(), prebuilt=False, runtime_lib=
     out/obj and are link inputs without a compile edge. runtime_lib: a prebuilt library replaces the runtime objects
     except INSTALL_SIDE. make_lib: build only that library, from the runtime objects except INSTALL_SIDE."""
     inc = f'-I {cmd_path(RUNTIME)} -I {cmd_path(gen)}'
-    vma = f'{cmd_path(DEPS / "include")} -I {cmd_path(DEPS / "include" / "vma")}' if DEPS else cmd_path(VMA_INCLUDE)
+    vma = f'{cmd_path(DEPS / "include")} -I {cmd_path(DEPS / "include" / "vma")}' if DEPS else cmd_path(vma_include())
     imgui = cmd_path(RUNTIME / 'third_party' / 'imgui')
     rt_inc = f'{inc} -I {cmd_path(out)} -I {vma} -I {imgui}'   # romfs_config.h, vk_mem_alloc.h (+ deps headers), imgui.h
     libs = [f'-L {cmd_path(DEPS / "lib")}'] + (LLVM_LINK_LIBS if WIN else LINK_LIBS) if DEPS else LINK_LIBS

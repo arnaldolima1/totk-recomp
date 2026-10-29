@@ -120,9 +120,8 @@ folder. The folder holds code and data derived from your game: for your own mach
 ## Linux (in progress)
 
 The runtime builds and runs on x86-64 Linux with a window, input and menu on SDL3 (`*_sdl.c`) in place of the Win32
-files (`*_win.c`); `runtime/platform/linux.c` implements `platform.h`. Status: the selftest and the probes that need no
-game files pass on RADV. `--probe-vkmem` still fails, because watched guest memory cannot be imported on Linux (below);
-playing the game is not verified yet.
+files (`*_win.c`); `runtime/platform/linux.c` implements `platform.h`. Status: the selftest and the probes pass, and
+1.2.1 plays at 60 fps on RADV (RX 7800 XT); 1.4.3 and long play sessions are not verified yet.
 
 Requirements:
 
@@ -132,17 +131,24 @@ Requirements:
 
   ```sh
   pacman -S --needed clang lld ninja make sdl3 opus libvpx zstd vulkan-headers vulkan-icd-loader \
-      vulkan-memory-allocator vulkan-validation-layers shaderc spirv-tools dotnet-sdk uv git
+      vulkan-validation-layers shaderc spirv-tools dotnet-sdk uv git
   ```
 
+  Vulkan Memory Allocator is a single header (AUR `vulkan-memory-allocator`). Without it, `build_game.py` fetches the
+  version the Windows release pins (3.4.0) into `toolchain/vma/` on first use and checks its hash.
+
 The steps are the Windows ones with POSIX paths: `.venv/bin/python` in place of `.venv\Scripts\python`, and `totk` in
-place of `totk.exe`. `build_game.py` takes clang, lld and Ninja from PATH (or the ones in `<dir>/bin` with `--toolchain <dir>`) and links against
-the system libraries, with `libstdc++` static and an `$ORIGIN` rpath; `build_hactool.py` builds `hactool` with make.
+place of `totk.exe`. `build_game.py` takes clang, lld and Ninja from PATH (or the ones in `<dir>/bin` with
+`--toolchain <dir>`) and links against the system libraries, with `libstdc++` static and an `$ORIGIN` rpath;
+`build_hactool.py` builds `hactool` with make. `tools/prepare_shaders.py` reads the shader list from
+`refs/MacNativeGames` at `origin/HEAD`, which must be the pinned commit with its history (the list format changed later).
 
 Memory: on Windows the GPU imports guest memory and `GetWriteWatch` tracks the CPU's writes to it. On Linux,
 re-protecting imported memory invalidates the driver's userptr buffer on every submit (about 1.3 ms per 16 MiB on
-amdgpu), and importing pins the pages, which drops their write protection. Watched guest memory is therefore copied to
-host-visible buffers instead of being imported; that part of `runtime/vk_memory.c` is the next step.
+amdgpu), and importing pins the pages, which drops their write protection. Each CPU-visible pool therefore gets a
+host-visible copy (shadow storage, `runtime/vk_memory.c`): the pages the CPU wrote go in before each submit, and the GPU's
+writes come back at its fence. In play that costs about 0.2 ms a frame and doubles the memory of those pools (about
+1.1 GB). `TOTK_SHADOW=1` turns it on under Windows too.
 
 ## Checks
 
