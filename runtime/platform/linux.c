@@ -33,6 +33,44 @@
 
 #include "platform.h"
 
+// The write-watch ABI of Linux 6.7 (uapi linux/fs.h and linux/userfaultfd.h), for headers older than it: the release
+// builds against the Steam Runtime's 5.10 headers and runs on newer kernels. The kernel refuses what it lacks at run time.
+#ifndef PAGEMAP_SCAN
+struct page_region {
+    __u64 start;
+    __u64 end;
+    __u64 categories;
+};
+struct pm_scan_arg {
+    __u64 size;
+    __u64 flags;
+    __u64 start;
+    __u64 end;
+    __u64 walk_end;
+    __u64 vec;
+    __u64 vec_len;
+    __u64 max_pages;
+    __u64 category_inverted;
+    __u64 category_mask;
+    __u64 category_anyof_mask;
+    __u64 return_mask;
+};
+#define PAGEMAP_SCAN _IOWR('f', 16, struct pm_scan_arg)
+#define PAGE_IS_WRITTEN (1 << 1)
+#define PAGE_IS_PRESENT (1 << 3)
+#define PAGE_IS_SWAPPED (1 << 4)
+#define PAGE_IS_PFNZERO (1 << 5)
+#define PM_SCAN_WP_MATCHING (1 << 0)
+#define PM_SCAN_CHECK_WPASYNC (1 << 1)
+#endif
+#ifndef UFFD_FEATURE_WP_ASYNC
+#define UFFD_FEATURE_WP_UNPOPULATED (1 << 13)
+#define UFFD_FEATURE_WP_ASYNC (1 << 15)
+#endif
+#ifndef UFFD_USER_MODE_ONLY
+#define UFFD_USER_MODE_ONLY 1
+#endif
+
 extern char **environ;
 
 // ---- threads

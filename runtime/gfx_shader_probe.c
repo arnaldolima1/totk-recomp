@@ -206,7 +206,7 @@ int probe_shader(void) {
     *o = 0;
     const Entry *e = &entries[0];
     snprintf(line, sizeof line,
-             "{\"job\":{\"key\":\"%.64sa\",\"stage\":\"%s\",\"debug\":false,\"c1\":\"%.*s\",\"code\":\"%s\\\\build\\\\v121\\\\shaders\\\\code\\\\%.64s.code\"},\"out\":\"%s\"}",
+             "{\"job\":{\"key\":\"%.64sa\",\"stage\":\"%s\",\"debug\":false,\"c1\":\"%.*s\",\"code\":\"%s/build/v121/shaders/code/%.64s.code\"},\"out\":\"%s\"}",
              e->key, e->stage == GFX_STAGE_VS ? "vs" : e->stage == GFX_STAGE_FS ? "ps" : "cs", (int)(e->c1_len * 2), e->c1,
              esc_root, e->key, dir_json);
     FAIL_IF(!gfx_shader_raw_request(line, reply, sizeof reply), "service did not answer a valid request after the malformed one");

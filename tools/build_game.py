@@ -712,6 +712,8 @@ def main():
                                                    'bin/llvm-ar) instead of the clang on PATH')
     ap.add_argument('--ninja', type=Path, help='ninja.exe to build with (default: MSYS2 UCRT64, else bin/ninja.exe of the '
                                                'release folder)')
+    ap.add_argument('--sysroot', type=Path, help='Linux: the glibc headers and libraries to compile and link against '
+                                                 'instead of the host\'s (the release\'s llvm/sysroot)')
     ap.add_argument('--deps', type=Path, help=f'with --toolchain: include/, lib/ and bin/ of Vulkan, SDL3, Opus, libvpx '
                                               f'and VMA (default {DEFAULT_DEPS.relative_to(ROOT).as_posix()})')
     ap.add_argument('--make-runtime-lib', action='store_true',
@@ -738,8 +740,8 @@ def main():
     global CLANG, AR, WINDRES, NINJA, TOOLCHAIN_BIN, DEPS
     if args.ninja:
         NINJA = args.ninja.resolve()
-    elif not NINJA.is_file() and (ROOT / 'bin' / 'ninja.exe').is_file():
-        NINJA = ROOT / 'bin' / 'ninja.exe'   # the release folder (tools/make_release.py)
+    elif not NINJA.is_file() and (ROOT / 'bin' / ('ninja' + ('.exe' if WIN else ''))).is_file():
+        NINJA = ROOT / 'bin' / ('ninja' + ('.exe' if WIN else ''))   # the release folder (tools/make_release.py)
     dlls = SDL3_DLLS
     suffix = '.exe' if WIN else ''
     if args.toolchain:
@@ -750,6 +752,17 @@ def main():
     if args.toolchain and WIN or args.deps and (args.toolchain or not WIN):   # Linux: --deps only, never deps-mingw
         DEPS = (args.deps or DEFAULT_DEPS).resolve()
         dlls = sorted((DEPS / 'bin').glob('*.dll')) if WIN else []
+    if DEPS and not WIN:
+        # A release (--deps): Opus, libvpx and zstd go into the executable, so it needs no more than libc, Vulkan and
+        # the libSDL3.so.0 beside it
+        for lib in ('opus', 'vpx', 'zstd'):
+            LINK_LIBS[LINK_LIBS.index(f'-l{lib}')] = f'-l:lib{lib}.a'
+    if args.sysroot and not WIN:
+        # Every compile and the link: the game then needs no newer glibc than the sysroot's (the Steam Runtime's)
+        sysroot = ['--target=x86_64-linux-gnu', f'--sysroot={cmd_path(args.sysroot.resolve())}']
+        GEN_FLAGS[:0] = sysroot
+        RT_FLAGS[:0] = sysroot
+        LINK_FLAGS[:0] = sysroot
     for tool in (CLANG, NINJA):
         if not tool.is_file():
             sys.exit(f'{tool} not found: install ' + ('MSYS2 UCRT64 clang, lld and ninja' if WIN else 'clang, lld and ninja')

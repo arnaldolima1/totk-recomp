@@ -136,6 +136,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--id-only", action="store_true", help="write totk_xlate.id for the exe already built")
     parser.add_argument("--out", type=Path, help="build directory instead of build/xlate")
+    parser.add_argument("--llvm", type=Path, help="Linux: an LLVM directory whose bin/clang and lld link the exe")
+    parser.add_argument("--sysroot", type=Path, help="Linux: link against this sysroot's glibc instead of the host's "
+                                                     "(tools/make_release_linux.py)")
     a = parser.parse_args()
     if a.out:
         global BUILD
@@ -166,6 +169,11 @@ def main() -> None:
         dotnet, "publish", str(work / "totk_xlate.csproj"), "-c", "Release", "-r", "win-x64" if WIN else "linux-x64",
         "-p:PublishAot=true", "-p:InvariantGlobalization=true", f"-p:RyuSrc={src}", "-o", str(out),
     ]
+    if a.llvm:
+        env["PATH"] = str(a.llvm.resolve() / "bin") + os.pathsep + env["PATH"]
+        cmd += ["-p:CppCompilerAndLinker=clang", "-p:LinkerFlavor=lld"]
+    if a.sysroot:
+        cmd.append(f"-p:SysRoot={a.sysroot.resolve()}")
     if subprocess.run(cmd, env=env).returncode != 0:
         sys.exit("dotnet publish failed")
     exe = BUILD / EXE

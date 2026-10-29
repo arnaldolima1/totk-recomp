@@ -50,24 +50,28 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--src', type=Path, default=ROOT / 'toolchain' / 'src' / 'hactool', help='source checkout')
     ap.add_argument('--out', type=Path, default=ROOT / 'toolchain' / 'hactool', help='where hactool(.exe) goes')
+    ap.add_argument('--cc', help='Linux: the C compiler command for hactool and its bundled mbedtls, for example '
+                                 '"clang --sysroot=DIR" (tools/make_release_linux.py); default cc')
     args = ap.parse_args()
     if WIN and not MSYS_BASH.is_file():
         sys.exit(f'{MSYS_BASH} not found: install MSYS2 with the UCRT64 gcc and make (docs/building.md)')
-    if not WIN and not (shutil.which('make') and shutil.which('cc')):
+    if not WIN and not (shutil.which('make') and (args.cc or shutil.which('cc'))):
         sys.exit('make and cc not found: install a C compiler and make (docs/building.md)')
     src, out = args.src.resolve(), args.out.resolve()
 
     fetch(src)
     for p in PATCHES:
         git(src, 'apply', '--whitespace=nowarn', str(p))
-    (src / 'config.mk').write_text(CONFIG_MK, encoding='utf-8', newline='\n')
+    config = CONFIG_MK.replace('CC = cc\n', f'CC = {args.cc}\n') if args.cc else CONFIG_MK
+    (src / 'config.mk').write_text(config, encoding='utf-8', newline='\n')
 
     jobs = f'-j{os.cpu_count() or 4}'
     if WIN:
         env = dict(os.environ, MSYSTEM='UCRT64', CHERE_INVOKING='1')
         r = subprocess.run([str(MSYS_BASH), '-lc', f'make {jobs}'], cwd=src, env=env, capture_output=True, text=True)
     else:
-        r = subprocess.run(['make', jobs], cwd=src, capture_output=True, text=True)
+        r = subprocess.run(['make', jobs, *([f'CC={args.cc}'] if args.cc else [])], cwd=src, capture_output=True,
+                           text=True)   # CC= on the command line: the bundled mbedtls's own make reads it too
     (src / 'build.log').write_text(r.stdout + r.stderr, encoding='utf-8')
     if r.returncode:
         sys.exit(f'make failed ({r.returncode}); log: {src / "build.log"}')

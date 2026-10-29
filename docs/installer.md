@@ -105,9 +105,39 @@ totk.ini.example, VERSION  the default ini; the release string (the repository's
 - The release contains nothing game-derived; `make_release.py` runs `tools/check_content.py` over the folder before it
   finishes.
 
+## Linux release
+
+`tools/make_release_linux.py` builds the same setup for Linux and packs it as `TotK-Setup-x86_64.AppImage` (the static
+type-2 runtime: no libfuse2 needed on the host). The player makes it executable and starts it; on a Steam Deck, from
+Desktop Mode. The setup builds the game into the folder they pick, as on Windows, and the game is `totk` there with
+`libSDL3.so.0` beside it. The folder inside the AppImage:
+
+```
+AppRun                starts python/bin/python3 -m installer.gui (no bytecode written into the read-only mount)
+totk-setup.desktop, totk-setup.png
+installer/, recomp/, tools/, data/, licenses/, THIRD_PARTY_NOTICES.md, totk.ini.example, VERSION   as on Windows
+python/               python-build-standalone 3.14 (with tkinter) + the installer's packages; a .pth puts the folder,
+                      tools/ and recomp/ on sys.path
+llvm/                 LLVM 23 (clang, lld, llvm-ar) and llvm/sysroot: the files of the Steam Runtime 3 "sniper" SDK the
+                      game's compile and link read (about 130 files)
+runtime/              libtotkrt.a, headers, the install-side sources, totk.png; deps/ with the Vulkan headers, VMA and a
+                      static zstd
+bin/                  totk_xlate, hactool, ninja, libSDL3.so.0
+```
+
+- Everything that runs on the player's machine is built against the sniper sysroot (glibc 2.31): the game, hostcheck,
+  hactool and the translator need no newer glibc, so they run on SteamOS and current distributions. The game links
+  Opus, libvpx, zstd and libstdc++ statically and needs only glibc, the system's Vulkan loader and the SDL3 beside it.
+- The setup's temp folder is `$XDG_CACHE_HOME/totk-setup` (default `~/.cache/totk-setup`): the AppImage is mounted
+  read-only.
+- The window follows `LANG` for English or Russian, cancels through SIGTERM to the CLI's process group (the CLI handles
+  it as Ctrl+Break on Windows) and opens the finished folder with `xdg-open`.
+- Requirements beyond Windows': Linux 6.7 or later (the write watch, `docs/building.md`), and enough space in the cache
+  folder's file system for the generated C (about 1.3 GB).
+
 ## Constraints
 
-- The installer steps contain no Win32 calls: Linux follows with its own compiler and the same steps.
+- The installer steps contain no Win32 calls: Linux runs the same steps with its own compiler ("Linux release").
 - The keys file path is passed to the tools; key values never appear in the UI, logs or files.
 - The window is a front end over the CLI (`python -m installer --base ... --update ... --keys ... --lang ... --dest
   ...`), which prints one JSON progress event per line. Tests and CI use the CLI.
@@ -123,4 +153,4 @@ totk.ini.example, VERSION  the default ini; the release string (the repository's
 ## Later
 
 - Re-warm the driver cache on start after a move, GPU or driver change.
-- NSZ and XCZ input. Linux release.
+- NSZ and XCZ input.
