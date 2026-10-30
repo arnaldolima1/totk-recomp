@@ -1,0 +1,75 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "UltraTears Launcher",
+  "version": "0.2.2",
+  "identifier": "dev.ultratears.launcher",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "UltraTears",
+        "width": 1280,
+        "height": 720,
+        "minWidth": 1024,
+        "minHeight": 600,
+        "decorations": false,
+        "center": true,
+        "resizable": true,
+        "backgroundColor": "#0b100e"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app",
+      "dmg",
+      "nsis"
+    ],
+    "createUpdaterArtifacts": true,
+    "category": "Game",
+    "shortDescription": "UltraTears Launcher",
+    "longDescription": "Builds and runs UltraTears, a native PC port of Tears of the Kingdom, from your own game files.",
+    "copyright": "GPL-3.0-or-later. Not affiliated with Nintendo.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "13.0"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "PortugueseBR",
+          "English"
+        ],
+        "displayLanguageSelector": false
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY1NDg1NjkyRDg1M0JGNjIKUldSaXYxUFlrbFpJWlJrL1lBKzdkNEhBZWl3c0hybWw1S1JOZ1ZzN3BIUzNuOEg3bkc4MjZjYjAK",
+      "endpoints": [
+        "https://github.com/arnaldolima1/ultratears/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}
