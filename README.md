@@ -22,6 +22,7 @@ Report problems as issues, following [CONTRIBUTING.md](CONTRIBUTING.md).
 - In-game settings menu (F1) and performance overlay (F10)
 - Keyboard, mouse and gamepad with remapping, rumble and gyro
 - Shaders prepared at install instead of during play
+- Atmosphère cheat files: bring your own, switch cheats in the menu ([docs/cheats.md](docs/cheats.md))
 
 ## Planned
 
