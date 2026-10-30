@@ -22,7 +22,8 @@ the .NET 10 SDK and Python 3.12+ with Pillow (.venv). The folder holds:
     AppRun, totk-setup.desktop, totk-setup.png   the AppImage entry: python/bin/python3 -m installer.gui
 
 --appimage packs the folder with appimagetool and the static type-2 runtime (no libfuse2 on the host). --prove compiles
-generated/v121 and links build/release-linux-check/totk with the folder's tools only, then runs the probes beside it.
+the generated C and links build/release-linux-check/totk with the folder's tools only, then runs the probes beside it.
+Like tools/make_release.py, both need one game version extracted and lifted first (generated/v121, else v143).
 
 The folder contains nothing derived from the game: check_content runs over it before the script finishes, then the
 folder's own python runs a check-only installer pass and the window's --selftest.
@@ -198,8 +199,10 @@ def build_bin(out, llvm, sysroot):
 def runtime_lib(out, llvm, sysroot):
     build = CHECK / 'rtlib'
     shutil.rmtree(build, ignore_errors=True)
+    version = mr.lifted_version()
     run([sys.executable, ROOT / 'tools' / 'build_game.py', '--make-runtime-lib', '--toolchain', llvm, '--sysroot', sysroot,
-         '--deps', out / 'runtime' / 'deps', '--ninja', out / 'bin' / 'ninja', '--out', build])
+         '--deps', out / 'runtime' / 'deps', '--ninja', out / 'bin' / 'ninja', '--version', version,
+         '--gen', MAIN_ROOT / 'generated' / version, '--out', build])
     rt = out / 'runtime'
     shutil.copy2(build / 'libtotkrt.a', rt / 'libtotkrt.a')
     for p in sorted((ROOT / 'runtime').rglob('*')):
@@ -428,17 +431,19 @@ def check_bundle(out):
 
 
 def prove(out):
-    """Compile generated/v121 and link totk with the folder's tools only, then run the probes beside it."""
+    """Compile the generated C and link totk with the folder's tools only, then run the probes beside it."""
     out = out.resolve()
-    gen = MAIN_ROOT / 'generated' / 'v121'
-    ext = MAIN_ROOT / 'build' / 'extracted' / 'v121'
+    version = mr.lifted_version()
+    gen = MAIN_ROOT / 'generated' / version
+    ext = MAIN_ROOT / 'build' / 'extracted' / version
     chk = CHECK / 'game'
     env = dict(os.environ, PATH=os.pathsep.join([str(out / 'llvm' / 'bin'), str(out / 'bin'), '/usr/bin', '/bin']))
     t0 = time.time()
     run([out / 'python' / 'bin' / 'python3', out / 'tools' / 'build_game.py', '--toolchain', out / 'llvm',
          '--sysroot', out / 'llvm' / 'sysroot', '--deps', out / 'runtime' / 'deps', '--runtime', out / 'runtime',
-         '--runtime-lib', out / 'runtime' / 'libtotkrt.a', '--ninja', out / 'bin' / 'ninja', '--gen', gen, '--out', chk,
-         '--exefs', ext / 'exefs', '--romfs', ext / 'romfs', '--profile', chk / 'profile'], env=env)
+         '--runtime-lib', out / 'runtime' / 'libtotkrt.a', '--ninja', out / 'bin' / 'ninja', '--version', version,
+         '--gen', gen, '--out', chk, '--exefs', ext / 'exefs', '--romfs', ext / 'romfs', '--profile', chk / 'profile'],
+        env=env)
     print(f'prove: build {time.time() - t0:.0f} s')
     shutil.copy2(out / 'bin' / 'libSDL3.so.0', chk / 'libSDL3.so.0')
     needed = subprocess.run(['readelf', '-d', str(chk / 'totk')], capture_output=True, text=True).stdout
