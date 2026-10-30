@@ -201,14 +201,14 @@ int res_heapdef_build(const void *in, size_t n, void **out, size_t *out_n) {
 void res_heapdef_served(void) { R.heapdef_ok = 1; }
 
 // ---- aspect ratio: an output of another shape than 16:9 gets a camera and a 2D canvas of its shape (the aspect set,
-// recomp/patches-v121.txt). Page +64 the aspect, +68 and +72 the factors of the canvas width and height: wider than 16:9
+// recomp/patches-v121.txt). Page +80 the aspect, +84 and +88 the factors of the canvas width and height: wider than 16:9
 // the canvas grows in x, narrower in y, so the 16:9 layouts keep their proportions and sit in the middle of it.
 static void aspect_init(uint8_t *page) {
     int set = rt_patch_set("aspect");   // decide() kept a version without it at 16:9
     double a = (double)R.ow / R.oh, base = (double)BASE_W / BASE_H;
     if (fabs(a - base) < ASPECT_EPS || set < 0) return;
     float v[3] = {(float)a, (float)(a > base ? a / base : 1.0), (float)(a < base ? base / a : 1.0)};
-    memcpy(page + 64, v, sizeof v);
+    memcpy(page + 80, v, sizeof v);
     rt_patch_switch(set, 1);
     rt_log("resolution: aspect %.4f (%ux%u): camera and interface canvas follow it (x %.4f, y %.4f)", a, R.ow, R.oh, v[1],
            v[2]);
