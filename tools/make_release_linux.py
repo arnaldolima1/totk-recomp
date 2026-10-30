@@ -404,6 +404,35 @@ def write_appimage(out, path):
 
 # ---- checks -------------------------------------------------------------------------------------------------------------
 
+# The newest glibc any program or library in the folder may need: the official LLVM binaries and the cryptography
+# wheel are built against 2.34 (Ubuntu 22.04, Debian 12, SteamOS 3 have it); the game itself links the sysroot's 2.31.
+GLIBC_FLOOR = (2, 34)
+
+
+def check_glibc(out):
+    """Every ELF file in the folder (llvm/sysroot aside: glibc itself, read by the link) needs glibc GLIBC_FLOOR or
+    older; prints which files set the floor."""
+    newest, by = (0, 0), []
+    for p in sorted(out.rglob('*')):
+        if not p.is_file() or p.is_symlink() or out / 'llvm' / 'sysroot' in p.parents:
+            continue
+        with open(p, 'rb') as f:
+            if f.read(4) != b'\x7fELF':
+                continue
+        text = subprocess.run(['readelf', '-V', str(p)], capture_output=True, text=True).stdout
+        need = max((tuple(map(int, v.split('.'))) for v in re.findall(r'GLIBC_(\d+\.\d+(?:\.\d+)?)', text)),
+                   default=(0, 0))
+        if need > newest:
+            newest, by = need, []
+        if need == newest:
+            by.append(str(p.relative_to(out)))
+    floor = '.'.join(map(str, GLIBC_FLOOR))
+    if newest > GLIBC_FLOOR:
+        sys.exit(f'glibc check: {", ".join(by[:8])} need glibc {".".join(map(str, newest))}, above {floor}')
+    print(f'glibc check: the folder needs glibc {".".join(map(str, newest))} (floor {floor}), set by '
+          f'{", ".join(by[:6])}{" and others" if len(by) > 6 else ""}')
+
+
 def check_bundle(out):
     """The folder's own python runs the installer without game files and the window's selftest."""
     import json
@@ -487,6 +516,7 @@ def main():
     collect_licenses(out, sysroot)
     build_entry(out)
     mr.check_folder(out)
+    check_glibc(out)
     check_bundle(out)
     mr.sizes(out)
     if args.appimage:

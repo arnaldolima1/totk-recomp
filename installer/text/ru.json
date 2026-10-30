@@ -41,6 +41,7 @@
  "check.lang_missing": "Выберите язык игры.",
  "check.lang_unknown": "Неизвестный язык «{lang}». Доступные: {known}.",
  "check.toolchain_broken": "Встроенный компилятор не работает: {detail}",
+ "check.glibc_old": "Библиотека C этой системы — glibc {version}; компилятору установщика нужна {need} или новее (она есть в Ubuntu 22.04, Debian 12, Fedora 35, SteamOS 3 и новее). Обновление системы это исправит.",
  "check.host_probe_failed": "Проверка компьютера не выполнилась (код выхода {code}).",
  "check.cpu_no_avx2": "Этому процессору не хватает AVX2 (x86-64-v3), который нужен игре. AVX2 есть у Intel Haswell (2013) и новее, у AMD Excavator и Zen и новее.",
  "check.vulkan_missing": "Драйвер Vulkan не установлен. Установите свежий драйвер видеокарты.",

@@ -41,7 +41,21 @@ static int layer_present(const char *name) {
     return found;
 }
 
+// Mesa's drivers (RADV on Linux and the Steam Deck) keep a shader cache of their own beside our pipeline cache, by
+// default in ~/.cache and up to 1 GB: about 35 MB in a minute of the title screen. A Deck's /home is small and the game
+// usually sits on the SD card, so unless MESA_SHADER_CACHE_DIR names a folder, it goes to mesa-cache beside the exe.
+static void mesa_cache_beside_exe(void) {
+    char dir[PLAT_PATH_MAX * 2];
+    if (plat_getenv("MESA_SHADER_CACHE_DIR", dir, sizeof dir)) return;
+    int len = plat_exe_path(dir, sizeof dir - 16);
+    char *cut = len ? plat_last_sep(dir) : NULL;
+    if (!cut) return;
+    strcpy(cut + 1, "mesa-cache");
+    plat_setenv("MESA_SHADER_CACHE_DIR", dir);
+}
+
 static int create_instance(void) {
+    mesa_cache_beside_exe();
     const char *ext[8];
     uint32_t n_ext = (uint32_t)gfx_window_vk_extensions(ext, 7);
     const char *layers[] = {"VK_LAYER_KHRONOS_validation"};

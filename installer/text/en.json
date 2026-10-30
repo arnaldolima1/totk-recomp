@@ -41,6 +41,7 @@
  "check.lang_missing": "Choose the game language.",
  "check.lang_unknown": "Unknown language '{lang}'. Known: {known}.",
  "check.toolchain_broken": "The bundled compiler does not work: {detail}",
+ "check.glibc_old": "This system's C library is glibc {version}; the setup's compiler needs {need} or later (Ubuntu 22.04, Debian 12, Fedora 35, SteamOS 3 and newer have it). Updating the system fixes this.",
  "check.host_probe_failed": "The computer check did not run (exit code {code}).",
  "check.cpu_no_avx2": "This processor lacks AVX2 (x86-64-v3), which the game needs. Intel Haswell (2013) or AMD Excavator / Zen and newer have it.",
  "check.vulkan_missing": "No Vulkan driver is installed. Install the latest driver for your graphics card.",

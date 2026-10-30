@@ -125,15 +125,22 @@ runtime/              libtotkrt.a, headers, the install-side sources, totk.png; 
 bin/                  totk_xlate, hactool, ninja, libSDL3.so.0
 ```
 
-- Everything that runs on the player's machine is built against the sniper sysroot (glibc 2.31): the game, hostcheck,
-  hactool and the translator need no newer glibc, so they run on SteamOS and current distributions. The game links
-  Opus, libvpx, zstd and libstdc++ statically and needs only glibc, the system's Vulkan loader and the SDL3 beside it.
-- The setup's temp folder is `$XDG_CACHE_HOME/totk-setup` (default `~/.cache/totk-setup`): the AppImage is mounted
-  read-only.
+- What we compile is built against the sniper sysroot (glibc 2.31): the game, hostcheck, hactool and the translator
+  need no newer glibc. The game links Opus, libvpx, zstd and libstdc++ statically and needs only glibc, the system's
+  Vulkan loader and the SDL3 beside it. The setup itself needs glibc 2.34 (Ubuntu 22.04, Debian 12, Fedora 35,
+  SteamOS 3): the official LLVM binaries and the `cryptography` wheel are built against it. `make_release_linux.py`
+  checks every ELF file in the folder against that floor (`check_glibc`), and the setup's check step stops with one
+  message on an older system.
+- The setup's temp folder is `.setup-temp` inside the install folder (`--temp` changes it): the AppImage is mounted
+  read-only, and a Steam Deck's `/home` is often too full for the generated C while the game goes to the SD card.
+- The game keeps Mesa's shader cache in `mesa-cache` beside `totk` unless `MESA_SHADER_CACHE_DIR` is set, for the
+  same reason: RADV fills its default folder in `~/.cache` up to 1 GB.
 - The window follows `LANG` for English or Russian, cancels through SIGTERM to the CLI's process group (the CLI handles
   it as Ctrl+Break on Windows) and opens the finished folder with `xdg-open`.
-- Requirements beyond Windows': Linux 6.7 or later (the write watch, `docs/building.md`), and enough space in the cache
-  folder's file system for the generated C (about 1.3 GB).
+- Requirements beyond Windows': Linux 6.7 or later (the write watch, `docs/building.md`) and glibc 2.34.
+- Building the release needs one game version extracted and lifted (`tools/extract.py`, `recomp/gen.py`, either
+  version): the runtime library includes the generated `layout.h`, whose shared part (`MOD_COUNT`, `MOD_MAIN_BASE`)
+  is the same for both. `tools/make_release.py` takes `generated/v121`, else `generated/v143`.
 
 ## Constraints
 

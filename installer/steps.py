@@ -102,6 +102,21 @@ def kill_tree(proc):
         proc.kill()
 
 
+def linux_glibc():
+    """(major, minor) of the C library this Linux process runs on, None elsewhere or when it is not glibc."""
+    try:
+        name = os.confstr('CS_GNU_LIBC_VERSION') if sys.platform.startswith('linux') else None
+    except (ValueError, OSError):
+        return None
+    m = re.match(r'glibc (\d+)\.(\d+)', name or '')
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+# The bundled clang, lld and the cryptography wheel are built against glibc 2.34 (tools/make_release_linux.py
+# GLIBC_FLOOR); on an older one they cannot start
+GLIBC_NEEDED = (2, 34)
+
+
 def linux_kernel():
     """(major, minor) of the running Linux kernel, None elsewhere."""
     if not sys.platform.startswith('linux'):
@@ -214,7 +229,8 @@ class Check(Step):
             raise InstallError('check.release_incomplete', paths=missing[:5])
         if dest.exists() and not dest.is_dir():
             raise InstallError('check.dest_not_folder', path=str(dest))
-        if ctx.mode == 'install' and dest.is_dir() and any(dest.iterdir()):
+        own = (ctx.temp, *ctx.temp.parents)   # a temp folder inside the install folder (installer/cli.py) is ours
+        if ctx.mode == 'install' and dest.is_dir() and any(p not in own for p in dest.iterdir()):
             raise InstallError('check.dest_not_empty', path=str(dest))
         lang = ctx.options.lang or ctx.state.get('lang')
         if not lang:
@@ -242,6 +258,10 @@ class Check(Step):
 
     def host(self, ctx):
         layout, work = ctx.layout, ctx.temp / 'check'
+        glibc = linux_glibc()
+        if glibc and glibc < GLIBC_NEEDED and not layout.dev:
+            raise InstallError('check.glibc_old', version='.'.join(map(str, glibc)),
+                               need='.'.join(map(str, GLIBC_NEEDED)))
         work.mkdir(parents=True, exist_ok=True)
         exe = work / ('hostcheck' + EXE)
         command = [str(layout.clang), '-O1', str(HOSTCHECK), '-o', str(exe)]
