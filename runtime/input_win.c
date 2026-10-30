@@ -5,6 +5,7 @@
 // The gamepad also rumbles (input_rumble) and, when it has a gyro and an accelerometer, feeds the six-axis sensor from a
 // thread of its own (input_motion_start). Every SDL call on the gamepad is made under `lock`.
 #include <windows.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -399,7 +400,10 @@ int input_window_msg(HWND h, UINT m, WPARAM w, LPARAM l, LRESULT *res) {
 
 static int key_down(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
 
-// The mouse camera as a right-stick sample, held for the whole presented frame. Under `lock`.
+// The mouse camera as a right-stick sample, held for the whole presented frame. Under `lock`. The sample is divided by
+// the camera speed factor the game runs with (camera_speed.c, cam_speed_applied), which multiplies every right-stick
+// turn rate, so TOTK_MOUSE_SENS alone sets the mouse's speed; below 1 the sample stays within the stick's range, so the
+// mouse's top speed drops with the factor.
 static void mouse_camera(int32_t out[2]) {
     static uint64_t frame = ~0ull;
     static LARGE_INTEGER t0;
@@ -424,8 +428,10 @@ static void mouse_camera(int32_t out[2]) {
             held[0] = held[1] = 0;   // frames stopped: do not hold a deflection
         }
     }
-    out[0] = held[0];
-    out[1] = held[1];
+    double k = cam_speed_applied(), x = held[0] / k, y = held[1] / k, len = sqrt(x * x + y * y);
+    if (len > STICK_MAX) x *= STICK_MAX / len, y *= STICK_MAX / len;
+    out[0] = (int32_t)lround(x);
+    out[1] = (int32_t)lround(y);
 }
 
 static int32_t axis(int16_t v) {

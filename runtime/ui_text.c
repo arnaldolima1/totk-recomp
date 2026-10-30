@@ -99,6 +99,9 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_PAD_LAYOUT_XBOX] = "Xbox (A bottom)", [UI_MENU_PAD_LAYOUT_IN_USE] = "in use: %s",
     [UI_MENU_MOUSE_SENS] = "Mouse camera sensitivity",
     [UI_MENU_MOUSE_SENS_DESC] = "How fast the mouse turns the camera.",
+    [UI_MENU_STICK_SENS] = "Stick camera speed",
+    [UI_MENU_STICK_SENS_DESC] = "Multiplies the game's own right-stick camera speed, top speed included, at each of the "
+                                "game's five camera sensitivities. The mouse keeps its own setting.",
 
     [UI_BINDS_HELP] = "Select a cell and press A or Enter, then the key, mouse button or controller button. Delete or "
                       "X clears a cell. A key in use moves here; a controller button swaps with the one it replaces.",
@@ -317,6 +320,9 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_PAD_LAYOUT_XBOX] = "Xbox (A снизу)", [UI_MENU_PAD_LAYOUT_IN_USE] = "сейчас: %s",
     [UI_MENU_MOUSE_SENS] = "Чувствительность мыши",
     [UI_MENU_MOUSE_SENS_DESC] = "Как быстро мышь поворачивает камеру.",
+    [UI_MENU_STICK_SENS] = "Скорость камеры (стик)",
+    [UI_MENU_STICK_SENS_DESC] = "Умножает скорость поворота камеры правым стиком, включая наибольшую, при каждой из пяти "
+                                "чувствительностей камеры в игре. На мышь не влияет.",
 
     [UI_BINDS_HELP] = "Выберите ячейку и нажмите A или Enter, затем клавишу, кнопку мыши или кнопку контроллера. "
                       "Delete или X очищает ячейку. Занятая клавиша переходит сюда; кнопка контроллера меняется "
