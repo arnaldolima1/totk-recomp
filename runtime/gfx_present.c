@@ -518,9 +518,8 @@ void gfx_fit_rect(int cw, int ch, int dw, int dh, int out[4]) {
     if (cw <= 0 || ch <= 0 || !strcmp(cfg_value("TOTK_PICTURE_FIT"), "stretch")) return;
     if ((int64_t)dw * ch > (int64_t)dh * cw) out[2] = (int)(((int64_t)dh * cw + ch / 2) / ch);   // window wider: pillarbox
     else out[3] = (int)(((int64_t)dw * ch + cw / 2) / cw);                                        // taller: letterbox
-    out[2] += out[2] & 1, out[3] += out[3] & 1;   // even sizes keep the bars equal
-    if (out[2] > dw) out[2] = dw;
-    if (out[3] > dh) out[3] = dh;
+    // A side of the window's parity keeps the two bars equal; a picture one pixel short of the window fills it
+    out[2] += (dw - out[2]) & 1, out[3] += (dh - out[3]) & 1;
     out[0] = (dw - out[2]) / 2, out[1] = (dh - out[3]) / 2;
 }
 
