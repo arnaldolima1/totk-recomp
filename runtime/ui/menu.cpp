@@ -550,6 +550,7 @@ static void tab_screen(float scale) {
     row_aniso();
     row_shadow_scale();
     row_shadow_range();
+    opt_slider("TOTK_CONTACT_SHADOWS", UI_MENU_CONTACT_SHADOWS, 0, 100, UI_MENU_CONTACT_SHADOWS_DESC, 10, "%.0f %%");
     opt_end();
 }
 
