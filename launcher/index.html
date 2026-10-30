@@ -77,34 +77,46 @@
     <section class="view" id="view-install">
       <div class="panel wide">
         <h2>Instalação</h2>
-        <p class="lead">Traduz e compila o jogo a partir dos <b>seus</b> arquivos (versão 1.4.3). Tudo fica na pasta do jogo, que pode estar num disco externo.</p>
+        <p class="lead">Traduz e compila o jogo a partir dos <b>seus</b> arquivos (base 1.0.0 com a atualização 1.2.1 ou 1.4.3). Roda uma vez; o jogo fica na pasta de instalação.</p>
         <div class="panel-scroll">
 
         <label class="field">
-          <span>Pasta do jogo <small id="home-free"></small></span>
+          <span>Pasta de instalação <small id="home-free"></small></span>
           <div class="path"><input id="home-path" readonly /><button class="ghost" id="pick-home">Alterar</button></div>
         </label>
-
-        <!-- where the dump comes from: a dump-source extension (main.js renderExtSources), or a folder already extracted -->
-        <div id="ext-sources"></div>
-        <label class="field" id="dump-manual">
-          <span>Dump (pasta com <code>exefs</code> e <code>romfs</code>) <button class="link hidden" id="use-ext">usar a extensão</button></span>
-          <div class="path"><input id="dump-path" placeholder="game/ dentro da pasta do jogo" readonly /><button class="ghost" id="pick-dump">Escolher</button></div>
+        <label class="field">
+          <span>Pasta do instalador <small id="release-version"></small></span>
+          <div class="path"><input id="release-path" placeholder="o release descompactado (com installer/)" readonly /><button class="ghost" id="pick-release">Alterar</button></div>
         </label>
-        <p class="hint hidden" id="dump-done">O jogo já foi empacotado nesta pasta: o dump não é mais necessário.</p>
+
+        <!-- the game files: needed for a first install; a folder with totk-install.json resumes or updates without them -->
+        <p class="hint hidden" id="inputs-known"></p>
+        <div class="grid2" id="inputs">
+          <label class="field">
+            <span>Jogo base (NSP ou XCI)</span>
+            <div class="path"><input id="in-base" readonly /><button class="ghost" data-pick="base">Escolher</button></div>
+          </label>
+          <label class="field">
+            <span>Atualização 1.2.1 ou 1.4.3 (NSP)</span>
+            <div class="path"><input id="in-update" readonly /><button class="ghost" data-pick="update">Escolher</button></div>
+          </label>
+          <label class="field">
+            <span>prod.keys</span>
+            <div class="path"><input id="in-keys" readonly /><button class="ghost" data-pick="keys">Escolher</button></div>
+          </label>
+          <label class="field">
+            <span>Idioma do jogo</span>
+            <select id="in-lang"></select>
+          </label>
+        </div>
+        <p class="hint">As chaves são lidas no lugar pelo instalador: o conteúdo delas nunca é mostrado, copiado nem guardado.</p>
 
         <div class="row">
-          <label class="field slim">
-            <span>Núcleos usados no build: <b id="cpus-val"></b></span>
-            <input type="range" id="cpus" min="1" max="16" />
-          </label>
           <div class="actions">
             <button id="build" class="gold">Instalar / Atualizar</button>
             <button id="cancel" class="ghost" disabled>Cancelar</button>
           </div>
         </div>
-
-        <label class="check" id="clean-row"><input type="checkbox" id="clean-dump" /> Apagar o dump temporário assim que o build não precisar mais dele (libera ~17 GB)</label>
 
         <div class="progress-block">
           <div class="progress-head">
@@ -181,7 +193,6 @@
             <button class="active" data-set="display">Exibição</button>
             <button data-set="control">Controle</button>
             <button data-set="launcher">Launcher</button>
-            <button data-set="extensions">Extensões</button>
             <button data-set="advanced">Avançado</button>
           </nav>
           <div class="set-body">
@@ -293,12 +304,6 @@
               <input type="range" id="set-volume" min="0" max="100" />
             </label>
             <div class="actions left"><button class="ghost" data-open="launcher-art">Arte do launcher</button></div>
-          </div>
-          <div class="set-page" id="set-extensions">
-            <h3>Extensões</h3>
-            <p class="hint">Programas extras que o launcher usa (um <code>.zip</code> com <code>extension.json</code>). Ficam só neste computador.</p>
-            <ul class="ext-list" id="ext-list"></ul>
-            <div class="actions left"><button class="ghost" id="ext-add">Adicionar extensão (.zip)</button></div>
           </div>
           <div class="set-page" id="set-advanced">
             <h3>Avançado</h3>
