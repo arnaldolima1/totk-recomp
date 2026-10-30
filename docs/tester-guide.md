@@ -77,9 +77,9 @@ vsync and a 40 fps limit. These are starting points, not measurements. What help
 2. The same with `fps_limit` 30, 45 and 60 and `render_scale` 50, 67 and game, so the defaults can be picked from
    measurements. Steam's own performance overlay (the ... button) adds power draw and temperatures.
 3. LCD or OLED, SteamOS version (`uname -r` in Desktop Mode's terminal), and the game update.
-4. Anything that looks stretched, squeezed or cut off, with a screenshot: at 16:10 the interface keeps its 16:9 layout
-   in the middle of the taller screen, and full-screen backgrounds of some menus may not reach the top and bottom
-   edges yet.
+4. Anything that looks stretched, squeezed or cut off, with a screenshot. At 16:10 the menus keep their 16:9
+   proportions in the middle of the taller screen, the HUD sits at the top and bottom edges, and full-screen
+   backgrounds reach them; pre-rendered cutscenes play stretched.
 
 `device_profile = desktop` in `totk.ini` turns the profile off; `deck` turns it on elsewhere, to try the Deck's
 settings on a PC.

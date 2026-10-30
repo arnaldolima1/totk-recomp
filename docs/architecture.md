@@ -94,6 +94,12 @@ Every guest thread is a host thread. TotK assumes Horizon's scheduler: three app
   (MacNativeGames' sites); `resolution.c` sets them from `output_res` and `render_scale` and grows the texture heap
   and the application pool to match. When the window is larger than the output, `vk_fsr.c` runs AMD FSR 1 (EASU,
   RCAS) on the present.
+- Aspect ratio. Besides 16:9 the game draws in 16:10 and 21:9 (`resolution.c` `SHAPES`). The `aspect` patch set gives
+  the 3D camera and the 2D canvas the output's shape; the interface is laid out in a 1920x1080 space that the game
+  stretches over the output, so `tools/aspect_layouts.py` rewrites the layout archive for each shape (every layout's
+  root pane scaled back, full-screen panes kept full, edge-anchored HUD moved to the edges, after the behaviour of
+  Fruithapje21's TOTK-Ultrawide) and `romfs.c` serves the overlay of the output's shape (`romfs-patches/16x10`,
+  `21x9`). Another shape draws 16:9 with bars.
 - Occlusion queries never block the CPU; a result that is not ready counts as visible.
 - ASTC textures are uploaded as they are where the device reports `textureCompressionASTC_LDR`, and decoded by a compute shader everywhere else (`vk_astc.c`, `TOTK_ASTC`). The CPU decoder (`tex_astc*.c`) is the fallback and the test oracle.
 - Draw state. A draw whose program, bound state and textures repeat reuses the previous draw's shaders and skips rebuilding its descriptor sets; descriptor sets are written through update templates (`vk_exec_draw.c`, `vk_pipeline.c`).

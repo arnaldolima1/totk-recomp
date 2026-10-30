@@ -358,9 +358,21 @@ static void heapdef_overlay(void) {
 }
 
 static void overlay_init(void) {
-    // TOTK_ROMFS_PATCHES unset: romfs-patches next to romfs-index.bin if it has a manifest (tools/make_romfs_patches.py)
+    // TOTK_ROMFS_PATCHES unset: romfs-patches next to romfs-index.bin if it has a manifest (tools/make_romfs_patches.py),
+    // for a 16:10 or 21:9 game resolution its subdirectory of that shape, the same overlay with the interface's layout
+    // edits (tools/aspect_layouts.py)
     char def[2100];
-    const char *patches = cfg_get("TOTK_ROMFS_PATCHES");
+    const char *patches = cfg_get("TOTK_ROMFS_PATCHES"), *shape = res_shape();
+    if (!patches && shape && snprintf(def, sizeof def, "%s/romfs-patches/%s/manifest.tsv", index_dir, shape) <
+                                 (int)sizeof def) {
+        if (plat_file_exists(def)) {
+            def[strlen(def) - strlen("/manifest.tsv")] = 0;
+            patches = def;
+        } else {
+            rt_log("RomFS overlay: no %s: the interface draws stretched at this game resolution (run "
+                   "tools/make_romfs_patches.py)", def);
+        }
+    }
     if (!patches && snprintf(def, sizeof def, "%s/romfs-patches/manifest.tsv", index_dir) < (int)sizeof def &&
         plat_file_exists(def)) {
         def[strlen(def) - strlen("/manifest.tsv")] = 0;

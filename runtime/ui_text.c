@@ -51,9 +51,9 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_PERF_LINE_FPS] = "%.0f fps",
     [UI_MENU_GRAPHICS] = "Picture",
     [UI_MENU_OUTPUT_RES] = "Game resolution",
-    [UI_MENU_OUTPUT_RES_DESC] = "The size the game draws its picture and interface in. A 16:10 or 21:9 size gives the "
-                                "camera and the interface that shape. Above 1920 x 1080 the game needs more video memory "
-                                "and GPU time.",
+    [UI_MENU_OUTPUT_RES_DESC] = "The size the game draws its picture and interface in, in one of three shapes: 16:9, "
+                                "16:10 (Steam Deck, handhelds) or 21:9 (ultrawide monitors), which the camera and the "
+                                "interface take. Above 1920 x 1080 the game needs more video memory and GPU time.",
     [UI_MENU_RENDER_SCALE] = "3D render scale",
     [UI_MENU_RENDER_SCALE_DESC] = "Size of the 3D scene relative to the game resolution; the game's FSR scales it to "
                                   "that size. Above 100 % smooths jagged edges (supersampling) at a high GPU cost.",
@@ -276,8 +276,9 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_PERF_LINE_FPS] = "%.0f к/с",
     [UI_MENU_GRAPHICS] = "Изображение",
     [UI_MENU_OUTPUT_RES] = "Разрешение игры",
-    [UI_MENU_OUTPUT_RES_DESC] = "Размер, в котором игра рисует картинку и интерфейс. Размер 16:10 или 21:9 даёт камере и "
-                                "интерфейсу эту форму. Выше 1920 × 1080 игре нужно больше видеопамяти и времени GPU.",
+    [UI_MENU_OUTPUT_RES_DESC] = "Размер, в котором игра рисует картинку и интерфейс, в одной из трёх форм: 16:9, 16:10 "
+                                "(Steam Deck, портативные ПК) или 21:9 (сверхширокие мониторы); камера и интерфейс "
+                                "принимают эту форму. Выше 1920 × 1080 игре нужно больше видеопамяти и времени GPU.",
     [UI_MENU_RENDER_SCALE] = "Масштаб 3D-отрисовки",
     [UI_MENU_RENDER_SCALE_DESC] = "Размер 3D-сцены относительно разрешения игры; FSR игры доводит её до этого размера. "
                                   "Выше 100 % сглаживает лесенки на краях (суперсэмплинг) ценой большой нагрузки на GPU.",

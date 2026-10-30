@@ -630,13 +630,16 @@ class Prepare(Step):
     def key(self, ctx):
         layout = ctx.layout
         xlate_id = layout.xlate.with_suffix('.id')
-        tools = [layout.tools / n for n in ('prepare_shaders.py', 'shader_census.py', 'make_romfs_patches.py')]
+        tools = [layout.tools / n for n in ('prepare_shaders.py', 'shader_census.py', 'make_romfs_patches.py',
+                                            'aspect_layouts.py')]
         return fingerprint('prepare-1', ctx.keys['compile'], layout.xlate, xlate_id, shader_list_text(layout), *tools)
 
     def current(self, ctx, record):
         dest = ctx.dest
         xlate = dest / ctx.layout.xlate.name
-        return ((dest / 'shader-prepared.bin').is_file() and (dest / 'romfs-patches' / 'manifest.tsv').is_file()
+        patches = dest / 'romfs-patches'   # the 16:9 overlay and the 16:10 and 21:9 ones (tools/aspect_layouts.py)
+        return ((dest / 'shader-prepared.bin').is_file() and (patches / 'manifest.tsv').is_file()
+                and all((patches / shape / 'manifest.tsv').is_file() for shape in ('16x10', '21x9'))
                 and xlate.is_file() and file_sha256(xlate) == record.get('xlate_sha256'))
 
     def run(self, ctx):

@@ -412,17 +412,22 @@ static void row_window_size(void) {
 // The game resolution (resolution.c): 16:9 sizes from the game's own 1920x1080 up, and the current value when it is
 // another size.
 static void row_output_res(void) {
-    // 16:9, 16:10 (the Steam Deck's 1280x800) and 21:9 sizes: the aspect patch gives the game the output's shape
-    static const char *const vals[] = {"1280x720",  "1280x800",  "1600x900",  "1920x1080", "1920x1200",
-                                       "2560x1080", "2560x1440", "3440x1440", "3200x1800", "3840x2160"};
-    enum { N = sizeof vals / sizeof *vals };
+    // The three shapes the game draws in (runtime/resolution.c SHAPES): 16:9, 16:10 (the Steam Deck's 1280x800,
+    // handhelds' 1920x1200) and 21:9 (ultrawide monitors), each with the aspect patch and its interface overlay
+    static const struct { const char *size, *shape; } sizes[] = {
+        {"1280x720", "16:9"},   {"1600x900", "16:9"},   {"1920x1080", "16:9"},  {"2560x1440", "16:9"},
+        {"3200x1800", "16:9"},  {"3840x2160", "16:9"},  {"1280x800", "16:10"},  {"1680x1050", "16:10"},
+        {"1920x1200", "16:10"}, {"2560x1600", "16:10"}, {"2560x1080", "21:9"},  {"3440x1440", "21:9"},
+        {"3840x1600", "21:9"},
+    };
+    enum { N = sizeof sizes / sizeof *sizes };
     char shown[N][32];
-    const char *names[N];
+    const char *vals[N], *names[N];
     for (int i = 0; i < N; i++) {
         int w = 0, h = 0;
-        sscanf(vals[i], "%dx%d", &w, &h);
-        snprintf(shown[i], sizeof shown[i], "%d × %d", w, h);   // U+00D7, the multiplication sign
-        names[i] = shown[i];
+        sscanf(sizes[i].size, "%dx%d", &w, &h);
+        snprintf(shown[i], sizeof shown[i], "%d × %d (%s)", w, h, sizes[i].shape);   // U+00D7, the multiplication sign
+        vals[i] = sizes[i].size, names[i] = shown[i];
     }
     opt_choice_list("TOTK_OUTPUT_RES", UI_MENU_OUTPUT_RES, vals, names, N, UI_MENU_OUTPUT_RES_DESC);
 }

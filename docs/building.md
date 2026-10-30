@@ -80,7 +80,8 @@ From the repository root, in PowerShell. Every step that depends on the game ver
    .venv\Scripts\python tools\build_xlate.py
    ```
 
-5. Lift the modules to C, write the RomFS half of the frame-rate patches, then compile and link `build\<ver>\totk.exe`:
+5. Lift the modules to C, write the RomFS overlays (the frame-rate fix, and the interface at 16:10 and 21:9), then
+   compile and link `build\<ver>\totk.exe`:
 
    ```powershell
    .venv\Scripts\python recomp\gen.py --exefs build\extracted\<ver>\exefs --out generated\<ver> --patches recomp\patches-<ver>.txt

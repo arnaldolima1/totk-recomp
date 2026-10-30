@@ -223,12 +223,14 @@ def write_if_changed(path, text):
 def copy_romfs_patches(version, out):
     """totk.exe loads romfs-patches beside romfs-index.bin (runtime/romfs.c overlay_init). tools/make_romfs_patches.py
     writes them into build/<version> only, so a build in another directory ran without the 60 fps overlay (the quick
-    menus' captured background turned black). Copies them when their manifest differs."""
+    menus' captured background turned black). Copies them when a manifest differs, the 16:10 and 21:9 ones in their
+    subdirectories included."""
     src = ROOT / 'build' / version / 'romfs-patches'
     dst = out / 'romfs-patches'
     if src.resolve() == dst.resolve() or not (src / 'manifest.tsv').is_file():
         return
-    if (dst / 'manifest.tsv').is_file() and (dst / 'manifest.tsv').read_bytes() == (src / 'manifest.tsv').read_bytes():
+    manifests = lambda d: {p.relative_to(d): p.read_bytes() for p in sorted(d.rglob('manifest.tsv'))}
+    if dst.is_dir() and manifests(dst) == manifests(src):
         return
     shutil.rmtree(dst, ignore_errors=True)
     shutil.copytree(src, dst)

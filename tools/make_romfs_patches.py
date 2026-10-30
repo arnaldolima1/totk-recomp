@@ -1,6 +1,6 @@
 # Adapted from MacNativeGames games/totk/scripts/make_romfs_patches.py @ ebe621d (MIT, Copyright (c) 2026
 # MacNativeGames contributors).
-"""Build the 60 fps RomFS overlay for TotK 1.2.1 or 1.4.3 (runtime/romfs.c, TOTK_ROMFS_PATCHES).
+"""Build the RomFS overlays for TotK 1.2.1 or 1.4.3: 60 fps, and 16:10 and 21:9 (runtime/romfs.c, TOTK_ROMFS_PATCHES).
 
 UI/LayoutArchive/Common.Product.<110 or 140>.Nin_NX_NVN.blarc.zs: the weapon / shield / material quick menus capture the game
 picture for their background when the panes C_CaptureBG_00, C_CaptureClearBG_00 and P_CaptureClearBG_00 become
@@ -11,6 +11,9 @@ captured at once (upstream checked weapon, shield, material and ability wheel at
 The game-over flow fix of the same upstream script is 1.0.0 only (1.2.1 and 1.4.3 run DmF_SY_GameOver.110) and is
 left out.
 
+The same archive with the layout edits of tools/aspect_layouts.py on top goes to <out>/16x10 and <out>/21x9, each an
+overlay directory of its own: runtime/romfs.c serves the one of the game resolution's shape instead of <out>.
+
 Input: build/extracted/<version>/romfs (romfs.bin and index.json, verified by tools/extract.py). Output:
 build/<version>/romfs-patches/<path> by default, and <out>/manifest.tsv (path, size, SHA-256 of the overlay, SHA-256 of the original). Run with .venv-py314.
 """
@@ -20,6 +23,8 @@ import hashlib
 import json
 import struct
 from pathlib import Path
+
+import aspect_layouts
 
 root = Path(__file__).resolve().parents[1]
 ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -117,13 +122,26 @@ for member, panes in MEMBERS.items():
     patched[member] = changed
 diff = [i for i in range(len(original)) if original[i] != blarc[i]]
 assert diff and all(any(lo <= i < hi for lo, hi in (members[m] for m in MEMBERS)) for i in diff), diff
-data = zstd.compress(bytes(blarc), level=19, zstd_dict=dictionary)
-assert zstd.decompress(data, zstd_dict=dictionary) == bytes(blarc)
-assert zstd.get_frame_info(data).dictionary_id == info.dictionary_id
-target = args.out / ARCHIVE
-target.parent.mkdir(parents=True, exist_ok=True)
-target.write_bytes(data)
-line = '\t'.join([ARCHIVE, str(len(data)), hashlib.sha256(data).hexdigest(), hashlib.sha256(raw).hexdigest()])
-(args.out / 'manifest.tsv').write_text('# path\tsize\tsha256\toriginal_sha256 (tools/make_romfs_patches.py)\n'
-                                       + line + '\n')
-print(json.dumps(dict(status='pass', path=ARCHIVE, members=patched, size=len(data), changed_bytes=len(diff))))
+
+
+def write_overlay(out, archive):
+    """The archive, compressed with the original's dictionary, as the one file of the overlay directory out."""
+    data = zstd.compress(bytes(archive), level=19, zstd_dict=dictionary)
+    assert zstd.decompress(data, zstd_dict=dictionary) == bytes(archive)
+    assert zstd.get_frame_info(data).dictionary_id == info.dictionary_id
+    target = out / ARCHIVE
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    line = '\t'.join([ARCHIVE, str(len(data)), hashlib.sha256(data).hexdigest(), hashlib.sha256(raw).hexdigest()])
+    (out / 'manifest.tsv').write_text('# path\tsize\tsha256\toriginal_sha256 (tools/make_romfs_patches.py)\n'
+                                      + line + '\n')
+    return len(data)
+
+
+size = write_overlay(args.out, blarc)
+shapes = {}
+for shape in aspect_layouts.SHAPES:
+    shaped = bytearray(blarc)
+    edited = aspect_layouts.apply(shaped, members, shape)
+    shapes[shape] = dict(values=edited, size=write_overlay(args.out / shape, shaped))
+print(json.dumps(dict(status='pass', path=ARCHIVE, members=patched, size=size, changed_bytes=len(diff), shapes=shapes)))

@@ -5,8 +5,9 @@
 // MacNativeGames contributors) make the game read both sizes from the patch page, and the texture heap that holds the
 // output- and scene-sized render targets grows with them.
 //
-// Settings, read at start: TOTK_OUTPUT_RES = <w>x<h> (default 1920x1080, the game's own; another shape than 16:9 gets
-// a camera and interface canvas of that shape, aspect_init), TOTK_RENDER_SCALE = the
+// Settings, read at start: TOTK_OUTPUT_RES = <w>x<h> (default 1920x1080, the game's own; a 16:10 or 21:9 one gets a
+// camera, canvas and interface of that shape, aspect_init and res_shape; another shape draws the largest 16:9 size
+// inside it, letterboxed), TOTK_RENDER_SCALE = the
 // scene's size relative to the output: "game" (default, 5/6, the game's 1600x900 at 1080p) or a percentage; above 100
 // the game supersamples its scene, which smooths edges (anti-aliasing) at the cost of GPU time. The game's own final
 // pass (FSR 1 EASU) scales the scene to the output; the present scales the output to the window (vk_fsr.c).
@@ -44,12 +45,17 @@
 #define SCENE_MAX 4096       // per side, as MacNativeGames' TOTK_RENDER_RES
 #define ASPECT_EPS 0.002     // an output this close to 16:9 is 16:9 (1366x768 is 1.7786)
 
+// The shapes besides 16:9 the game gets, each with its layout overlay (tools/aspect_layouts.py SHAPES,
+// romfs-patches/<name>): 16:10 (1280x800, 1920x1200, 2560x1600) and 21:9, 2560x1080 (2.370) to 3840x1600 (2.400).
+static const struct { const char *name; double lo, hi; } SHAPES[] = {{"16x10", 1.59, 1.61}, {"21x9", 2.30, 2.45}};
+
 static struct {
     int decided;
     unsigned ow, oh, sw, sh;   // output and scene
     int scene_set;             // the scene differs from the game's 5/6 of the output
     int heapdef_ok;            // romfs.c serves the grown HeapDef
     int on;                    // res_init switched the patch sets on
+    int shape;                 // SHAPES index of the output, -1: 16:9
 } R;
 
 static void decide(void) {
@@ -66,15 +72,24 @@ static void decide(void) {
     } else {
         rt_log("resolution: TOTK_OUTPUT_RES=%s is not <width>x<height> in 1280x720..7680x4320; 1920x1080", o);
     }
-    // A game version without the aspect set draws 16:9 only: the largest 16:9 size inside the wanted one, which the
-    // present letterboxes in a window of the wanted shape (TOTK_PICTURE_FIT)
+    // Another shape than 16:9, 16:10 and 21:9, or any but 16:9 in a game version without the aspect set, draws the
+    // largest 16:9 size inside the wanted one, which the present letterboxes in a window of the wanted shape
+    // (TOTK_PICTURE_FIT)
     double a = (double)R.ow / R.oh, base = (double)BASE_W / BASE_H;
-    if (fabs(a - base) >= ASPECT_EPS && rt_patch_set("aspect") < 0) {
-        unsigned w = R.ow, h = R.oh;
-        if (a > base) R.ow = (unsigned)(R.oh * base + 0.5) & ~1u;
-        else R.oh = (unsigned)(R.ow / base + 0.5) & ~1u;
-        rt_log("resolution: this game version has no aspect patch set: %ux%u draws %ux%u (16:9), letterboxed", w, h, R.ow,
-               R.oh);
+    R.shape = -1;
+    if (fabs(a - base) >= ASPECT_EPS) {
+        for (int i = 0; i < (int)(sizeof SHAPES / sizeof *SHAPES); i++)
+            if (a >= SHAPES[i].lo && a <= SHAPES[i].hi) R.shape = i;
+        const char *why = R.shape < 0                     ? "is not 16:9, 16:10 or 21:9"
+                          : rt_patch_set("aspect") < 0 ? "needs the aspect patch set, which this game version lacks"
+                                                        : NULL;
+        if (why) {
+            unsigned w = R.ow, h = R.oh;
+            if (a > base) R.ow = (unsigned)(R.oh * base + 0.5) & ~1u;
+            else R.oh = (unsigned)(R.ow / base + 0.5) & ~1u;
+            R.shape = -1;
+            rt_log("resolution: %ux%u %s: the game draws %ux%u (16:9), letterboxed", w, h, why, R.ow, R.oh);
+        }
     }
     const char *s = cfg_value("TOTK_RENDER_SCALE");
     double k = 5.0 / 6.0;
@@ -93,6 +108,11 @@ static void decide(void) {
     if (fit < 1.0) R.scene_set = 1;
     R.sw = (unsigned)(sw * fit + 0.5);
     R.sh = (unsigned)(sh * fit + 0.5);
+}
+
+const char *res_shape(void) {
+    decide();
+    return R.shape < 0 ? NULL : SHAPES[R.shape].name;
 }
 
 static int bigger(void) {
@@ -206,7 +226,7 @@ void res_heapdef_served(void) { R.heapdef_ok = 1; }
 static void aspect_init(uint8_t *page) {
     int set = rt_patch_set("aspect");   // decide() kept a version without it at 16:9
     double a = (double)R.ow / R.oh, base = (double)BASE_W / BASE_H;
-    if (fabs(a - base) < ASPECT_EPS || set < 0) return;
+    if (R.shape < 0 || set < 0) return;
     float v[3] = {(float)a, (float)(a > base ? a / base : 1.0), (float)(a < base ? base / a : 1.0)};
     memcpy(page + 80, v, sizeof v);
     rt_patch_switch(set, 1);
