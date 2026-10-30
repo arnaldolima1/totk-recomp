@@ -118,6 +118,13 @@
 # from 0 (off) to 100. Changes while the game runs take effect at once.
 # upscaler = fsr
 # sharpness = 80
+# NVIDIA DLAA: DLSS anti-aliasing of the 3D scene at its own resolution, on NVIDIA RTX GPUs with nvngx_dlss.dll (from
+# NVIDIA's DLSS SDK) next to totk.exe; elsewhere the setting does nothing. Changes while the game runs take effect at
+# once.
+# dlaa = 0
+# The game's own FXAA after the post effects; with DLAA on it is not needed. Changes while the game runs take effect at
+# once.
+# fxaa = 1
 
 [language]
 # Language: a Windows locale such as de-DE, or a Switch code (en-US, ja, zh-Hant, ...). Default: the Windows locale.

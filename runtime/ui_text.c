@@ -63,6 +63,11 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_UPSCALER_FSR] = "AMD FSR 1", [UI_MENU_UPSCALER_BILINEAR] = "Bilinear",
     [UI_MENU_SHARPNESS] = "FSR sharpness",
     [UI_MENU_SHARPNESS_DESC] = "Sharpening after FSR scaling; 0 turns it off.",
+    [UI_MENU_DLAA] = "NVIDIA DLAA",
+    [UI_MENU_DLAA_DESC] = "DLSS anti-aliasing of the 3D scene at its own resolution (NVIDIA RTX GPUs; nvngx_dlss.dll next to "
+                          "totk.exe). Smoother edges and less shimmer for about 3 ms a frame.",
+    [UI_MENU_FXAA] = "Game anti-aliasing (FXAA)",
+    [UI_MENU_FXAA_DESC] = "The game's own FXAA edge smoothing. It blurs fine detail a little; with DLAA on it is not needed.",
 
     [UI_MENU_FPS_LIMIT] = "Frame rate limit",
     [UI_MENU_FPS_LIMIT_DESC] = "The most frames per second the game draws. Above 60 is experimental and needs Game speed "
@@ -282,6 +287,11 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_UPSCALER_FSR] = "AMD FSR 1", [UI_MENU_UPSCALER_BILINEAR] = "Билинейное",
     [UI_MENU_SHARPNESS] = "Резкость FSR",
     [UI_MENU_SHARPNESS_DESC] = "Повышение резкости после масштабирования FSR; 0 выключает его.",
+    [UI_MENU_DLAA] = "NVIDIA DLAA",
+    [UI_MENU_DLAA_DESC] = "Сглаживание 3D-сцены через DLSS в её собственном разрешении (видеокарты NVIDIA RTX; nvngx_dlss.dll "
+                          "рядом с totk.exe). Ровнее края и меньше мерцания, около 3 мс на кадр.",
+    [UI_MENU_FXAA] = "Сглаживание игры (FXAA)",
+    [UI_MENU_FXAA_DESC] = "Собственное сглаживание FXAA. Слегка размывает мелкие детали; с DLAA оно не нужно.",
 
     [UI_MENU_FPS_LIMIT] = "Ограничение частоты кадров",
     [UI_MENU_FPS_LIMIT_DESC] = "Наибольшее число кадров в секунду. Выше 60 — экспериментальный режим, нужна «Скорость "
