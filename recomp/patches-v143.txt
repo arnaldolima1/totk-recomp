@@ -10,6 +10,7 @@ set cloth    TOTK_CLOTH_REALTIME 1
 set bounce   TOTK_HIGHFPS_FIX    1
 set output   TOTK_PATCH_OUTPUT   0
 set scene    TOTK_PATCH_SCENE    0
+set aspect   TOTK_PATCH_ASPECT   0
 
 # 60 fps: the adaptive present-interval controller (main+0x2db174, 1.2.1 0x8f26c8) gets the minimum interval 1.
 site fps60 main 2db204 6b08015f 7100055f   # clamp: cmp w10, #1 (was cmp w10, w8 = minimum)
@@ -936,3 +937,16 @@ spin subsdk0 1c4e54 1c4e60   # 4 instructions; loads
 spin sdk 2d3654 2d3668   # 6 instructions; loads
 spin sdk 443864 443884   # 9 instructions; loads
 spin sdk 541e54 541f98   # 32 instructions; loads
+
+# Aspect ratio: the 1.2.1 set's sites (patches-v121.txt, which explains them and the page) found in 1.4.3 by their code.
+# Three of 1.2.1's five canvas-size loads (main+0x1ae1ae4, 0x12c7bd4, 0x12c7fbc) have no match found here; with them
+# switched off 1.2.1 draws the gameplay HUD and the system menu the same at 21:9, so what they adjust is not known yet.
+# - DefaultAspect's default (main+0x2d06910, 16/9): the camera parameter reader takes the page's.
+site aspect main 1aa0ac4 d0009328 @page:x8   # adrp x8, 0x2d06000 -> adrp x8, page
+site aspect main 1aa0ac8 91244108 91010108   # add x8, x8, #0x910 -> add x8, x8, #64
+# - The two camera-viewport updates: the division becomes a load of the page's aspect (x9 is set again just after).
+site aspect main 1ff04f4 1e211800 @page:x9 bd404120   # fdiv s0, s0, s1 -> adrp x9, page; ldr s0, [x9, #64]
+site aspect main 253fbb0 1e211800 @page:x9 bd404120   # fdiv s0, s0, s1
+# - Loads of the 2D canvas size {width, height}, each followed by the multiplication (x9 and s2 saved around it).
+site aspect main 2136fa8 2d4307a0 2d4307a0 f81f0fe9 bd000be2 @page:x9 bd404522 1e220800 bd404922 1e220821 bd400be2 f84107e9   # ldp s0, s1, [x29, #0x18]
+site aspect main 213641c 2d4103e1 2d4103e1 f81f0fe9 bd000be2 @page:x9 bd404522 1e220821 bd404922 1e220800 bd400be2 f84107e9   # ldp s1, s0, [sp, #8] (width in s1)

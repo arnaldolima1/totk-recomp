@@ -69,8 +69,8 @@ Build or install on Linux ([installer.md](installer.md), "Linux release"), in De
 mode; for Game Mode, add `totk` from the install folder to Steam as a non-Steam game.
 
 The game recognises the Deck (LCD and OLED) and uses its device profile for every setting `totk.ini` does not set:
-fullscreen, the screen's own 1280x800 (16:10: on 1.2.1 the camera and interface take that shape; 1.4.3 draws 1280x720
-with black bars until its aspect patch exists), the game's own 3D scale, vsync and a 40 fps limit. These are starting points, not measurements. What helps most:
+fullscreen, the screen's own 1280x800 (16:10: the camera and interface take that shape), the game's own 3D scale,
+vsync and a 40 fps limit. These are starting points, not measurements. What helps most:
 
 1. The performance overlay (F10, or both stick clicks L3 + R3) in full mode: the frame rate, mean and longest frame
    time over a minute in Lookout Landing, in the Depths and in the Sky, with the settings named.

@@ -111,8 +111,8 @@
 # gpu_index = 0
 # gpu_name = NVIDIA
 # Game resolution: the size the game draws its picture and interface in (1280x720 to 7680x4320). Another shape than
-# 16:9 (1280x800, 2560x1080) gives the camera and the interface that shape (1.2.1; 1.4.3 draws the largest 16:9 size
-# inside it, with black bars). Above 1920x1080 the game's texture heap and memory pool grow with it. Read at start.
+# 16:9 (1280x800, 2560x1080) gives the camera and the interface that shape. Above 1920x1080 the game's texture heap and
+# memory pool grow with it. Read at start.
 # output_res = 1920x1080
 # 3D render scale: the scene's size relative to the game resolution, game (5/6, the game's own 1600x900 at 1080p) or
 # a percentage (25 to 400, at most 4096 pixels a side); above 100 supersamples the scene (anti-aliasing). Read at start.
