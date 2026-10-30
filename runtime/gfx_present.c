@@ -53,6 +53,7 @@ void gfx_window_focus_changed(int in) {
     oe_set_focus(in);                          // pinned to 1 by TOTK_ASSUME_FOCUS inside
     oe_push_message(OE_MSG_FOCUS_STATE_CHANGED);
     plat_inc32(&g_focus_msgs);
+    rt_log("gfx: window %s the focus", in ? "gained" : "lost");
 }
 
 // The window was closed: the process ends with it, as in MNG, once a save Commit still running in the background is

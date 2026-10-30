@@ -124,6 +124,9 @@
 # Picture shape when the window's differs from the game resolution's (a 16:9 game on a 16:10 screen): keep (its
 # proportions, with black bars) or stretch (over the whole window). Changes take effect at once.
 # picture_fit = keep
+# 1: the game always counts itself in focus and keeps running behind other windows. 0: it pauses while the window
+# lacks the focus, as a Switch does with the HOME menu; a load interrupted that way can stop for good. Read at start.
+# assume_focus = 1
 
 [language]
 # Language: a Windows locale such as de-DE, or a Switch code (en-US, ja, zh-Hant, ...). Default: the Windows locale.

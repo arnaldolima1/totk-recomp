@@ -9,8 +9,8 @@
 //   TOTK_LOCALE=<BCP 47 tag>           else the language for this locale ("pt-BR"), else the Windows user locale;
 //                                      a language the game does not ship becomes en-US
 //   TOTK_OPERATION_MODE=docked|handheld   operation and performance mode reported to the game (default docked)
-//   TOTK_ASSUME_FOCUS=1                GetCurrentFocusState always reports in focus, whatever the window says; the
-//                                      window opens without taking focus (gfx_window_win.c), for scripted runs
+//   TOTK_ASSUME_FOCUS=1|0              1 (default): GetCurrentFocusState always reports in focus, whatever the
+//                                      window says; 0: out of focus while the window is, as on a Switch (see below)
 //   TOTK_SHARED_FONTS=<dir>            nn::pl shared fonts (tools/extract_fonts.py output), default
 //                                      <romfs>/../../firmware/shared-fonts
 #include <ctype.h>
@@ -147,16 +147,18 @@ static void ov_focus_mode(Cpu *c) {
     }
 }
 
-// FocusState GetCurrentFocusState(): 1 in focus, 2 out of focus (nn::oe::FocusState). In focus until the window
-// reports otherwise through oe_set_focus; TOTK_ASSUME_FOCUS=1 (unattended runs) pins it to 1. The caller of
-// oe_set_focus also pushes OE_MSG_FOCUS_STATE_CHANGED.
+// FocusState GetCurrentFocusState(): 1 in focus, 2 out of focus (nn::oe::FocusState). The game sets focus handling
+// mode 2: on a Switch the system then suspends the whole process while it is out of focus and sends Resume when it
+// returns. Here only the game's main thread stops (it waits in PopNotificationMessage for the next message) while its
+// loader threads, audio and clocks run on, and a load interrupted that way was seen to never finish (Linux, 1.4.3).
+// So TOTK_ASSUME_FOCUS=1, the default, keeps it at 1, as MacNativeGames does; with 0 it follows the window through
+// oe_set_focus. The caller of oe_set_focus also pushes OE_MSG_FOCUS_STATE_CHANGED.
 static volatile int32_t focus_state = 1;
 static int assume_focus(void) {
     static volatile int32_t v = -1;
     int32_t a = v;
     if (a < 0) {
-        const char *e = cfg_get("TOTK_ASSUME_FOCUS");
-        a = e && atoi(e) ? 1 : 0;
+        a = atoi(cfg_value("TOTK_ASSUME_FOCUS")) ? 1 : 0;
         plat_xchg32(&v, a);
     }
     return (int)a;
