@@ -5,7 +5,8 @@
 // MacNativeGames contributors) make the game read both sizes from the patch page, and the texture heap that holds the
 // output- and scene-sized render targets grows with them.
 //
-// Settings, read at start: TOTK_OUTPUT_RES = <w>x<h> (default 1920x1080, the game's own), TOTK_RENDER_SCALE = the
+// Settings, read at start: TOTK_OUTPUT_RES = <w>x<h> (default 1920x1080, the game's own; another shape than 16:9 gets
+// a camera and interface canvas of that shape, aspect_init), TOTK_RENDER_SCALE = the
 // scene's size relative to the output: "game" (default, 5/6, the game's 1600x900 at 1080p) or a percentage; above 100
 // the game supersamples its scene, which smooths edges (anti-aliasing) at the cost of GPU time. The game's own final
 // pass (FSR 1 EASU) scales the scene to the output; the present scales the output to the window (vk_fsr.c).
@@ -41,6 +42,7 @@
 #define SCENE_H 900
 #define DTA_KIB 113664u      // DynamicTextureAllocatorMem, shipped
 #define SCENE_MAX 4096       // per side, as MacNativeGames' TOTK_RENDER_RES
+#define ASPECT_EPS 0.002     // an output this close to 16:9 is 16:9 (1366x768 is 1.7786)
 
 static struct {
     int decided;
@@ -63,6 +65,16 @@ static void decide(void) {
         R.oh = h & ~1u;
     } else {
         rt_log("resolution: TOTK_OUTPUT_RES=%s is not <width>x<height> in 1280x720..7680x4320; 1920x1080", o);
+    }
+    // A game version without the aspect set draws 16:9 only: the largest 16:9 size inside the wanted one, which the
+    // present letterboxes in a window of the wanted shape (TOTK_PICTURE_FIT)
+    double a = (double)R.ow / R.oh, base = (double)BASE_W / BASE_H;
+    if (fabs(a - base) >= ASPECT_EPS && rt_patch_set("aspect") < 0) {
+        unsigned w = R.ow, h = R.oh;
+        if (a > base) R.ow = (unsigned)(R.oh * base + 0.5) & ~1u;
+        else R.oh = (unsigned)(R.ow / base + 0.5) & ~1u;
+        rt_log("resolution: this game version has no aspect patch set: %ux%u draws %ux%u (16:9), letterboxed", w, h, R.ow,
+               R.oh);
     }
     const char *s = cfg_value("TOTK_RENDER_SCALE");
     double k = 5.0 / 6.0;
@@ -188,6 +200,20 @@ int res_heapdef_build(const void *in, size_t n, void **out, size_t *out_n) {
 
 void res_heapdef_served(void) { R.heapdef_ok = 1; }
 
+// ---- aspect ratio: an output of another shape than 16:9 gets a camera and a 2D canvas of its shape (the aspect set,
+// recomp/patches-v121.txt). Page +64 the aspect, +68 and +72 the factors of the canvas width and height: wider than 16:9
+// the canvas grows in x, narrower in y, so the 16:9 layouts keep their proportions and sit in the middle of it.
+static void aspect_init(uint8_t *page) {
+    int set = rt_patch_set("aspect");   // decide() kept a version without it at 16:9
+    double a = (double)R.ow / R.oh, base = (double)BASE_W / BASE_H;
+    if (fabs(a - base) < ASPECT_EPS || set < 0) return;
+    float v[3] = {(float)a, (float)(a > base ? a / base : 1.0), (float)(a < base ? base / a : 1.0)};
+    memcpy(page + 64, v, sizeof v);
+    rt_patch_switch(set, 1);
+    rt_log("resolution: aspect %.4f (%ux%u): camera and interface canvas follow it (x %.4f, y %.4f)", a, R.ow, R.oh, v[1],
+           v[2]);
+}
+
 // ---- start: the patch page and the sets
 static uint64_t pack(unsigned w, unsigned h) { return (uint64_t)h << 32 | w; }
 
@@ -218,6 +244,7 @@ void res_init(void) {
     rt_patch_switch(output, R.ow != BASE_W || R.oh != BASE_H);
     rt_patch_switch(scene, scene_on);
     R.on = 1;
+    aspect_init(page);
     rt_log("resolution: output %ux%u, scene %ux%u%s; texture heap +%llu KiB", R.ow, R.oh, R.sw, R.sh,
            scene_on ? "" : " (the game's own 5/6 of the output)", (unsigned long long)res_heap_extra_kib());
 }

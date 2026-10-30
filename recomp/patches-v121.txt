@@ -9,6 +9,7 @@ set cloth    TOTK_CLOTH_REALTIME 1
 set bounce   TOTK_HIGHFPS_FIX    1
 set output   TOTK_PATCH_OUTPUT   0
 set scene    TOTK_PATCH_SCENE    0
+set aspect   TOTK_PATCH_ASPECT   0
 
 # 60 fps: the adaptive present-interval controller (main+0x8f26c8, 1.0.0 0x8f6bec) gets the minimum interval 1.
 site fps60 main 8f273c 6b08015f 7100055f   # clamp: cmp w10, #1 (was cmp w10, w8 = minimum)
@@ -930,3 +931,27 @@ spin sdk 23a590 23a5d8   # 19 instructions; loads
 spin sdk 23a658 23a6a0   # 19 instructions; loads
 spin sdk 23a7fc 23a918   # 19 instructions; loads
 spin sdk 3d3250 3d3270   # 9 instructions; loads
+
+# Aspect ratio (runtime/resolution.c aspect_init switches the set on when the game resolution is not 16:9; the sites are those of
+# Fruithapje21's TOTK-Ultrawide 1.2.1 patch, GPL-3.0, read for behaviour, the code here our own). The page holds +64 the
+# aspect (output width / height), +68 and +72 the factors the 2D canvas size is multiplied by in x and y: wider than
+# 16:9, x by aspect / (16/9); narrower (the Steam Deck's 16:10), y by (16/9) / aspect; the other is 1.
+# - The world camera reads its aspect from the camera parameter DefaultAspect (main+0x1164a7c reads DefaultFovy,
+#   DefaultAspect, DefaultOffsetX...), whose default is the float at main+0x3816ab4: the reader takes the page's instead.
+site aspect main 1164aa8 d0013588 @page:x8   # adrp x8, 0x3816000 -> adrp x8, page
+site aspect main 1164aac 912ad108 91010108   # add x8, x8, #0xab4 -> add x8, x8, #64
+# - Two copies of a camera-viewport update compute aspect = (right - left) / (bottom - top) of a 16:9 rectangle;
+#   x9 is set to 1 again after the load, so it holds the page meanwhile.
+site aspect main 19b36e0 1e223800 @page:x9   # fsub s0, s0, s2 -> adrp x9, page
+site aspect main 19b36e8 52800029 bd404120   # mov w9, #1 -> ldr s0, [x9, #64]
+site aspect main 19b36f0 1e211800 52800029   # fdiv s0, s0, s1 -> mov w9, #1
+site aspect main 1ecdf58 1e223800 @page:x9
+site aspect main 1ecdf60 52800029 bd404120
+site aspect main 1ecdf68 1e211800 52800029
+# - The size of the 2D canvas the layouts are drawn in, loaded as {width, height} at five places: each load is kept
+#   and followed by the multiplication, with x9 and s2 saved on the stack around it.
+site aspect main 1add300 2d4307a0 2d4307a0 f81f0fe9 bd000be2 @page:x9 bd404522 1e220800 bd404922 1e220821 bd400be2 f84107e9   # ldp s0, s1, [x29, #0x18]
+site aspect main 1ae1ae4 2d440680 2d440680 f81f0fe9 bd000be2 @page:x9 bd404522 1e220800 bd404922 1e220821 bd400be2 f84107e9   # ldp s0, s1, [x20, #0x20]
+site aspect main 1adc6f8 2d4103e1 2d4103e1 f81f0fe9 bd000be2 @page:x9 bd404522 1e220821 bd404922 1e220800 bd400be2 f84107e9   # ldp s1, s0, [sp, #8] (width in s1)
+site aspect main 12c7bd4 2d400500 2d400500 f81f0fe9 bd000be2 @page:x9 bd404522 1e220800 bd404922 1e220821 bd400be2 f84107e9   # ldp s0, s1, [x8]
+site aspect main 12c7fbc 2d400500 2d400500 f81f0fe9 bd000be2 @page:x9 bd404522 1e220800 bd404922 1e220821 bd400be2 f84107e9   # ldp s0, s1, [x8]

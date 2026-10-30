@@ -69,16 +69,17 @@ Build or install on Linux ([installer.md](installer.md), "Linux release"), in De
 mode; for Game Mode, add `totk` from the install folder to Steam as a non-Steam game.
 
 The game recognises the Deck (LCD and OLED) and uses its device profile for every setting `totk.ini` does not set:
-fullscreen, game resolution 1280x720 letterboxed in the 1280x800 screen, the game's own 3D scale, vsync and a 40 fps
-limit. These are starting points, not measurements. What helps most:
+fullscreen, the screen's own 1280x800 (16:10: on 1.2.1 the camera and interface take that shape; 1.4.3 draws 1280x720
+with black bars until its aspect patch exists), the game's own 3D scale, vsync and a 40 fps limit. These are starting points, not measurements. What helps most:
 
 1. The performance overlay (F10, or both stick clicks L3 + R3) in full mode: the frame rate, mean and longest frame
    time over a minute in Lookout Landing, in the Depths and in the Sky, with the settings named.
 2. The same with `fps_limit` 30, 45 and 60 and `render_scale` 50, 67 and game, so the defaults can be picked from
    measurements. Steam's own performance overlay (the ... button) adds power draw and temperatures.
 3. LCD or OLED, SteamOS version (`uname -r` in Desktop Mode's terminal), and the game update.
-4. Anything that looks stretched or cut off: the game draws 16:9 only, so the profile keeps black bars above and
-   below; `picture_fit = stretch` fills the screen instead.
+4. Anything that looks stretched, squeezed or cut off, with a screenshot: at 16:10 the interface keeps its 16:9 layout
+   in the middle of the taller screen, and full-screen backgrounds of some menus may not reach the top and bottom
+   edges yet.
 
 `device_profile = desktop` in `totk.ini` turns the profile off; `deck` turns it on elsewhere, to try the Deck's
 settings on a PC.
