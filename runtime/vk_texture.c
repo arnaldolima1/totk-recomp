@@ -220,6 +220,7 @@ static int bind_pool_memory(VkCtx *c, Tex *e, VkImage img) {
     VkMemoryRequirements req;
     vkGetImageMemoryRequirements(c->device, img, &req);
     VkMemSpan sp;
+    if (!req.size) return 0;   // an image the device could not lay out (image_size)
     if (!vk_mem_resolve(e->pub.addr, req.size, &sp) || !sp.alloc || sp.alloc_offset % req.alignment) return 0;
     VmaAllocationInfo info;
     vmaGetAllocationInfo(c->vma, sp.alloc, &info);
@@ -243,6 +244,18 @@ static int block_views_ok(const VkImageCreateInfo *ci) {
     return ci->extent.width <= q->maxExtent.width && ci->extent.height <= q->maxExtent.height &&
            ci->extent.depth <= q->maxExtent.depth && ci->mipLevels <= q->maxMipLevels &&
            ci->arrayLayers <= q->maxArrayLayers;
+}
+
+// The memory the device wants for an image made from ci: 0 when it cannot lay it out. RADV on GFX9 (Vega, Renoir)
+// hands back a 0-byte image for a mipmapped block-compressed 3D image at least as deep as it is wide in blocks, with
+// COLOR_ATTACHMENT usage and no STORAGE: that usage asks for a thin 3D layout (Mesa radv_image.c), for which the GFX9
+// address library has no swizzle mode left (gfx9addrlib.cpp), and the error is dropped; VMA then refuses the 0-byte
+// allocation. The format properties call it supported, so only the size shows it.
+static VkDeviceSize image_size(const VkImageCreateInfo *ci) {
+    VkDeviceImageMemoryRequirements q = {.sType = VK_STRUCTURE_TYPE_DEVICE_IMAGE_MEMORY_REQUIREMENTS, .pCreateInfo = ci};
+    VkMemoryRequirements2 r = {.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2};
+    vkGetDeviceImageMemoryRequirements(vk_ctx()->device, &q, &r);
+    return r.memoryRequirements.size;
 }
 
 // UNDEFINED -> GENERAL; new depth / stencil images start cleared (LAS textures.c: the game copies depth
@@ -274,7 +287,7 @@ static void init_image(Tex *e, VkCommandBuffer cb) {
 
 // defer_init: the caller records the image's first transition (init_image or alias_copy).
 static Tex *create_tex(const tex_t *t, const TexKey *k, int defer_init) {
-    static volatile int32_t n_unmapped, n_unsupported, n_failed, n_unbound;
+    static volatile int32_t n_unmapped, n_unsupported, n_failed, n_unbound, n_thick;
     VkCtx *c = vk_ctx();
     const nvn_texdesc *d = &t->d;
     if (!c || d->target == NVN_TEXTURE_TARGET_BUFFER) return NULL;
@@ -326,7 +339,17 @@ static Tex *create_tex(const tex_t *t, const TexKey *k, int defer_init) {
         bc.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         bc.flags |= VK_IMAGE_CREATE_BLOCK_TEXEL_VIEW_COMPATIBLE_BIT | VK_IMAGE_CREATE_EXTENDED_USAGE_BIT;
         if (type == VK_IMAGE_TYPE_3D) bc.flags |= VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT;
-        if (block_views_ok(&bc)) ci = bc, usage = bc.usage, flags = bc.flags, block_views = 1;
+        VkImageUsageFlags hidden = 0;   // creation usage the replay never uses (views restrict theirs, vk_exec.c)
+        int ok = block_views_ok(&bc);
+        if (ok && type == VK_IMAGE_TYPE_3D && !image_size(&bc)) {
+            // STORAGE usage keeps RADV on GFX9 from the thin layout (image_size), so agl's BC4 encoder still renders
+            // into the volume; else the image is made without block views and its encoder passes are left out
+            bc.usage |= VK_IMAGE_USAGE_STORAGE_BIT, hidden = VK_IMAGE_USAGE_STORAGE_BIT;
+            ok = block_views_ok(&bc) && image_size(&bc);
+            log_limited(&n_thick, "texture fmt %#x %ux%ux%u: the device cannot lay out a 3D image with block views; %s",
+                        d->format, w, h, depth, ok ? "made with storage usage (a thick layout)" : "made without them");
+        }
+        if (ok) ci = bc, usage = bc.usage & ~hidden, flags = bc.flags, block_views = 1;
     }
     // Feedback loops (vk.h VkCtx.feedback): every attachable image may be sampled by a draw of a pass that renders it,
     // so it gets the usage now; adding it when a loop shows up would mean recreating the image (that lost the
