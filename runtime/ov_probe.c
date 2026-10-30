@@ -275,7 +275,7 @@ static void probe_oe(void) {
     free(keep_locale);
     checks++;
     failures += bad > 0;
-    printf("oe: language %s by default (en-US locale), %s for this Windows user locale; %d locale/TOTK_LANG cases %s\n",
+    printf("oe: language %s by default (en-US locale), %s for this user's locale; %d locale/TOTK_LANG cases %s\n",
            def, sys, (int)(sizeof cases / sizeof *cases), bad ? "FAILED" : "ok");
 
     CALL("oe.Initialize", 0);

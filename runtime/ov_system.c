@@ -114,13 +114,13 @@ static void ov_desired_language(Cpu *c) {
     ret_x(c, v);
 }
 
-static void ov_oe_initialize(Cpu *c) { (void)c; rt_log("oe: application environment: local Windows process"); }
+static void ov_oe_initialize(Cpu *c) { (void)c; rt_log("oe: application environment: a local host process"); }
 
 // void SetPerformanceConfiguration(PerformanceMode mode, int config)
 static void ov_performance_config(Cpu *c) {
     int64_t mode = (int32_t)arg_x(c, 0);
     if (mode < 0 || mode > 1) rt_fatal("nn::oe::SetPerformanceConfiguration: invalid mode %lld", (long long)mode);
-    rt_log("oe: performance request mode %lld configuration %#x: Windows schedules the CPU", (long long)mode,
+    rt_log("oe: performance request mode %lld configuration %#x: the host OS schedules the CPU", (long long)mode,
            (uint32_t)arg_x(c, 1));
 }
 
