@@ -140,10 +140,15 @@ def main():
     t0 = time.monotonic()
     variants, prio = parse_list(read_list(a.list))
     extracted = ROOT / 'build' / 'extracted' / a.version
-    shaders, _ = inventory(a.romfs or extracted / 'romfs', a.exefs or extracted / 'exefs')
+    listed = len(variants)
+    shaders, _ = inventory(a.romfs or extracted / 'romfs', a.exefs or extracted / 'exefs', everything=False)
+    missing = sum(1 for key, _ in variants if key not in shaders)
+    if missing > max(16, listed // 20):   # the list names shaders the narrowed walk did not reach
+        print(f'{missing} of the {listed} listed variants are not among the {len(shaders)} shaders found: reading every '
+              f'RomFS file instead', flush=True)
+        shaders, _ = inventory(a.romfs or extracted / 'romfs', a.exefs or extracted / 'exefs')
     t1 = time.monotonic()
     progs, recs, seen, skipped = {}, [], set(), {'not in this version': 0, 'stage': 0}
-    listed = len(variants)
     variants += [(key, DEFAULT) for key in sorted(shaders)]
     for key, deps in variants:
         s = shaders.get(key)
