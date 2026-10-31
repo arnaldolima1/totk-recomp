@@ -219,6 +219,23 @@ def size_of(paths):
 
 # ---- 1. check
 
+UPDATE_TITLE_ID = '0100F2C0115B6800'
+
+
+def base_misuse(records):
+    """Name why a file chosen as the base game holds an update or a combined package, or return None.
+
+    The Meta NCA (content type 1) carries the package's own title id: the update's id (...800) for an update NSP, and
+    several Meta NCAs mean base, update and DLC repacked into one file.
+    """
+    metadata = [r['title_id'] for r, _ in records if r['content_type'] == 1]
+    if len(metadata) > 1:
+        return 'check.base_combined'
+    if UPDATE_TITLE_ID in metadata:
+        return 'check.base_is_update'
+    return None
+
+
 class Check(Step):
     id = 'check'
     always = True
@@ -350,6 +367,10 @@ class Check(Step):
         except ValueError as e:
             if is_update and 'BKTR' in str(e):
                 raise InstallError('check.update_is_base') from None
+            if not is_update:
+                reason = base_misuse(records)
+                if reason:
+                    raise InstallError(reason) from None
             raise InstallError('check.update_not_totk' if is_update else 'check.base_not_totk', detail=str(e)) from None
         try:
             nca_ctr_key(header, keys, tickets)
