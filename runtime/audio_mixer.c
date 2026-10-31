@@ -154,6 +154,71 @@ static void ring_pull(Mixer *m, float *out, uint32_t frames) {
     atomic_store_explicit(&m->rd, rd + n, memory_order_release);
 }
 
+// ---- the achievement chime (audio_chime): two short bell arpeggios made here, not taken from the game, mixed into the
+// output on SDL's thread on top of the game's audio. chime_pos is the next frame to play, -1 when silent.
+enum { CHIME_NORMAL, CHIME_PLATINUM, CHIMES };
+static float *chime_buf[CHIMES];
+static int chime_frames[CHIMES];
+static _Atomic int chime_play = -1, chime_pos = -1;
+static _Atomic float chime_gain;
+
+// One bell note into buf (stereo): a few inharmonic-free partials with an exponential decay, panned by pan (-1..1).
+static void chime_note(float *buf, int frames, int rate, double at_s, double freq, double amp, double decay_s, double pan) {
+    static const double partials[][2] = {{1.0, 1.0}, {2.0, 0.35}, {3.0, 0.12}, {4.2, 0.05}};
+    int start = (int)(at_s * rate);
+    double l = amp * sqrt((1 - pan) / 2), r = amp * sqrt((1 + pan) / 2);
+    for (int i = start; i < frames; i++) {
+        double t = (double)(i - start) / rate, env = exp(-t / decay_s) * (t < 0.004 ? t / 0.004 : 1.0), s = 0;
+        if (env < 1e-4) break;
+        for (int k = 0; k < 4; k++) s += partials[k][1] * sin(2 * M_PI * freq * partials[k][0] * t) * exp(-t * k * 1.5);
+        buf[2 * i] += (float)(s * env * l);
+        buf[2 * i + 1] += (float)(s * env * r);
+    }
+}
+
+static void chime_make(int rate) {
+    // the normal one: a rising major arpeggio (E5 G#5 B5 E6) with a soft fifth under it
+    static const double normal[][2] = {{0.00, 659.26}, {0.09, 830.61}, {0.18, 987.77}, {0.30, 1318.51}};
+    // the platinum one: the same rise twice, an octave apart, then the chord rings on
+    static const double plat[][2] = {{0.00, 659.26}, {0.09, 830.61}, {0.18, 987.77}, {0.27, 1318.51}, {0.40, 1661.22},
+                                     {0.49, 1975.53}, {0.62, 2637.02}, {0.80, 1318.51}, {0.80, 1661.22}, {0.80, 1975.53}};
+    for (int c = 0; c < CHIMES; c++) {
+        double len = c == CHIME_PLATINUM ? 3.2 : 1.8;
+        int frames = (int)(len * rate);
+        float *buf = calloc((size_t)frames * 2, sizeof(float));
+        if (!buf) return;
+        const double (*notes)[2] = c == CHIME_PLATINUM ? plat : normal;
+        int n = c == CHIME_PLATINUM ? (int)(sizeof plat / sizeof *plat) : (int)(sizeof normal / sizeof *normal);
+        for (int i = 0; i < n; i++)
+            chime_note(buf, frames, rate, notes[i][0], notes[i][1], 0.16, c == CHIME_PLATINUM && i >= 7 ? 1.1 : 0.55,
+                       -0.4 + 0.8 * i / (n > 1 ? n - 1 : 1));
+        chime_note(buf, frames, rate, 0.0, 329.63, 0.07, 0.9, 0.0);   // the low E under it
+        chime_buf[c] = buf, chime_frames[c] = frames;
+    }
+}
+
+void audio_chime(int platinum, float volume) {
+    int c = platinum ? CHIME_PLATINUM : CHIME_NORMAL;
+    if (!chime_buf[c]) return;   // no output device
+    atomic_store(&chime_gain, volume < 0 ? 0 : volume > 1 ? 1 : volume);
+    atomic_store(&chime_pos, -1);
+    atomic_store(&chime_play, c);
+    atomic_store_explicit(&chime_pos, 0, memory_order_release);
+}
+
+static void chime_mix(float *out, uint32_t frames) {
+    int pos = atomic_load_explicit(&chime_pos, memory_order_acquire), c = atomic_load(&chime_play);
+    if (pos < 0 || c < 0) return;
+    float g = atomic_load(&chime_gain);
+    uint32_t n = 0;
+    for (; n < frames && pos + (int)n < chime_frames[c]; n++) {
+        out[2 * n] += chime_buf[c][2 * (pos + n)] * g;
+        out[2 * n + 1] += chime_buf[c][2 * (pos + n) + 1] * g;
+    }
+    int next = pos + (int)n >= chime_frames[c] ? -1 : pos + (int)n;
+    atomic_compare_exchange_strong(&chime_pos, &pos, next);   // a new chime started meanwhile keeps its own position
+}
+
 static void SDLCALL sdl_pull(void *user, SDL_AudioStream *stream, int additional, int total) {
     (void)total;
     Mixer *m = user;
@@ -164,6 +229,7 @@ static void SDLCALL sdl_pull(void *user, SDL_AudioStream *stream, int additional
         if (!frames) break;
         if (frames > 1024) frames = 1024;
         ring_pull(m, tmp, frames);
+        chime_mix(tmp, frames);
         if (!SDL_PutAudioStreamData(stream, tmp, (int)(frames * 2 * sizeof(float)))) break;
         additional -= (int)(frames * 2 * sizeof(float));
     }
@@ -192,6 +258,7 @@ static void output_open(Mixer *m, int rate) {
         return;
     }
     m->device_ok = 1;
+    if (!chime_buf[CHIME_NORMAL]) chime_make(rate);
     SDL_AudioSpec dev;
     int period = 0;
     if (!SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(m->stream), &dev, &period) || period <= 0) period = m->frame;

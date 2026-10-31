@@ -23,18 +23,26 @@ and Enum values sit in the pair; arrays and strings at the value's offset in the
 
 A quest's progress is the enum `Step_<quest>`, whose last value is `Complete`.
 
+Armor: each set has five ids, its base and four upgrade levels, and each piece a flag
+`IsGet.Armor_<id>_<Head|Upper|Lower>` that turns true when it is first obtained; a set is complete when the three
+pieces of its base id are. `tools/achievements.py` `ARMOR_SETS` lists the 33 sets with all three pieces.
+
 1. `tools/achievements.py` holds the condition catalogue (Portuguese labels), the default set of 52 achievements and
    their emblem icons, and the compiler: it resolves each condition against the install's GameDataList and writes
    `achievements/compiled.tsv` (flag hashes) and `achievements/icons/<id>.rgba` (64x64) next to `totk.exe`. A name that
    is not a flag of the expected type stops it with that name.
 2. The setup runs `achievements.py defaults <install>` in its prepare step: the default set when the folder has none,
-   then the compile. The player's own set stays across updates and is compiled again for the new release.
+   then the compile. The player's own set stays across updates and is compiled again for the new release; default
+   achievements a newer release adds join it before the platinum one, unless they were offered before (the set's
+   `offered` list, so one the player deleted stays deleted).
 3. `runtime/achievements.c` reads the compiled file at start. After every save commit (`runtime/fs_host.c`
    `commit_run`) and once when the save storage comes up, it reads the slot whose `progress.sav` was written last,
    records what became true in `profile/achievements.tsv` and queues a notice. Unlocks are kept for good, whatever
    save is loaded later.
 4. `runtime/ui/menu.cpp` shows the notice at the top of the screen (`TOTK_ACH_POPUP`, *Achievement notices* on the
-   Screen tab) and the *Achievements* tab with every achievement, its progress and its unlock date. The icons ride in
+   Screen tab) with a chime (`TOTK_ACH_SOUND`, *Achievement sound*: bell arpeggios made in `runtime/audio_mixer.c`
+   `chime_make` and mixed over the game's output at its volume; the platinum trophy has a longer one) and the
+   *Achievements* tab with every achievement, its progress and its unlock date. The icons ride in
    the font atlas as custom rectangles.
 
 The notice comes with the save after the feat, not at the feat itself: the game autosaves often, so that is seconds to

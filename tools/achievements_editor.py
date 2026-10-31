@@ -34,7 +34,8 @@ import achievements as A   # noqa: E402
 BG, PANEL, GOLD, ZONAI, CREAM, MUTED = '#0b1311', '#121c19', '#d8bf7e', '#5ef2c8', '#ece6d6', '#a9a594'
 RARITY_HEX = {'common': '#c79e66', 'rare': '#78ccd6', 'epic': '#b88af2', 'legendary': '#f2c962', 'platinum': '#edf2fa'}
 KINDS = [('preset:' + k, v['label']) for k, v in A.PRESETS.items()] + [
-    ('quest', 'Missão concluída'), ('flag', 'Marco da história'), ('all', 'Todas as outras conquistas (platina)')]
+    ('quest', 'Missão concluída'), ('flag', 'Marco da história'), ('armor', 'Conjunto de roupa completo'),
+    ('all', 'Todas as outras conquistas (platina)')]
 SOURCE_SIDE = 512
 PREVIEW_DELAY_MS = 120
 
@@ -191,6 +192,9 @@ class Editor:
         self.c_quest = ttk.Combobox(self.param, values=[f'{v}  [{k}]' for k, v in A.QUESTS.items()],
                                     textvariable=self.v_quest)
         self.c_flag = ttk.Combobox(self.param, state='readonly', values=list(A.FLAGS.values()), textvariable=self.v_flag)
+        self.v_armor = tk.StringVar()
+        self.c_armor = ttk.Combobox(self.param, state='readonly', values=[v[0] for v in A.ARMOR_SETS.values()],
+                                    textvariable=self.v_armor)
         self.l_hint = ttk.Label(form, text='', style='Muted.TLabel', wraplength=420, justify='left')
         self.l_hint.pack(anchor='w', pady=(4, 0))
 
@@ -218,7 +222,7 @@ class Editor:
         ttk.Label(side, text='Aviso no jogo', style='Muted.TLabel').pack(anchor='w', pady=(18, 4))
         self.cv_note = tk.Canvas(side, width=420, height=96, bg='#3a4a44', highlightthickness=0)
         self.cv_note.pack()
-        for v in (self.v_name, self.v_rarity, self.v_hidden, self.v_min, self.v_quest, self.v_flag):
+        for v in (self.v_name, self.v_rarity, self.v_hidden, self.v_min, self.v_quest, self.v_flag, self.v_armor):
             v.trace_add('write', lambda *a: self.form_changed())
         self.t_desc.bind('<<Modified>>', self.desc_changed)
 
@@ -269,6 +273,8 @@ class Editor:
             key = 'preset:' + c['preset']
         elif c['kind'] in ('quest', 'flag'):
             key = c['kind']
+        elif c['kind'] == 'armor_set' and len(c.get('sets', [])) == 1:
+            key = 'armor'
         else:
             key = None
         self.v_kind.set(dict(KINDS).get(key, 'Condição avançada (só no arquivo)'))
@@ -277,6 +283,8 @@ class Editor:
         q = c.get('quest', '')
         self.v_quest.set(f'{A.QUESTS[q]}  [{q}]' if q in A.QUESTS else q)
         self.v_flag.set(A.FLAGS.get(c.get('name', ''), ''))
+        sets = c.get('sets') or ['']
+        self.v_armor.set(A.ARMOR_SETS.get(sets[0], ('',))[0])
         self.v_emblem.set(a.get('emblem') or 'triforce')
         icon = a.get('icon') or {}
         self.v_zoom.set(icon.get('zoom', 1.0))
@@ -289,7 +297,7 @@ class Editor:
     # ---- editing
 
     def show_params(self, key):
-        for w in (self.l_param, self.s_min, self.c_quest, self.c_flag):
+        for w in (self.l_param, self.s_min, self.c_quest, self.c_flag, self.c_armor):
             w.pack_forget()
         hint = ''
         if key and key.startswith('preset:'):
@@ -309,6 +317,11 @@ class Editor:
             self.l_param.config(text='Marco')
             self.l_param.pack(side='left')
             self.c_flag.pack(side='left', fill='x', expand=True, padx=8)
+        elif key == 'armor':
+            self.l_param.config(text='Conjunto')
+            self.l_param.pack(side='left')
+            self.c_armor.pack(side='left', fill='x', expand=True, padx=8)
+            hint = 'Desbloqueia quando você tiver as três peças do conjunto: cabeça, corpo e pernas.'
         elif key == 'all':
             hint = 'Desbloqueia quando todas as outras conquistas estiverem desbloqueadas.'
         elif key is None:
@@ -330,6 +343,10 @@ class Editor:
             f = next(iter(A.FLAGS))
             a['condition'] = {'kind': 'flag', 'name': f}
             self.v_flag.set(A.FLAGS[f])
+        elif key == 'armor':
+            s = next(iter(A.ARMOR_SETS))
+            a['condition'] = {'kind': 'armor_set', 'sets': [s]}
+            self.v_armor.set(A.ARMOR_SETS[s][0])
         else:
             a['condition'] = {'kind': 'all'}
         self.show_params(key)
@@ -363,6 +380,8 @@ class Editor:
             c['quest'] = m.group(1) if m else self.v_quest.get().strip()
         elif c['kind'] == 'flag':
             c['name'] = next((k for k, v in A.FLAGS.items() if v == self.v_flag.get()), c['name'])
+        elif c['kind'] == 'armor_set' and len(c.get('sets', [])) == 1:
+            c['sets'] = [next((k for k, v in A.ARMOR_SETS.items() if v[0] == self.v_armor.get()), c['sets'][0])]
         self.tree.item(a['id'], text='  ' + a['name'], values=(A.RARITY_LABEL[a['rarity']],))
         self.draw_note()
 

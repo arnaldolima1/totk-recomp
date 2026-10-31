@@ -57,6 +57,8 @@ extern const int rt_game_version;
 int romfs_prompts_ready(const char *layout);
 // host.h (frame_rate.c): game time since the loaded save's first frame, -1 before; achievement notices wait for it.
 int64_t frame_step_world_us(void);
+// audren.h (audio_mixer.c): the achievement chime over the game's audio.
+void audio_chime(int platinum, float volume);
 const char *romfs_prompts_active(void);
 extern const char rt_port_version[];
 }
@@ -682,6 +684,7 @@ static void tab_screen(float scale) {
     static const UiTextId perf[] = {UI_MENU_PERF_OFF, UI_MENU_PERF_FPS, UI_MENU_PERF_FULL};
     opt_toggle("TOTK_SHADER_TOAST", UI_MENU_SHADER_TOAST, UI_MENU_SHADER_TOAST_DESC);
     opt_toggle("TOTK_ACH_POPUP", UI_MENU_ACH_POPUP, UI_MENU_ACH_POPUP_DESC);
+    opt_toggle("TOTK_ACH_SOUND", UI_MENU_ACH_SOUND, UI_MENU_ACH_SOUND_DESC);
     opt_choice("TOTK_PERF_OVERLAY", UI_MENU_PERF_OVERLAY, perf, 3, UI_MENU_PERF_OVERLAY_DESC);
     opt_group(UI_MENU_GRAPHICS);
     row_output_res();
@@ -1621,6 +1624,11 @@ static bool note_tick(void) {
     if (next < 0) return false;
     if (!cfg_bool("TOTK_ACH_POPUP")) return false;   // turned off: the unlock is recorded, the notice dropped
     g_note = next, g_note_count = count, g_note_at = now;
+    AchView v;
+    if (cfg_bool("TOTK_ACH_SOUND") && ach_get(next, &v)) {   // at the game volume the player set
+        double vol = cfg_double("TOTK_VOLUME");
+        audio_chime(v.rarity == ACH_PLATINUM && count == 1, (float)((vol < 0 ? 0 : vol > 100 ? 100 : vol) / 100));
+    }
     return true;
 }
 

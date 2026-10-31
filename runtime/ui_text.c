@@ -55,6 +55,9 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_ACH_POPUP] = "Achievement notices",
     [UI_MENU_ACH_POPUP_DESC] = "A notice at the top of the screen when an achievement unlocks. Achievements are checked "
                                "each time the game saves, so the notice comes with the next save after the feat.",
+    [UI_MENU_ACH_SOUND] = "Achievement sound",
+    [UI_MENU_ACH_SOUND_DESC] = "A short chime with the achievement notice, at the game volume; the platinum trophy has its "
+                               "own.",
     [UI_MENU_TAB_ACHIEVEMENTS] = "Achievements", [UI_MENU_ACH_PROGRESS] = "%d of %d unlocked",
     [UI_MENU_ACH_NONE] = "No achievements are installed. Run the setup again, or save them in the achievements editor.",
     [UI_MENU_ACH_SECRET] = "Secret achievement", [UI_MENU_ACH_SECRET_DESC] = "Keep playing to find out.",
@@ -343,6 +346,9 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_ACH_POPUP] = "Уведомления о достижениях",
     [UI_MENU_ACH_POPUP_DESC] = "Уведомление вверху экрана, когда открывается достижение. Достижения проверяются при "
                                "каждом сохранении игры, поэтому уведомление приходит со следующим сохранением.",
+    [UI_MENU_ACH_SOUND] = "Звук достижения",
+    [UI_MENU_ACH_SOUND_DESC] = "Короткий звон вместе с уведомлением о достижении, на громкости игры; у платинового "
+                               "трофея свой.",
     [UI_MENU_TAB_ACHIEVEMENTS] = "Достижения", [UI_MENU_ACH_PROGRESS] = "Открыто %d из %d",
     [UI_MENU_ACH_NONE] = "Достижения не установлены. Запустите установку снова или сохраните их в редакторе достижений.",
     [UI_MENU_ACH_SECRET] = "Секретное достижение", [UI_MENU_ACH_SECRET_DESC] = "Продолжайте играть, чтобы узнать.",
@@ -639,6 +645,9 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_ACH_POPUP] = "Avisos de conquista",
     [UI_MENU_ACH_POPUP_DESC] = "Um aviso no alto da tela quando uma conquista é desbloqueada. As conquistas são "
                                "verificadas a cada salvamento do jogo, então o aviso chega com o próximo salvamento.",
+    [UI_MENU_ACH_SOUND] = "Som de conquista",
+    [UI_MENU_ACH_SOUND_DESC] = "Um toque curto junto com o aviso de conquista, no volume do jogo; o troféu de platina tem "
+                               "um próprio.",
     [UI_MENU_TAB_ACHIEVEMENTS] = "Conquistas", [UI_MENU_ACH_PROGRESS] = "%d de %d desbloqueadas",
     [UI_MENU_ACH_NONE] = "Nenhuma conquista instalada. Rode a instalação de novo ou salve-as no Editor de Conquistas.",
     [UI_MENU_ACH_SECRET] = "Conquista secreta", [UI_MENU_ACH_SECRET_DESC] = "Continue jogando para descobrir.",

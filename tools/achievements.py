@@ -114,8 +114,43 @@ PRESETS = {
     'bargainer': dict(label='Encontros com a Estátua do Barganhista',
                       cond={'kind': 'number', 'name': 'DemonStatue_MeetCount'}, max=20),
 }
+# The armor sets: the base id of each (the first of its five ids; the other four are its upgrade levels), whose head,
+# body and legs pieces each have a flag IsGet.Armor_<id>_<Head|Upper|Lower> that turns true when the piece is first
+# obtained. Labels are ours.
+ARMOR_SETS = {
+    'hylian': ('Traje Hyliano', 1), 'wild': ('Traje Selvagem', 5), 'zora': ('Armadura Zora', 6),
+    'desert_voe': ('Traje do Deserto', 8), 'snowquill': ('Traje Rito da Neve', 9),
+    'flamebreaker': ('Armadura Antichamas', 11), 'stealth': ('Traje Furtivo', 12),
+    'climbing': ('Equipamento de Escalada', 14), 'radiant': ('Traje Radiante', 17), 'soldier': ('Armadura de Soldado', 20),
+    'rubber': ('Armadura de Borracha', 46), 'barbarian': ('Armadura Bárbara', 48), 'dark': ('Traje Sombrio', 160),
+    'phantom': ('Armadura Fantasma', 171), 'tingle': ('Fantasia do Tingle', 174),
+    'royal_guard': ('Uniforme da Guarda Real', 179), 'evil_spirit': ('Armadura do Espírito Maligno', 180),
+    'time': ('Traje do Tempo', 200), 'wind': ('Traje do Vento', 205), 'twilight': ('Traje do Crepúsculo', 210),
+    'sky': ('Traje do Céu', 215), 'fierce_deity': ('Armadura da Divindade Feroz', 225), 'hero': ('Traje do Herói', 230),
+    'glide': ('Traje de Planador', 1006), 'froggy': ('Traje de Sapo', 1046), 'miner': ('Traje de Minerador', 1051),
+    'ember': ('Traje Brasa', 1061), 'charged': ('Traje Carregado', 1066), 'frostbite': ('Traje Gélido', 1071),
+    'mystic': ('Traje Místico', 1086), 'zonaite': ('Armadura de Zonaíta', 1091), 'awakening': ('Traje do Despertar', 1096),
+    'depths': ('Traje das Profundezas', 1141),
+}
+CLASSIC_SETS = ('wild', 'time', 'wind', 'twilight', 'sky', 'hero')   # the outfits of earlier Links
+
+
+def armor_flags(*sets):
+    """The IsGet flags of the head, body and legs of each set."""
+    out = []
+    for s in sets:
+        base = ARMOR_SETS[s][1]
+        out += [f'IsGet.Armor_{base:03d}_{part}' for part in ('Head', 'Upper', 'Lower')]
+    return out
+
+
+PRESETS['armor_pieces'] = dict(label='Peças de conjuntos de roupa obtidas',
+                               cond={'kind': 'flags', 'names': armor_flags(*ARMOR_SETS)}, max=3 * len(ARMOR_SETS))
+
 # Single flags with a Portuguese label.
 FLAGS = {
+    'SageOfSky_IsOpenShutterInWakeUpRoom': 'Acordar na Sala do Despertar (depois do ataque de Ganondorf)',
+    'Firstskyisland_OnDispLocationName': 'Saltar e pousar na Grande Ilha do Céu',
     'HaveMasterSword': 'Ter a Espada Mestra',
     'IsGameClear': 'Zerar o jogo (derrotar Ganondorf)',
     'GreatFairy4_AllRevival': 'Despertar as quatro Grandes Fadas',
@@ -155,8 +190,16 @@ def _p(preset, n):
     return dict(PRESETS[preset]['cond'], min=n * PRESETS[preset].get('unit', 1), preset=preset)
 
 
+def _armor(*sets):
+    return {'kind': 'armor_set', 'sets': list(sets)}
+
+
 DEFAULTS = [
     # the story
+    ('toque_rei_demonio', 'O Toque do Rei Demônio', 'Sobreviva ao ataque de Ganondorf sob o Castelo de Hyrule.',
+     'common', 'mask', {'kind': 'flag', 'name': 'SageOfSky_IsOpenShutterInWakeUpRoom'}),
+    ('salto_de_fe', 'Salto de Fé', 'Salte do templo e pouse na Grande Ilha do Céu.', 'common', 'feather',
+     {'kind': 'flag', 'name': 'Firstskyisland_OnDispLocationName'}),
     ('despertar', 'Despertar nos Céus', 'Conclua o prólogo na Ilha do Grande Céu.', 'common', 'triforce',
      _q('MainChallenge')),
     ('primeira_torre', 'Olhos no Horizonte', 'Ative sua primeira torre de observação.', 'common', 'tower',
@@ -234,6 +277,25 @@ DEFAULTS = [
      _q('EightHeroStatues')),
     ('arma_forte', 'A Arma Mais Forte', 'Conclua a aventura da arma mais forte.', 'rare', 'sword',
      _q('TheStrongestWeapon')),
+    # clothes
+    ('roupa_hyliana', 'Moda de Hateno', 'Tenha o Traje Hyliano completo: capuz, túnica e calças.', 'common', 'armor',
+     _armor('hylian')),
+    ('roupa_despertar', 'Vestido para Acordar', 'Tenha o Traje do Despertar completo.', 'rare', 'armor',
+     _armor('awakening')),
+    ('roupa_profundezas', 'Explorador das Trevas', 'Tenha o Traje das Profundezas completo.', 'rare', 'armor',
+     _armor('depths')),
+    ('roupa_zonaita', 'Tecnologia Ancestral', 'Tenha a Armadura de Zonaíta completa.', 'rare', 'armor',
+     _armor('zonaite')),
+    ('roupa_barbara', 'Fúria Bárbara', 'Tenha a Armadura Bárbara completa.', 'epic', 'armor', _armor('barbarian')),
+    ('roupa_tempo', 'O Herói do Tempo', 'Tenha o Traje do Tempo completo.', 'epic', 'armor', _armor('time')),
+    ('roupa_divindade', 'Máscara da Divindade', 'Tenha a Armadura da Divindade Feroz completa.', 'epic', 'armor',
+     _armor('fierce_deity')),
+    ('roupas_classicas', 'Lendas que Vestem', 'Tenha os seis trajes dos heróis lendários: Selvagem, do Tempo, do '
+     'Vento, do Crepúsculo, do Céu e do Herói.', 'legendary', 'armor', _armor(*CLASSIC_SETS)),
+    ('roupas_30', 'Guarda-Roupa Cheio', 'Obtenha 30 peças de conjuntos de roupa.', 'rare', 'armor',
+     _p('armor_pieces', 30)),
+    ('roupas_todas', 'Estilista de Hyrule', f'Tenha todos os {len(ARMOR_SETS)} conjuntos de roupa completos.',
+     'legendary', 'armor', _p('armor_pieces', 3 * len(ARMOR_SETS))),
     # the platinum one
     ('platina', 'Lenda de Hyrule', 'Desbloqueie todas as outras conquistas.', 'platinum', 'triforce',
      {'kind': 'all'}),
@@ -241,7 +303,7 @@ DEFAULTS = [
 
 
 def default_definitions():
-    return {'format': FORMAT, 'achievements': [
+    return {'format': FORMAT, 'offered': sorted(i for i, *_ in DEFAULTS), 'achievements': [
         {'id': i, 'name': n, 'description': d, 'rarity': r, 'emblem': e, 'condition': c, 'hidden': False}
         for i, n, d, r, e, c in DEFAULTS]}
 
@@ -467,6 +529,10 @@ def _emblem(name):
     if name == 'camera':
         return minus(union(P([(-0.72, -0.36), (0.72, -0.36), (0.72, 0.52), (-0.72, 0.52)]),
                            P([(-0.24, -0.52), (0.24, -0.52), (0.3, -0.36), (-0.3, -0.36)])), ring(0, 0.08, 0.0, 0.26))
+    if name == 'armor':   # a tunic: the body, the sleeves and a belt
+        body = P([(-0.36, -0.62), (-0.14, -0.72), (0.0, -0.56), (0.14, -0.72), (0.36, -0.62), (0.78, -0.22),
+                  (0.6, 0.0), (0.4, -0.18), (0.42, 0.8), (-0.42, 0.8), (-0.4, -0.18), (-0.6, 0.0), (-0.78, -0.22)])
+        return minus(body, P([(-0.42, 0.18), (0.42, 0.18), (0.42, 0.28), (-0.42, 0.28)]))
     if name == 'flag':
         return union(P([(-0.5, -0.8), (-0.38, -0.8), (-0.38, 0.85), (-0.5, 0.85)]),
                      P([(-0.38, -0.8), (0.6, -0.55), (-0.38, -0.25)]))
@@ -474,7 +540,7 @@ def _emblem(name):
 
 
 EMBLEMS = ('triforce', 'shrine', 'tower', 'root', 'gem', 'rupee', 'leaf', 'heart', 'stamina', 'sword', 'map', 'chest',
-           'tear', 'sages', 'feather', 'flame', 'wave', 'bolt', 'mask', 'horse', 'fairy', 'camera', 'flag')
+           'tear', 'sages', 'feather', 'flame', 'wave', 'bolt', 'mask', 'horse', 'fairy', 'camera', 'flag', 'armor')
 ICON = 128
 
 
@@ -692,6 +758,9 @@ def resolve(cond, gd, lists):
         names, _ = _flag(gd, f'Pouch.{cond["pouch"]}.Content.Name', ('String64Array',))
         stock, _ = _flag(gd, f'Pouch.{cond["pouch"]}.Content.StockNum', ('IntArray',))
         return ('pouch', f'{names:08x}', f'{stock:08x}', str(int(cond['min'])), cond['item'])
+    if k == 'armor_set':   # every piece of the sets: the same as a list of their flags, all needed
+        names = armor_flags(*cond['sets'])
+        return resolve({'kind': 'flags', 'names': names, 'min': len(names)}, gd, lists)
     if k in ('count', 'flags'):
         if k == 'count':
             fam, (_, e) = _flag(gd, cond['family'], ('Struct',))
@@ -849,10 +918,32 @@ def progress(items, lists, save, unlocked=()):
     return out
 
 
+def merge_defaults(path):
+    """Add to the player's set the default achievements a newer release brought: those whose id is in neither the set nor
+    its "offered" list (every default id ever offered to it, so one the player deleted stays deleted). They go before
+    the platinum one. Returns the ids added."""
+    defs = json.loads(path.read_text(encoding='utf-8'))
+    items = defs['achievements']
+    have = {a['id'] for a in items}
+    offered = set(defs.get('offered', have))   # a set written before the list existed: what it holds was offered
+    new = [a for a in default_definitions()['achievements'] if a['id'] not in have and a['id'] not in offered]
+    at = next((i for i, a in enumerate(items) if a['condition']['kind'] == 'all'), len(items))
+    items[at:at] = new
+    defs['offered'] = sorted(offered | {i for i, *_ in DEFAULTS})
+    if new or 'offered' not in json.loads(path.read_text(encoding='utf-8')):
+        tmp = path.with_suffix('.json.tmp')
+        tmp.write_text(json.dumps(defs, ensure_ascii=False, indent=1), encoding='utf-8')
+        os.replace(tmp, path)
+    return [a['id'] for a in new]
+
+
 def write_defaults(dest, force=False):
     folder = Path(dest) / 'achievements'
     path = folder / 'achievements.json'
     if path.is_file() and not force:
+        added = merge_defaults(path)
+        if added:
+            print(f'achievements: {len(added)} new default achievements added: {", ".join(added)}')
         return False
     folder.mkdir(parents=True, exist_ok=True)
     defs = default_definitions()
