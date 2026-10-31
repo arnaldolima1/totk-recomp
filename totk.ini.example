@@ -91,6 +91,9 @@
 # vk_recorder = 1
 # Dynamic vertex input, 0 or 1. Default: on, except on Intel's older integrated GPU drivers (Vulkan 1.3.215 and older).
 # vk_dyn_vertex = 1
+# Dynamic alpha to coverage, 0 or 1. Default: on, except on AMD's driver for RDNA 2 and older (RX 400 to RX 6000),
+# which applies alpha to coverage while the dynamic state says off and draws the characters black.
+# vk_dyn_a2c = 1
 # Pin the shader subgroup size to 32 when the GPU allows it.
 # vk_subgroup_pin = 1
 

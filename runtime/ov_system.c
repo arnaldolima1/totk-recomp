@@ -9,8 +9,8 @@
 //   TOTK_LOCALE=<BCP 47 tag>           else the language for this locale ("pt-BR"), else the Windows user locale;
 //                                      a language the game does not ship becomes en-US
 //   TOTK_OPERATION_MODE=docked|handheld   operation and performance mode reported to the game (default docked)
-//   TOTK_ASSUME_FOCUS=1                GetCurrentFocusState always reports in focus, whatever the window says; the
-//                                      window opens without taking focus (gfx_window.c), for scripted runs
+//   TOTK_ASSUME_FOCUS=1                GetCurrentFocusState always reports in focus, whatever the window says: the
+//                                      game keeps running in the background (the Game tab's row; scripted runs)
 //   TOTK_SHARED_FONTS=<dir>            nn::pl shared fonts (tools/extract_fonts.py output), default
 //                                      <romfs>/../../firmware/shared-fonts
 #include <windows.h>
@@ -158,8 +158,8 @@ static void ov_focus_mode(Cpu *c) {
 }
 
 // FocusState GetCurrentFocusState(): 1 in focus, 2 out of focus (nn::oe::FocusState). In focus until the window
-// reports otherwise through oe_set_focus; TOTK_ASSUME_FOCUS=1 (unattended runs) pins it to 1. The caller of
-// oe_set_focus also pushes OE_MSG_FOCUS_STATE_CHANGED.
+// reports otherwise through oe_set_focus; TOTK_ASSUME_FOCUS=1 (the Game tab's row, scripted runs) pins it to 1.
+// The caller of oe_set_focus also pushes OE_MSG_FOCUS_STATE_CHANGED.
 //
 // The setting is read on every focus change rather than once at start: a focus change is rare, the lookup is a short
 // walk of the loaded ini entries, and the Game tab's row then takes effect the next time the window is left, without

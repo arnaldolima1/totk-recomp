@@ -226,6 +226,9 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_VK_VALIDATION_MISSING] = "The validation layer is not installed.",
     [UI_MENU_VK_DYN_VERTEX] = "Dynamic vertex state",
     [UI_MENU_VK_DYN_VERTEX_DESC] = "Forces dynamic vertex input on or off; the default depends on the GPU.",
+    [UI_MENU_VK_DYN_A2C] = "Dynamic alpha to coverage",
+    [UI_MENU_VK_DYN_A2C_DESC] = "Forces dynamic alpha to coverage on or off. Default: off on AMD's driver for RDNA 2 and "
+                                "older, which draws characters black with it, on elsewhere.",
     [UI_MENU_VK_SUBGROUP_PIN] = "Pin subgroup size", [UI_MENU_VK_SUBGROUP_PIN_DESC] = "Fixes the shader subgroup size.",
     [UI_MENU_TRACE] = "Performance log", [UI_MENU_TRACE_DESC] = "Writes frame timings to a file.",
     [UI_MENU_FLIGHT] = "Flight recorder",
@@ -469,6 +472,10 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_VK_VALIDATION_MISSING] = "Слой проверки не установлен.",
     [UI_MENU_VK_DYN_VERTEX] = "Динамическое состояние вершин",
     [UI_MENU_VK_DYN_VERTEX_DESC] = "Принудительно включает или выключает динамический ввод вершин; по умолчанию зависит от GPU.",
+    [UI_MENU_VK_DYN_A2C] = "Динамический alpha to coverage",
+    [UI_MENU_VK_DYN_A2C_DESC] = "Принудительно включает или выключает динамический alpha to coverage. По умолчанию "
+                                "выключен на драйвере AMD для RDNA 2 и старше, где с ним персонажи чёрные, и включён "
+                                "на остальных.",
     [UI_MENU_VK_SUBGROUP_PIN] = "Фиксировать размер подгруппы",
     [UI_MENU_VK_SUBGROUP_PIN_DESC] = "Фиксирует размер подгруппы шейдера.",
     [UI_MENU_TRACE] = "Журнал производительности", [UI_MENU_TRACE_DESC] = "Пишет время кадров в файл.",

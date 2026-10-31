@@ -486,9 +486,9 @@ static DWORD WINAPI window_main(void *arg) {
         g_wnd_failed = 1;
     } else {
         // An IME switched on over the game attaches to this window and then shows its candidate window and eats the keys
-        // it composes, although there is nothing here to type into (Shift, which a player may have bound as the walk key,
-        // is one of the keys a Chinese IME takes). Detaching the game's window leaves the software keyboard alone: its
-        // edit box is a window of its own and gets the IME it needs.
+        // it composes, although there is nothing here to type into (a Chinese IME takes Shift, the B button by default).
+        // Detaching the game's window leaves the software keyboard alone: its edit box sits in a window of its own
+        // (swkbd_win.c) and gets the IME it needs.
         ImmAssociateContext(g_hwnd, NULL);
         // The frame was measured at the system DPI; the window may have opened on a monitor at another scale.
         InterlockedExchange(&g_dpi, (LONG)GetDpiForWindow(g_hwnd));
