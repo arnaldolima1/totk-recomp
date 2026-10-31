@@ -15,6 +15,17 @@ extern "C" {
 #include "ui_text.h"
 }
 
+// The menu's colours (menu.cpp style_init, its panel and these rows): near-black green panels, gold lines and headings,
+// the Zonai teal for what is selected, in the look of the UltraTears overlay.
+static const ImVec4 kUiGold(0.847f, 0.749f, 0.494f, 1), kUiGoldHi(0.953f, 0.886f, 0.663f, 1),
+    kUiZonai(0.369f, 0.949f, 0.784f, 1), kUiCream(0.925f, 0.902f, 0.839f, 1), kUiMuted(0.663f, 0.647f, 0.580f, 1),
+    kUiWarn(1.0f, 0.71f, 0.42f, 1), kUiDanger(1.0f, 0.482f, 0.420f, 1), kUiPanel(0.035f, 0.059f, 0.051f, 0.96f);
+// c with its alpha set to a, packed; the style's Alpha applies too (a page fading in after a tab change).
+inline ImU32 ui_col(ImVec4 c, float a = 1) {
+    c.w = a;
+    return ImGui::GetColorU32(c);
+}
+
 void opt_begin(const char *id, float scale);
 void opt_end(void);
 // The height the next pages leave free under their panes (the menu's bottom row).

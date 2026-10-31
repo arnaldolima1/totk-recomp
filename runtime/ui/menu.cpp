@@ -182,27 +182,31 @@ static float menu_scale(uint32_t h) {
     return ((float)h >= least ? (float)h : least) / 1080.0f;
 }
 
-// SavageWindRecomp's colours: dark green panels, gold accents.
+// The colours of option_rows.h: near-black green, gold buttons and lines, the Zonai teal for the cursor.
 static void style_init(ImGuiStyle &s) {
     ImGui::StyleColorsDark(&s);
-    s.WindowRounding = 14; s.FrameRounding = 8; s.GrabRounding = 8; s.TabRounding = 8; s.ChildRounding = 10;
+    s.WindowRounding = 12; s.FrameRounding = 8; s.GrabRounding = 8; s.TabRounding = 8; s.ChildRounding = 10;
+    s.PopupRounding = 12;
     s.WindowPadding = ImVec2(28, 22); s.FramePadding = ImVec2(14, 8); s.ItemSpacing = ImVec2(14, 12);
-    s.WindowBorderSize = 0; s.ScrollbarSize = 18;
+    s.WindowBorderSize = 0; s.PopupBorderSize = 1; s.ScrollbarSize = 14; s.ScrollbarRounding = 7;
+    auto a = [](ImVec4 c, float alpha) { c.w = alpha; return c; };
     ImVec4 *c = s.Colors;
-    ImVec4 gold(0.93f, 0.76f, 0.33f, 1), green(0.15f, 0.36f, 0.25f, 1);
-    c[ImGuiCol_WindowBg] = ImVec4(0.06f, 0.09f, 0.08f, 0.94f);
+    c[ImGuiCol_WindowBg] = kUiPanel;
     c[ImGuiCol_ChildBg] = ImVec4(0, 0, 0, 0);
-    c[ImGuiCol_Text] = ImVec4(0.96f, 0.94f, 0.88f, 1);
-    c[ImGuiCol_TextDisabled] = ImVec4(0.62f, 0.64f, 0.58f, 1);
-    c[ImGuiCol_Button] = ImVec4(0.14f, 0.22f, 0.18f, 1);
-    c[ImGuiCol_ButtonHovered] = green;
-    c[ImGuiCol_ButtonActive] = ImVec4(0.21f, 0.50f, 0.34f, 1);
-    c[ImGuiCol_Tab] = ImVec4(0.12f, 0.18f, 0.15f, 1);
-    c[ImGuiCol_TabHovered] = green;
-    c[ImGuiCol_TabSelected] = ImVec4(0.21f, 0.44f, 0.31f, 1);
-    c[ImGuiCol_TabSelectedOverline] = gold;
-    c[ImGuiCol_NavCursor] = gold;
-    c[ImGuiCol_Separator] = ImVec4(0.30f, 0.36f, 0.30f, 1);
+    c[ImGuiCol_PopupBg] = ImVec4(0.04f, 0.065f, 0.058f, 0.98f);
+    c[ImGuiCol_Border] = a(kUiGold, 0.30f);
+    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0, 0, 0, 0.45f);
+    c[ImGuiCol_Text] = kUiCream;
+    c[ImGuiCol_TextDisabled] = kUiMuted;
+    c[ImGuiCol_Button] = a(kUiGold, 0.14f);
+    c[ImGuiCol_ButtonHovered] = a(kUiGold, 0.30f);
+    c[ImGuiCol_ButtonActive] = a(kUiGold, 0.45f);
+    c[ImGuiCol_NavCursor] = kUiZonai;
+    c[ImGuiCol_Separator] = a(kUiGold, 0.18f);
+    c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
+    c[ImGuiCol_ScrollbarGrab] = a(kUiGold, 0.22f);
+    c[ImGuiCol_ScrollbarGrabHovered] = a(kUiGold, 0.38f);
+    c[ImGuiCol_ScrollbarGrabActive] = a(kUiZonai, 0.6f);
 }
 
 static void make_context(void) {
@@ -786,71 +790,228 @@ static int g_tab;               // the tab shown
 static int g_tab_request = -1;  // select this tab at the next layout; -1 none
 static int g_focus_page = -1;   // this tab's first row takes the cursor once it is shown; -1 none
 
-// ---- the window: title, tabs (L / R or Q / E switch), the page, and the bottom row with "Continue" and "Quit game".
-// B on the gamepad and Esc close it.
+// ---- the look: a panel from the left edge over the dimmed game, a rail of tab icons down its left side and the page
+// beside it, in the look of the UltraTears overlay (colours in option_rows.h). The panel slides in when the menu opens
+// and a page fades in when its tab is chosen.
+static double g_opened_at, g_tab_at;   // ImGui::GetTime() the menu opened, the tab showed
+static int g_last_layout = -2;         // ImGui frame count of the last layout: a gap means the menu opened again
+
+static float ease_out(float x) {
+    x = x < 0 ? 0 : x > 1 ? 1 : x;
+    return 1 - (1 - x) * (1 - x) * (1 - x);
+}
+
+// A tab's icon (TAB_COUNT: close), line drawings of radius r around c.
+static void tab_icon(ImDrawList *dl, int tab, ImVec2 c, float r, ImU32 col, float th) {
+    switch (tab) {
+    case TAB_SCREEN:   // a monitor on its stand
+        dl->AddRect(ImVec2(c.x - r, c.y - r * 0.78f), ImVec2(c.x + r, c.y + r * 0.42f), col, r * 0.16f, 0, th);
+        dl->AddLine(ImVec2(c.x, c.y + r * 0.42f), ImVec2(c.x, c.y + r * 0.82f), col, th);
+        dl->AddLine(ImVec2(c.x - r * 0.48f, c.y + r * 0.86f), ImVec2(c.x + r * 0.48f, c.y + r * 0.86f), col, th);
+        break;
+    case TAB_GAME: {   // three triangles in one: the outline and the upturned middle
+        float hs = r * 1.0f, hh = hs * 0.866f;
+        ImVec2 t(c.x, c.y - hh), l(c.x - hs, c.y + hh * 0.9f), rr(c.x + hs, c.y + hh * 0.9f);
+        ImVec2 ml((t.x + l.x) / 2, (t.y + l.y) / 2), mr((t.x + rr.x) / 2, (t.y + rr.y) / 2), mb(c.x, l.y);
+        dl->AddTriangle(t, rr, l, col, th);
+        dl->AddTriangle(ml, mr, mb, col, th);
+        break;
+    }
+    case TAB_SOUND: {   // a speaker and two waves
+        ImVec2 body[] = {{c.x - r, c.y - r * 0.32f}, {c.x - r * 0.5f, c.y - r * 0.32f}, {c.x - r * 0.05f, c.y - r * 0.78f},
+                         {c.x - r * 0.05f, c.y + r * 0.78f}, {c.x - r * 0.5f, c.y + r * 0.32f}, {c.x - r, c.y + r * 0.32f}};
+        dl->AddPolyline(body, 6, col, ImDrawFlags_Closed, th);
+        static const float waves[] = {0.42f, 0.82f};
+        for (float k : waves) {
+            dl->PathArcTo(ImVec2(c.x + r * 0.05f, c.y), r * k, -0.8f, 0.8f, 12);
+            dl->PathStroke(col, 0, th);
+        }
+        break;
+    }
+    case TAB_CONTROLS:   // a controller: the body, a cross, two buttons
+        dl->AddRect(ImVec2(c.x - r, c.y - r * 0.55f), ImVec2(c.x + r, c.y + r * 0.6f), col, r * 0.5f, 0, th);
+        dl->AddLine(ImVec2(c.x - r * 0.72f, c.y), ImVec2(c.x - r * 0.28f, c.y), col, th);
+        dl->AddLine(ImVec2(c.x - r * 0.5f, c.y - r * 0.22f), ImVec2(c.x - r * 0.5f, c.y + r * 0.22f), col, th);
+        dl->AddCircleFilled(ImVec2(c.x + r * 0.36f, c.y + r * 0.12f), r * 0.12f, col);
+        dl->AddCircleFilled(ImVec2(c.x + r * 0.62f, c.y - r * 0.12f), r * 0.12f, col);
+        break;
+    case TAB_MENU:   // a globe: the menu's language
+        dl->AddCircle(c, r * 0.9f, col, 24, th);
+        dl->AddEllipse(c, ImVec2(r * 0.4f, r * 0.9f), col, 0, 20, th);
+        dl->AddLine(ImVec2(c.x - r * 0.9f, c.y), ImVec2(c.x + r * 0.9f, c.y), col, th);
+        break;
+    case TAB_ADVANCED:   // a gear
+        dl->AddCircle(c, r * 0.42f, col, 16, th);
+        for (int i = 0; i < 8; i++) {
+            float an = i * 0.7853982f, cs = cosf(an), sn = sinf(an);
+            dl->AddLine(ImVec2(c.x + cs * r * 0.62f, c.y + sn * r * 0.62f), ImVec2(c.x + cs * r * 0.95f, c.y + sn * r * 0.95f),
+                        col, th * 1.6f);
+        }
+        break;
+    default:   // close
+        dl->AddLine(ImVec2(c.x - r * 0.6f, c.y - r * 0.6f), ImVec2(c.x + r * 0.6f, c.y + r * 0.6f), col, th);
+        dl->AddLine(ImVec2(c.x + r * 0.6f, c.y - r * 0.6f), ImVec2(c.x - r * 0.6f, c.y + r * 0.6f), col, th);
+    }
+}
+
+// A square button of the rail; the chosen tab is lit in teal with a slow glow. Not a nav item: the D-pad stays on the
+// page, and L / R change the tab.
+static bool rail_button(int tab, bool active, float size, float scale, const char *tip) {
+    ImVec2 p = ImGui::GetCursorScreenPos(), q(p.x + size, p.y + size), c(p.x + size / 2, p.y + size / 2);
+    ImGui::PushID(tab);
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
+    bool clicked = ImGui::InvisibleButton("##rail", ImVec2(size, size));
+    ImGui::PopItemFlag();
+    bool hov = ImGui::IsItemHovered();
+    ImGui::PopID();
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    float r = size * 0.24f;
+    if (active) {
+        float glow = 0.7f + 0.3f * sinf((float)ImGui::GetTime() * 2.2f), g = 3 * scale;
+        dl->AddRect(ImVec2(p.x - g, p.y - g), ImVec2(q.x + g, q.y + g), ui_col(kUiZonai, 0.10f * glow), r + g, 0, 2 * g);
+        dl->AddRectFilled(p, q, ui_col(kUiZonai, 0.13f), r);
+        dl->AddRect(p, q, ui_col(kUiZonai, 0.60f), r, 0, 1.3f * scale);
+    } else if (hov) {
+        dl->AddRectFilled(p, q, ui_col(ImVec4(1, 1, 1, 1), 0.06f), r);
+    }
+    tab_icon(dl, tab, c, size * 0.25f, active ? ui_col(kUiZonai) : hov ? ui_col(kUiCream) : ui_col(kUiMuted), 2 * scale);
+    if (hov) ImGui::SetTooltip("%s", tip);
+    return clicked;
+}
+
+// The rail: the mark at the top, a button per tab, close at the bottom. A click on a tab asks for it (g_tab_request),
+// except while a confirmation or a key capture is open.
+static void layout_rail(float x, float rail, float H, float scale) {
+    ImGui::SetNextWindowPos(ImVec2(x, 0));
+    ImGui::SetNextWindowSize(ImVec2(rail, H));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::Begin("##rail", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                                        ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoNav |
+                                        ImGuiWindowFlags_NoFocusOnAppearing);
+    ImGui::PopStyleVar();
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImVec2 c(x + rail / 2, 46 * scale);   // the mark: a gold diamond in a teal haze
+    float r = 14 * scale, glow = 0.6f + 0.4f * sinf((float)ImGui::GetTime() * 1.5f);
+    ImVec2 d[4] = {{c.x, c.y - r}, {c.x + r, c.y}, {c.x, c.y + r}, {c.x - r, c.y}};
+    dl->AddPolyline(d, 4, ui_col(kUiZonai, 0.16f * glow), ImDrawFlags_Closed, 8 * scale);
+    dl->AddPolyline(d, 4, ui_col(kUiGold), ImDrawFlags_Closed, 1.6f * scale);
+    dl->AddCircleFilled(c, 2.5f * scale, ui_col(kUiGoldHi));
+    float bs = 62 * scale;
+    ImGui::SetCursorPosY(96 * scale);
+    for (int t = 0; t < TAB_COUNT; t++) {
+        ImGui::SetCursorPosX((rail - bs) / 2);
+        if (rail_button(t, g_tab == t, bs, scale, menu_text(kTabNames[t])) && t != g_tab && !g_modal && !binds_modal())
+            g_tab_request = t;
+        ImGui::Dummy(ImVec2(1, 6 * scale));
+    }
+    float cs = 52 * scale;
+    ImGui::SetCursorPos(ImVec2((rail - cs) / 2, H - 26 * scale - cs));
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
+    if (ImGui::InvisibleButton("##close", ImVec2(cs, cs))) set_open(0);
+    ImGui::PopItemFlag();
+    bool hov = ImGui::IsItemHovered();
+    dl->AddRect(p, ImVec2(p.x + cs, p.y + cs), ui_col(kUiGold, hov ? 0.55f : 0.25f), 12 * scale, 0, 1.2f * scale);
+    tab_icon(dl, TAB_COUNT, ImVec2(p.x + cs / 2, p.y + cs / 2), cs * 0.22f, hov ? ui_col(kUiCream) : ui_col(kUiMuted),
+             2 * scale);
+    if (hov) ImGui::SetTooltip("%s", menu_text(UI_MENU_CONTINUE));
+    ImGui::End();
+}
+
+// ---- the menu: the rail, then the title, the page and the bottom line with the keys, "Continue" and "Quit game". L / R
+// or Q / E switch tabs; B on the gamepad and Esc close it.
 static void layout_menu(uint32_t w, uint32_t h, float scale) {
-    ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), ImVec2((float)w, (float)h), IM_COL32(0, 0, 0, 120));
-    float ww = fminf(w * 0.88f, 1400 * scale), wh = fminf(h * 0.86f, 820 * scale);
-    ImGui::SetNextWindowPos(ImVec2(w * 0.5f, h * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(ww, wh), ImGuiCond_Always);
-    ImGui::Begin("##menu", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                                        ImGuiWindowFlags_NoSavedSettings);
-    ImGui::TextColored(ImVec4(0.93f, 0.76f, 0.33f, 1), "%s", menu_text(UI_MENU_TITLE));
-    // the port version and the game update, right-aligned on the title line: what a bug report needs first
-    char game[16], version[96];
-    snprintf(game, sizeof game, "%d.%d.%d", rt_game_version / 100, rt_game_version / 10 % 10, rt_game_version % 10);
-    snprintf(version, sizeof version, menu_text(UI_MENU_VERSION), rt_port_version, game);
-    ImGui::SameLine(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - ImGui::CalcTextSize(version).x);
-    ImGui::TextDisabled("%s", version);
+    double now = ImGui::GetTime();
+    if (ImGui::GetFrameCount() != g_last_layout + 1) g_opened_at = g_tab_at = now;
+    g_last_layout = ImGui::GetFrameCount();
+    float W = (float)w, H = (float)h, k = ease_out((float)((now - g_opened_at) / 0.24));
+    float pw = fminf(W * 0.94f, 1560 * scale), x = -pw * (1 - k), rail = 104 * scale;
+
+    // the game dimmed, darker on the panel's side; the panel, its rail and its edges; its shadow on the game
+    ImDrawList *bg = ImGui::GetBackgroundDrawList();
+    ImVec4 shade(0.016f, 0.031f, 0.027f, 1);
+    bg->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(W, H), ui_col(shade, 0.78f * k), ui_col(shade, 0.35f * k),
+                                ui_col(shade, 0.35f * k), ui_col(shade, 0.78f * k));
+    bg->AddRectFilled(ImVec2(x, 0), ImVec2(x + pw, H), ui_col(kUiPanel, kUiPanel.w));
+    bg->AddRectFilled(ImVec2(x, 0), ImVec2(x + rail, H), ui_col(ImVec4(1, 1, 1, 1), 0.025f));
+    bg->AddLine(ImVec2(x + rail, 0), ImVec2(x + rail, H), ui_col(kUiGold, 0.12f), 1);
+    bg->AddLine(ImVec2(x + pw - 0.5f, 0), ImVec2(x + pw - 0.5f, H), ui_col(kUiGold, 0.30f), 1);
+    bg->AddRectFilledMultiColor(ImVec2(x + pw, 0), ImVec2(x + pw + 56 * scale, H), ui_col(ImVec4(0, 0, 0, 1), 0.5f * k),
+                                0, 0, ui_col(ImVec4(0, 0, 0, 1), 0.5f * k));
 
     int step = g_modal || binds_modal()                                                                  ? 0
              : ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) || ImGui::IsKeyPressed(ImGuiKey_E, false) ? 1
              : ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) || ImGui::IsKeyPressed(ImGuiKey_Q, false) ? -1
                                                                                                          : 0;
     if (step) g_tab_request = (g_tab + step + TAB_COUNT) % TAB_COUNT;
-    if (g_tab_request >= 0) g_focus_page = g_tab_request;   // the new page's first row takes the cursor
-
-    const ImGuiStyle &st = ImGui::GetStyle();
-    float bottom = ImGui::GetFrameHeight() + st.ItemSpacing.y * 2;
-    if (ImGui::BeginTabBar("##tabs", ImGuiTabBarFlags_NoTabListScrollingButtons)) {
-        for (int k = 0; k < TAB_COUNT; k++) {
-            char label[128];
-            snprintf(label, sizeof label, "  %s  ###tab%d", menu_text(kTabNames[k]), k);   // the id stays per language
-            if (!ImGui::BeginTabItem(label, nullptr, g_tab_request == k ? ImGuiTabItemFlags_SetSelected : 0)) continue;
-            g_tab = k;
-            if (g_focus_page == k) {
-                opt_focus_first();
-                g_focus_page = -1;
-            }
-            ImGui::Spacing();
-            // the page's rows are a NavFlattened child of this window itself: ImGui clips the items of a direct child
-            // only, so behind a second child level the rows scrolled out above the tabs won D-pad moves from the
-            // buttons and the tabs (up from "Continue" went to the tabs, down from the tabs to "Continue")
-            opt_reserve_bottom(bottom);
-            switch (k) {
-            case TAB_SCREEN: tab_screen(scale); break;
-            case TAB_GAME: tab_game(scale); break;
-            case TAB_SOUND: tab_sound(scale); break;
-            case TAB_CONTROLS: tab_controls(scale); break;
-            case TAB_MENU: tab_menu(scale); break;
-            case TAB_ADVANCED: tab_advanced(scale); break;
-            }
-            ImGui::EndTabItem();
-        }
+    layout_rail(x, rail, H, scale);
+    if (g_tab_request >= 0) {   // the new page's first row takes the cursor, and the page fades in
+        if (g_tab_request != g_tab) g_tab_at = now;
+        g_tab = g_tab_request;
+        g_focus_page = g_tab;
         g_tab_request = -1;
-        ImGui::EndTabBar();
     }
 
-    // bottom row: the save status on the left, the two buttons on the right
-    ImGui::Spacing();
-    float y = ImGui::GetCursorPosY();
-    if (!cfg_last_save_ok()) {   // stays until a save succeeds; the settings hold for the session
-        ImGui::SetCursorPosY(y + st.FramePadding.y);
-        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.35f, 1), "%s", menu_text(UI_MENU_SAVE_FAILED));
+    float px = 40 * scale;
+    ImGui::SetNextWindowPos(ImVec2(x + rail, 0));
+    ImGui::SetNextWindowSize(ImVec2(pw - rail, H));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px, 30 * scale));
+    ImGui::Begin("##menu", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                                        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBackground);
+    ImGui::PopStyleVar();
+    const ImGuiStyle &st = ImGui::GetStyle();
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImFont *font = ImGui::GetFont();
+    float fs = ImGui::GetFontSize(), small = fs * 0.78f;
+
+    // the title, large in pale gold; the tab's name under it; the port version and the game update on the right (what a
+    // bug report needs first)
+    ImVec2 tp = ImGui::GetCursorScreenPos();
+    float content_w = ImGui::GetContentRegionAvail().x, title = fs * 1.45f;
+    dl->AddText(font, title, tp, ui_col(kUiGoldHi), menu_text(UI_MENU_TITLE));
+    dl->AddText(font, small, ImVec2(tp.x, tp.y + title * 1.08f), ui_col(kUiMuted), menu_text(kTabNames[g_tab]));
+    char game[16], version[96];
+    snprintf(game, sizeof game, "%d.%d.%d", rt_game_version / 100, rt_game_version / 10 % 10, rt_game_version % 10);
+    snprintf(version, sizeof version, menu_text(UI_MENU_VERSION), rt_port_version, game);
+    float vw = font->CalcTextSizeA(small, FLT_MAX, 0, version).x;
+    dl->AddText(font, small, ImVec2(tp.x + content_w - vw, tp.y + (title - small) * 0.5f), ui_col(kUiMuted), version);
+    ImGui::Dummy(ImVec2(content_w, title * 1.08f + small * 1.6f));
+
+    // the page, fading and rising in after a tab change. Its rows are a NavFlattened child of this window itself: ImGui
+    // clips the items of a direct child only, so behind a second child level the rows scrolled out above the page won
+    // D-pad moves from the buttons.
+    float fade = ease_out((float)((now - g_tab_at - 0.03) / 0.28));
+    float bottom = ImGui::GetFrameHeight() + st.ItemSpacing.y * 2 + 8 * scale;
+    if (g_focus_page == g_tab) {
+        opt_focus_first();
+        g_focus_page = -1;
     }
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, st.Alpha * fade);
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (1 - fade) * 12 * scale);
+    opt_reserve_bottom(bottom + (1 - fade) * 12 * scale);
+    switch (g_tab) {
+    case TAB_SCREEN: tab_screen(scale); break;
+    case TAB_GAME: tab_game(scale); break;
+    case TAB_SOUND: tab_sound(scale); break;
+    case TAB_CONTROLS: tab_controls(scale); break;
+    case TAB_MENU: tab_menu(scale); break;
+    case TAB_ADVANCED: tab_advanced(scale); break;
+    }
+    ImGui::PopStyleVar();
+
+    // the bottom line: a gold rule, the keys (or the save failure) on the left, the two buttons on the right
+    ImGui::Dummy(ImVec2(1, 8 * scale));
+    float y = ImGui::GetCursorPosY();
+    ImVec2 rule = ImGui::GetCursorScreenPos();
+    dl->AddLine(ImVec2(rule.x, rule.y - 4 * scale), ImVec2(rule.x + content_w, rule.y - 4 * scale), ui_col(kUiGold, 0.14f), 1);
+    float ty = rule.y + st.ItemSpacing.y * 0.5f + (ImGui::GetFrameHeight() - small) * 0.5f;
+    if (!cfg_last_save_ok())   // stays until a save succeeds; the settings hold for the session
+        dl->AddText(font, small, ImVec2(rule.x, ty), ui_col(kUiDanger), menu_text(UI_MENU_SAVE_FAILED));
+    else
+        dl->AddText(font, small, ImVec2(rule.x, ty), ui_col(kUiMuted), menu_text(UI_MENU_HINT));
     const char *cont = menu_text(UI_MENU_CONTINUE), *quit = menu_text(UI_MENU_QUIT);
     float bw = fmaxf(ImGui::CalcTextSize(cont).x, ImGui::CalcTextSize(quit).x) + st.FramePadding.x * 4;
-    ImGui::SetCursorPos(ImVec2(ImGui::GetWindowWidth() - st.WindowPadding.x - bw * 2 - st.ItemSpacing.x, y));
+    ImGui::SetCursorPos(ImVec2(ImGui::GetWindowWidth() - px - bw * 2 - st.ItemSpacing.x, y + st.ItemSpacing.y * 0.5f));
     if (ImGui::Button(cont, ImVec2(bw, 0))) set_open(0);
     ImGui::SameLine();
     if (ImGui::Button(quit, ImVec2(bw, 0))) gfx_window_request_close();

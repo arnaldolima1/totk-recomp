@@ -23,6 +23,7 @@ typedef enum {
     UI_MENU_SET_BY_ENV,       // note on a setting an environment variable fixes
     UI_MENU_SAVE_FAILED,
     UI_MENU_VERSION,          // "TotK Recomp %s, game %s": the port version and the game update, beside the title
+    UI_MENU_HINT,             // the keys, on the panel's bottom line
 
     // Screen
     UI_MENU_FULLSCREEN, UI_MENU_FULLSCREEN_DESC,

@@ -36,6 +36,7 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_AFTER_RESTART] = "after restart", [UI_MENU_SET_BY_ENV] = "set by environment variable",
     [UI_MENU_SAVE_FAILED] = "could not save settings",
     [UI_MENU_VERSION] = "TotK Recomp %s, game %s",
+    [UI_MENU_HINT] = "B or Esc closes  ·  L / R or Q / E change tab  ·  F10 overlay  ·  F11 fullscreen",
 
     [UI_MENU_FULLSCREEN] = "Fullscreen", [UI_MENU_FULLSCREEN_DESC] = "Fills the screen with the game; F11 toggles it.",
     [UI_MENU_WINDOW_SIZE] = "Window size", [UI_MENU_WINDOW_SIZE_DESC] = "Size of the game window when not fullscreen.",
@@ -280,6 +281,7 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_AFTER_RESTART] = "после перезапуска", [UI_MENU_SET_BY_ENV] = "задано переменной окружения",
     [UI_MENU_SAVE_FAILED] = "не удалось сохранить настройки",
     [UI_MENU_VERSION] = "TotK Recomp %s, игра %s",
+    [UI_MENU_HINT] = "B или Esc — закрыть  ·  L / R или Q / E — вкладки  ·  F10 — индикатор  ·  F11 — полный экран",
 
     [UI_MENU_FULLSCREEN] = "Полный экран", [UI_MENU_FULLSCREEN_DESC] = "Игра на весь экран; F11 переключает режим.",
     [UI_MENU_WINDOW_SIZE] = "Размер окна", [UI_MENU_WINDOW_SIZE_DESC] = "Размер окна игры вне полноэкранного режима.",
@@ -531,6 +533,7 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_AFTER_RESTART] = "após reiniciar", [UI_MENU_SET_BY_ENV] = "definido por variável de ambiente",
     [UI_MENU_SAVE_FAILED] = "não foi possível salvar as configurações",
     [UI_MENU_VERSION] = "TotK Recomp %s, jogo %s",
+    [UI_MENU_HINT] = "B ou Esc fecha  ·  L / R ou Q / E troca de aba  ·  F10 indicador  ·  F11 tela cheia",
 
     [UI_MENU_FULLSCREEN] = "Tela cheia", [UI_MENU_FULLSCREEN_DESC] = "O jogo ocupa a tela inteira; F11 alterna.",
     [UI_MENU_WINDOW_SIZE] = "Tamanho da janela",
