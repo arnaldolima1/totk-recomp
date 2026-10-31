@@ -12,7 +12,7 @@
 //
 // Patch page: +16 the scene size {w, h} as floats, +32 the output size and +48 the swapchain size as {w, h} in one
 // 64-bit word, +40 the renderer (1.2.1) or display configuration (1.4.3) the patched code stores there.
-// +56 the camera's aspect ratio as a float when the output is not 16:9 (1.4.3, set aspect).
+// +56 the camera's aspect ratio as a float when the output is not 16:9 (set aspect).
 // 1.4.3 scales the scene it reads by output width / 1920 (a 2560x1440 output renders its 1600x900 scene at 2128x1200;
 // MacNativeGames measured the same), so its page holds the wanted size divided by that factor and the game's 5/6 needs
 // no scene patch. 1.2.1 renders the size it reads (1600x900 on a 2560x1440 output): its page holds the wanted size, and
@@ -229,8 +229,8 @@ void res_init(void) {
     rt_patch_switch(output, R.ow != BASE_W || R.oh != BASE_H);
     rt_patch_switch(scene, scene_on);
     R.on = 1;
-    // Another shape than 16:9 (more than 1% off): the camera takes the output's ratio (recomp/patches-v143.txt, set
-    // aspect), so a 21:9 output shows more of the world at the sides instead of a stretched 16:9 view. The HUD's layouts
+    // Another shape than 16:9 (more than 1% off): the camera takes the output's ratio (recomp/patches-v121.txt and
+    // patches-v143.txt, set aspect), so a 21:9 output shows more of the world at the sides instead of a stretched 16:9 view. The HUD's layouts
     // for that shape come from romfs-patches-<w>x<h> (romfs.c overlay_init, tools/make_romfs_patches.py --aspect).
     double ratio = (double)R.ow / R.oh, game = (double)BASE_W / BASE_H;
     int aspect = rt_patch_set("aspect");
@@ -265,7 +265,7 @@ int res_is_16x9(unsigned w, unsigned h) {
 }
 
 // The game resolution asks for a romfs-patches-<w>x<h> overlay: it is not 16:9 and the game version has the camera
-// aspect patch (set aspect, 1.4.3 only); the wide UI layouts only fit a camera that follows the same shape.
+// aspect patch (set aspect); the UI layouts of another shape only fit a camera that follows the same shape.
 int res_wants_wide_overlay(const unsigned out[2]) {
     return !res_is_16x9(out[0], out[1]) && rt_patch_set("aspect") >= 0;
 }
