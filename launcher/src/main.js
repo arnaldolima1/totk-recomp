@@ -14,7 +14,7 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 const esc = (t) => String(t).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 // ---------------------------------------------------------------- launcher-only preferences (this PC)
-const prefs = Object.assign({ music: true, volume: 35, closeOnPlay: false, inputs: {} },
+const prefs = Object.assign({ music: true, volume: 35, closeOnPlay: true, inputs: {} },   // closed while playing: no WebView in memory
   JSON.parse(localStorage.getItem('prefs') || '{}'));
 const savePrefs = () => localStorage.setItem('prefs', JSON.stringify(prefs));
 
