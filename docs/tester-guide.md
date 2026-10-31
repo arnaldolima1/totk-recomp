@@ -69,7 +69,7 @@ Build or install on Linux ([installer.md](installer.md), "Linux release"), in De
 mode; for Game Mode, add `totk` from the install folder to Steam as a non-Steam game.
 
 The game recognises the Deck (LCD and OLED) and uses its device profile for every setting `totk.ini` does not set:
-fullscreen, the screen's own 1280x800 (16:10: on 1.4.3 the camera and interface take that shape), the game's own 3D scale,
+fullscreen, the screen's own 1280x800 (16:10: the camera and interface take that shape), the game's own 3D scale,
 vsync and a 40 fps limit. These are starting points, not measurements. What helps most:
 
 1. The performance overlay (F10, or both stick clicks L3 + R3) in full mode: the frame rate, mean and longest frame
@@ -77,7 +77,7 @@ vsync and a 40 fps limit. These are starting points, not measurements. What help
 2. The same with `fps_limit` 30, 45 and 60 and `render_scale` 50, 67 and game, so the defaults can be picked from
    measurements. Steam's own performance overlay (the ... button) adds power draw and temperatures.
 3. LCD or OLED, SteamOS version (`uname -r` in Desktop Mode's terminal), and the game update.
-4. Anything that looks stretched, squeezed or cut off, with a screenshot. At 16:10 on 1.4.3 the menus keep their 16:9
+4. Anything that looks stretched, squeezed or cut off, with a screenshot. At 16:10 the menus keep their 16:9
    proportions in the middle of the taller screen, the HUD sits at the top and bottom edges, and full-screen
    backgrounds reach them; pre-rendered cutscenes play stretched.
 

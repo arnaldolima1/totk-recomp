@@ -15,7 +15,7 @@ left out.
 for that shape (tools/ultrawide_layout.py): menus keep their 16:9 proportions in the middle, full-screen backgrounds
 cover the screen and the HUD moves to the screen's corners (wider) or its top and bottom edges (narrower). totk.exe
 loads that overlay from romfs-patches-<w>x<h> when the game resolution is that size (runtime/romfs.c overlay_init);
-the camera's side of it is the patch set aspect (recomp/patches-v143.txt).
+the camera's side of it is the patch set aspect (recomp/patches-v121.txt, patches-v143.txt).
 
 --xbox-prompts: the same overlay with the A and B, and the X and Y button prompts swapped, for pad_layout = xbox_prompts
 (runtime/romfs.c overlay_init loads romfs-patches-xbox in place of romfs-patches). That layout plays an Xbox pad by
