@@ -40,14 +40,15 @@ typedef enum {
     UI_MENU_SHARPNESS, UI_MENU_SHARPNESS_DESC,
 
     // Game
-    UI_MENU_FPS_LIMIT, UI_MENU_FPS_LIMIT_DESC, UI_MENU_FPS_30, UI_MENU_FPS_60, UI_MENU_FPS_90, UI_MENU_FPS_120,
-    UI_MENU_FPS_144,
+    UI_MENU_FPS_LIMIT, UI_MENU_FPS_LIMIT_DESC, UI_MENU_FPS_30, UI_MENU_FPS_40, UI_MENU_FPS_45, UI_MENU_FPS_60, UI_MENU_FPS_90,
+    UI_MENU_FPS_120, UI_MENU_FPS_144,
     UI_MENU_FPS_DISPLAY, UI_MENU_FPS_DISPLAY_HZ,
     UI_MENU_REALTIME, UI_MENU_REALTIME_DESC,
     UI_MENU_CLOTH_REALTIME, UI_MENU_CLOTH_REALTIME_DESC,
     UI_MENU_HIGHFPS_FIX, UI_MENU_HIGHFPS_FIX_DESC,
     UI_MENU_GAME_LANG, UI_MENU_GAME_LANG_DESC, UI_MENU_GAME_LANG_AUTO,
     UI_MENU_OPERATION_MODE, UI_MENU_OPERATION_MODE_DESC, UI_MENU_MODE_DOCKED, UI_MENU_MODE_HANDHELD,
+    UI_MENU_ASSUME_FOCUS, UI_MENU_ASSUME_FOCUS_DESC,
 
     // Sound
     UI_MENU_VOLUME, UI_MENU_VOLUME_DESC,
@@ -135,7 +136,7 @@ typedef enum {
     UI_MENU_PUSH_SKIP, UI_MENU_PUSH_SKIP_DESC,
     UI_MENU_SPLIT_DRAWS, UI_MENU_SPLIT_DRAWS_DESC,
     UI_MENU_VK_VALIDATION, UI_MENU_VK_VALIDATION_DESC, UI_MENU_VK_VALIDATION_MISSING,
-    UI_MENU_VK_DYN_VERTEX, UI_MENU_VK_DYN_VERTEX_DESC,
+    UI_MENU_VK_DYN_VERTEX, UI_MENU_VK_DYN_VERTEX_DESC, UI_MENU_VK_DYN_A2C, UI_MENU_VK_DYN_A2C_DESC,
     UI_MENU_VK_SUBGROUP_PIN, UI_MENU_VK_SUBGROUP_PIN_DESC,
     UI_MENU_TRACE, UI_MENU_TRACE_DESC,
     UI_MENU_FLIGHT, UI_MENU_FLIGHT_DESC,
@@ -163,6 +164,11 @@ typedef enum {
     UI_MENU_LAST_ID = UI_MENU_OV_SCALE_BILINEAR,
     UI_TEXT_COUNT
 } UiTextId;
+
+// Bytes of the menu's description pane (ui/option_rows.cpp, struct Desc): a description plus the note appended to it
+// ("after restart", "set by environment variable", a disabled row's note). UTF-8 Cyrillic takes two bytes a letter, so
+// the longest Russian description is about 850 bytes; the probe checks every menu text leaves room for a note.
+enum { UI_DESC_BYTES = 2048 };
 
 // UTF-8 text for id in the language of ov_language(); English when the catalog has no row for that language.
 const char *ui_text(UiTextId id);
