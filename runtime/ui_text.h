@@ -163,6 +163,11 @@ typedef enum {
     UI_TEXT_COUNT
 } UiTextId;
 
+// Bytes of the menu's description pane (ui/option_rows.cpp, struct Desc): a description plus the note appended to it
+// ("after restart", "set by environment variable", a disabled row's note). UTF-8 Cyrillic takes two bytes a letter, so
+// the longest Russian description is about 850 bytes; the probe checks every menu text leaves room for a note.
+enum { UI_DESC_BYTES = 2048 };
+
 // UTF-8 text for id in the language of ov_language(); English when the catalog has no row for that language.
 const char *ui_text(UiTextId id);
 // The same for an explicit catalog language ("en", "ja", "fr", "de", "it", "es", "nl", "pt", "ru", "zh-Hans",
