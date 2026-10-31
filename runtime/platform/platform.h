@@ -307,6 +307,10 @@ int plat_fs_rename(const char *from, const char *to, int durable);
 int plat_fs_link(const char *existing, const char *path); // a hard link
 int plat_fs_links(const char *path);                      // the file's hard link count, 0 when unknown
 void plat_fs_sync_dir(const char *path);                  // a directory's entries to the disk, as far as the FS allows
+// Why dir could not be renamed, for the log: into out "no permission to rename it" when this process may not delete
+// it, else the programs holding a file under it ("explorer.exe 1234, ..."), else an empty string. Windows refuses to
+// rename a directory with any file open under it; elsewhere out is always empty.
+void plat_fs_busy_reason(const char *dir, char *out, size_t cap);
 // cb(name, kind, size, ctx) for each entry of dir but "." and ".."; cb returns 0 to stop. The listing's error.
 int plat_fs_list(const char *dir, int (*cb)(const char *name, int kind, uint64_t size, void *ctx), void *ctx);
 // An existing file for reading and, with write, writing; *err (may be NULL) gets the reason on failure.
