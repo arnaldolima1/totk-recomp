@@ -183,7 +183,8 @@ static int by_host(const void *a, const void *b) {
     return x < y ? -1 : x > y;
 }
 
-// The lifted function that contains a host code address, by the nearest function start below it.
+// The lifted function that contains a host code address, by the nearest function start below it; 0 outside the lifted
+// code.
 static uint64_t lifted_function(uintptr_t rip) {
     if (!fn_rev) {
         static RtModule mods[MAX_MODULES];
@@ -197,6 +198,9 @@ static uint64_t lifted_function(uintptr_t rip) {
                 fn_rev[fn_rev_n++] = (FnRev){(uintptr_t)mods[i].fns[k], mods[i].addrs[k]};
         qsort(fn_rev, fn_rev_n, sizeof *fn_rev, by_host);
     }
+    // The lifted code is one range with the host code outside it (kernel.c ap_init checks that); an address above the
+    // last function start is taken for host code, which costs only the last function's body.
+    if (!fn_rev_n || rip > fn_rev[fn_rev_n - 1].host) return 0;
     uint64_t lo = 0, hi = fn_rev_n;
     while (lo < hi) {
         uint64_t mid = (lo + hi) / 2;
@@ -220,6 +224,12 @@ static void crash_handler(const PlatCrash *x) {
     rt_log_raw("\n", 1);
     uint64_t f = lifted_function(rip);
     if (f) rt_logf("  in lifted function f_%llx = %s\n", (unsigned long long)f, ldr_describe(f, d, sizeof d));
+    for (int i = 0; i < x->nframes; i++) {   // abort and invalid parameter: where the host code called it
+        uint64_t g = lifted_function(x->frames[i]);
+        rt_logf("  host frame %2d: totk+%#llx", i, (unsigned long long)(x->frames[i] - (rip - x->offset)));
+        if (g) rt_logf(" in lifted function f_%llx", (unsigned long long)g);
+        rt_log_raw("\n", 1);
+    }
     Cpu *c = kern_cpu();
     if (c) {
         for (int i = 0; i < 31; i++)

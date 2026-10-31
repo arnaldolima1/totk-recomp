@@ -9,6 +9,7 @@
 #include <psapi.h>
 #include <shellapi.h>
 #include <timeapi.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
@@ -582,9 +583,37 @@ static LONG CALLBACK crash_veh(EXCEPTION_POINTERS *ep) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
+// abort() and an invalid parameter to a C runtime function raise no exception: the C runtime ends the process with
+// 0xc0000409 after calling the SIGABRT or invalid-parameter handler. The report names the host frames in this
+// executable; the innermost is the caller of abort (assert) or of the C runtime function. Skipped frames: this function
+// and the handler that called it.
+__attribute__((noinline)) static void crash_from_runtime(const char *what, uint32_t code) {
+    PlatCrash c = {what, code, 0, 0, -1, 0};
+    void *f[62];
+    USHORT n = RtlCaptureStackBackTrace(2, 62, f, NULL);
+    MODULEINFO mi;
+    if (GetModuleInformation(GetCurrentProcess(), GetModuleHandleW(NULL), &mi, sizeof mi)) {
+        uintptr_t base = (uintptr_t)mi.lpBaseOfDll;
+        for (USHORT i = 0; i < n && c.nframes < (int)(sizeof c.frames / sizeof *c.frames); i++)
+            if ((uintptr_t)f[i] - base < mi.SizeOfImage) c.frames[c.nframes++] = (uintptr_t)f[i];
+        if (c.nframes) c.rip = c.frames[0], c.offset = c.rip - base;
+    }
+    crash_fn(&c);
+}
+
+static void abort_signal(int sig) { crash_from_runtime("abort", (uint32_t)sig); }
+
+static void invalid_parameter(const wchar_t *expr, const wchar_t *func, const wchar_t *file, unsigned line,
+                              uintptr_t reserved) {
+    (void)expr, (void)func, (void)file, (void)line, (void)reserved;   // NULL and 0 in the release C runtime
+    crash_from_runtime("invalid parameter to a C runtime function", 0xc0000417u);   // STATUS_INVALID_CRUNTIME_PARAMETER
+}
+
 void plat_crash_hook(void (*fn)(const PlatCrash *c)) {
     crash_fn = fn;
     AddVectoredExceptionHandler(0, crash_veh);
+    signal(SIGABRT, abort_signal);
+    _set_invalid_parameter_handler(invalid_parameter);
 }
 
 // A fresh process gets a fresh layout: Windows places DLLs, heaps and thread stacks at random addresses. The parent
