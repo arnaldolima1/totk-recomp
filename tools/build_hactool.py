@@ -14,6 +14,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -79,7 +80,11 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src / EXE, out / EXE)
     shutil.copy2(src / 'LICENSE', out / 'LICENSE')
-    banner = subprocess.run([str(out / EXE)], capture_output=True, text=True)
+    # hactool reads ~/.switch/prod.keys before it prints the banner and exits on a malformed key there, so the check
+    # runs with an empty home: it tests the binary, not the builder's keys.
+    with tempfile.TemporaryDirectory() as home:
+        env = dict(os.environ, HOME=home, USERPROFILE=home)
+        banner = subprocess.run([str(out / EXE)], capture_output=True, text=True, env=env)
     if 'hactool (c) SciresM' not in banner.stdout + banner.stderr:
         sys.exit(f'{out / EXE} does not start')
     print(f'{out / EXE}: {COMMIT[:7]} + {", ".join(p.name for p in PATCHES)}')
