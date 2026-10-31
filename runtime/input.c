@@ -555,15 +555,20 @@ void input_menu(int open) {
     ikb_cursor_update();
 }
 
-// 1 while flag (g_block, g_menu) blocks the game's input; state 2 ends at the first poll with nothing held.
-static int blocked(volatile int32_t *flag, uint64_t buttons) {
+// 1 while flag (g_block, g_menu) blocks the game's input; state 2 ends at the first poll with nothing held. A stick
+// axis counts as held as well: with the walk key the keyboard's sticks move part way without setting a direction bit, so
+// a gate that watched the buttons alone would let that movement through the moment the menu or the text entry closes.
+static int blocked(volatile int32_t *flag, uint64_t buttons, const int32_t *axes) {
     int32_t k = *flag;
-    return k && !(k == 2 && !buttons && plat_cas32(flag, 0, 2) == 2);
+    int held = buttons != 0;
+    for (int i = 0; i < 4; i++) held |= axes[i] != 0;
+    return k && !(k == 2 && !held && plat_cas32(flag, 0, 2) == 2);
 }
 
 void input_poll(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx, int32_t *ry) {
     poll_merged(buttons, lx, ly, rx, ry);
-    int text = blocked(&g_block, *buttons), menu = blocked(&g_menu, *buttons);
+    const int32_t axes[4] = {*lx, *ly, *rx, *ry};
+    int text = blocked(&g_block, *buttons, axes), menu = blocked(&g_menu, *buttons, axes);
     if (!text && !menu) return;
     *buttons = 0; *lx = *ly = *rx = *ry = 0;
 }

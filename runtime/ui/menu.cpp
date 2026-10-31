@@ -669,11 +669,13 @@ static const char *pad_layout_note(void) {
 }
 
 // The action a key presses, or -1: the walk key is a key of its own, but Shift is B in the default bindings, and a
-// walk key that also presses something walks and does that something at the same time.
-static int key_action(int key) {
+// walk key that also presses something walks and does that something at the same time. The bindings come from a
+// snapshot, and every key of an action is looked at: binds_refresh rebuilds the live table on the polling thread while
+// the menu draws, and an action may hold more than the two keys its cells show.
+static int key_action(const InputMap *m, int key) {
     for (int a = 0; a < ACTION_COUNT; a++) {
-        uint8_t keys[2];
-        int n = input_map_keys_of(&input_map, a, keys, 2);
+        uint8_t keys[INPUT_BINDING_MAX];
+        int n = input_map_keys_of(m, a, keys, INPUT_BINDING_MAX);
         for (int i = 0; i < n; i++)
             if (keys[i] == key) return a;
     }
@@ -690,9 +692,11 @@ static void row_walk_key(void) {
     const char *cur = cfg_value("TOTK_WALK_KEY");
     static char note[64];
     const char *n = nullptr;
+    InputMap m;
+    input_map_snapshot(&m);
     for (int k = KEY_A; k < KEY_COUNT && !n; k++) {
         if (!input_key_name(k) || _stricmp(input_key_name(k), cur)) continue;
-        int a = key_action(k);
+        int a = key_action(&m, k);
         if (a >= 0 && input_action_name(a)) snprintf(note, sizeof note, menu_text(UI_MENU_WALK_KEY_TAKEN), input_action_name(a)), n = note;
     }
     opt_choice_list("TOTK_WALK_KEY", UI_MENU_WALK_KEY, keys, names, sizeof keys / sizeof *keys, UI_MENU_WALK_KEY_DESC,
