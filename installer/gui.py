@@ -379,7 +379,7 @@ class App:
             glyph.configure(text=GLYPH[state], foreground=COLOR[state])
             name.configure(text=self.cat('step.' + s) + (f'  ({self.cat("ui.state_" + state)})'
                                                           if state in (SKIPPED, FAILED) else ''),
-                           font=(self.ui_font, 10, 'bold') if state == RUNNING else ('Segoe UI', 10))
+                           font=(self.ui_font, 10, 'bold') if state == RUNNING else (self.ui_font, 10))
         mode = m.mode or 'install'
         self.run_header.configure(text=self.cat('ui.running_' + mode if mode in ('install', 'resume', 'update')
                                                 else 'ui.running_install'))
