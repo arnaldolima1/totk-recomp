@@ -146,7 +146,8 @@ def full_sysroot():
     root = WORK / 'sniper'
     if (root / '.relinked').is_file() and (root / 'usr/share/doc/libxft2/copyright').is_file():
         return root
-    # Older cached SDK extractions omitted the font libraries' architecture-independent pkg-config files.
+    # Older cached SDK extractions omitted the font libraries' architecture-independent pkg-config files and the
+    # libXft and libXrender copyright files.
     (root / '.unpacked').unlink(missing_ok=True)
     tar_extract('sniper-sdk', root, SNIPER_MEMBERS)
     for p in root.rglob('*'):
