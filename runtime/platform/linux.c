@@ -1094,6 +1094,12 @@ void plat_fs_sync_dir(const char *path) {
     }
 }
 
+// Open files never stop a rename here.
+void plat_fs_busy_reason(const char *dir, char *out, size_t cap) {
+    (void)dir;
+    if (cap) *out = 0;
+}
+
 int plat_fs_list(const char *dir, int (*cb)(const char *name, int kind, uint64_t size, void *ctx), void *ctx) {
     DIR *d = opendir(dir);
     if (!d) return fs_err(errno);
