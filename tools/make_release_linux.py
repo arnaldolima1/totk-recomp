@@ -72,12 +72,12 @@ PINS = {
     'vulkan-headers-src': ('https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.363.tar.gz',
                            'cbaf687d3c59b9666fe080e7f8396b6b4f4d344a768ee6b337c59852f4526b68'),
     'vma-header': build_game.VMA_FETCH,
-    # appimagetool and the runtime are published only under the moving "continuous" tag: pinned by hash, so a new
-    # upload stops the build until the pins are updated on purpose
-    'appimagetool': ('https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage',
-                     'ac7fd56feade6002c2f57db39587113275d351fce911a5fbb29ea84cd0666cab'),
-    'appimage-runtime': ('https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64',
-                         '617aa77314d57c8b8e4fae9c3f0b35af7b30d5529cb69e98f64f92510ed98a46'),
+    # appimagetool and the type-2 runtime from release tags, not "continuous", whose uploads change under the same
+    # URL and would stop the build at the hash check
+    'appimagetool': ('https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage',
+                     'ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0'),
+    'appimage-runtime': ('https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64',
+                         '2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d'),
 }
 mr.PINS.update(PINS)   # one cache (toolchain/release-dl) and one fetch for both releases
 

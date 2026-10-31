@@ -51,7 +51,7 @@ def mng_pin() -> str:
     """The MacNativeGames commit tools/fetch_refs.sh pins."""
     for line in (ROOT / "tools" / "fetch_refs.sh").read_text(encoding="utf-8").splitlines():
         f = line.split()
-        if len(f) == 4 and f[:2] == ["fetch", "MacNativeGames"]:
+        if len(f) >= 4 and f[:2] == ["fetch", "MacNativeGames"]:   # a fifth word asks for the history
             return f[3]
     sys.exit("tools/fetch_refs.sh pins no MacNativeGames commit")
 
