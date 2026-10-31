@@ -17,9 +17,11 @@ first (rpath $ORIGIN). docs/building.md lists the packages.
 
 Every runtime/*.c is compiled. build/<version>/modules.c carries the layout, the linked function tables, the
 expected SHA-256 of each ExeFS file (tools/data/expected-<display version>.json) and the default game paths
-(--exefs, --romfs, --profile), which totk.exe uses unless its own command line names others. tools/romfs_index.py
-writes build/<version>/romfs-index.bin and romfs_config.h from the RomFS directory's index.json (runtime/romfs.c reads
-the index next to totk.exe).
+(--exefs, --romfs, --profile), which totk.exe uses unless its own command line names others. --exefs and --romfs
+default to extracted/<version> in the work folder: the [work] dir of config.local.toml, where tools/extract.py writes
+them, else build/. tools/romfs_index.py writes build/<version>/romfs-index.bin and romfs_config.h from the RomFS
+directory's index.json (runtime/romfs.c reads the index next to totk.exe). Without that index.json the build stops:
+the exe would stop at start. --no-romfs builds it anyway.
 
 Private builds reuse the main build's objects. When --out differs from build/<version>, the main build's generated
 objects are up to date (checked with a dry run of its build.ninja) and every header they include from runtime/ is
@@ -239,6 +241,16 @@ def copy_romfs_patches(version, out):
         shutil.rmtree(dst, ignore_errors=True)
         shutil.copytree(src, dst)
         print(f'romfs patches: copied {name} from {src}')
+
+
+def work_dir():
+    """The work folder: the [work] dir of config.local.toml (relative to the checkout), where tools/extract.py writes
+    extracted/; build/ without the file or the key."""
+    cfg = ROOT / 'config.local.toml'
+    if not cfg.is_file():
+        return ROOT / 'build'
+    import tomllib
+    return ROOT / tomllib.loads(cfg.read_text(encoding='utf-8')).get('work', {}).get('dir', 'build')
 
 
 def c_string(s):
@@ -710,9 +722,12 @@ def main():
                     help='comma-separated runtime/*.c names to leave out (the link needs another definition of what they '
                          'define)')
     ap.add_argument('--exefs', type=Path,
-                    help="totk.exe's default ExeFS directory (default build/extracted/<version>/exefs)")
+                    help="totk.exe's default ExeFS directory (default <work dir>/extracted/<version>/exefs, the work "
+                         "dir being the [work] dir of config.local.toml, else build)")
     ap.add_argument('--romfs', type=Path, help="totk.exe's default RomFS directory with romfs.bin and index.json "
-                                               '(default build/extracted/<version>/romfs)')
+                                               '(default <work dir>/extracted/<version>/romfs)')
+    ap.add_argument('--no-romfs', action='store_true',
+                    help='build even when the RomFS directory has no index.json (the exe then stops at start)')
     ap.add_argument('--profile', type=Path, help="totk.exe's default profile directory (default build/profile for v121, "
                                                  "build/profile-<version> otherwise, so trying another version leaves "
                                                  "the main profile alone; saves load on 1.2.1 and 1.4.3 alike)")
@@ -735,11 +750,16 @@ def main():
 
     gen = (args.gen or ROOT / 'generated' / args.version).resolve()
     out = (args.out or ROOT / 'build' / args.version).resolve()
-    extracted = ROOT / 'build' / 'extracted' / args.version
+    extracted = None if args.exefs and args.romfs else work_dir() / 'extracted' / args.version
     paths = {'exefs': (args.exefs or extracted / 'exefs').resolve(),
              'romfs': (args.romfs or extracted / 'romfs').resolve(),
              'profile': (args.profile or ROOT / 'build' / ('profile' if args.version == 'v121'
                                                            else f'profile-{args.version}')).resolve()}
+    has_romfs = (paths['romfs'] / 'index.json').is_file()
+    if not (has_romfs or args.no_romfs or args.make_runtime_lib or args.compile_only):
+        sys.exit(f'{paths["romfs"] / "index.json"} not found: without the RomFS the game stops at start. Run '
+                 'tools/extract.py (it writes extracted/<version> into the [work] dir of config.local.toml), pass '
+                 '--romfs DIR, or --no-romfs to build without it')
     expected = args.expected
     if not expected:
         if args.version not in DISPLAY_VERSIONS:
@@ -795,7 +815,7 @@ def main():
     if missing:
         sys.exit(f'{expected}: no exefs_sha256 for {missing}')
     write_if_changed(out / 'modules.c', module_glue(layout, linked, hashes, paths, args.version))
-    if (paths['romfs'] / 'index.json').is_file():
+    if has_romfs:
         count, size, dt = romfs_index.write(paths['romfs'], out)
         print(f'romfs index: {count} files, {mib(size)}, {dt:.1f} s')
     else:

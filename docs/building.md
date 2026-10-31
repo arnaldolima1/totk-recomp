@@ -69,7 +69,8 @@ of them.
    keys file. `config.local.toml` is ignored by git. The tools read the keys file themselves.
 
 3. Extract and verify. This writes `build\extracted\v0` (1.0.0) and `build\extracted\<ver>` for each update in
-   `updates`, identified by its hash; a hash mismatch stops the run:
+   `updates`, identified by its hash; a hash mismatch stops the run. With another `[work] dir` in `config.local.toml`,
+   `extracted` goes there instead, and `build_game.py` reads the ExeFS and RomFS from there:
 
    ```powershell
    .venv-py314\Scripts\python tools\extract.py
