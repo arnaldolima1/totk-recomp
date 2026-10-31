@@ -140,6 +140,15 @@
 # window is no longer stretched as it used to be; stretch fills the window. Changes while the game runs take effect at
 # once.
 # aspect = fit
+# Colour adjustment of the picture, HUD included, before it is scaled to the window: brightness (-30 to 30, added in %),
+# contrast and saturation (70 to 150 and 50 to 200 %), gamma (0.8 to 1.2, below 1 brightens dark tones). At 0, 100,
+# 100 and 1 nothing runs. color_preset is the menu's profile (default, vivid, clarity, custom), which sets the four.
+# Changes while the game runs take effect at once.
+# color_preset = default
+# color_brightness = 0
+# color_contrast = 100
+# color_saturation = 100
+# color_gamma = 1
 
 [language]
 # Language: a Windows locale such as de-DE, or a Switch code (en-US, ja, zh-Hant, ...). Default: the Windows locale.
