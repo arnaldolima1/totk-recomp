@@ -175,7 +175,8 @@ $('#src-save').onclick = () => saveSource('alt', true);
 // TotK-Setup-<version>-windows.zip from the GitHub releases of status.repo, checked against its SHA-256 and unpacked
 // into the launcher's data folder. The newest stable release is picked unless a pre-release is newer than it.
 let releases = [], releasesError = null;
-const vkey = (v) => String(v || '').replace(/^v/i, '').split(/[+\- ]/)[0].split('.').map((n) => +n || 0);
+// The first dotted number of a tag or release string: "v0.2.1", "game-v0.2.2" and "0.2.1+973c626" give [0, 2, x].
+const vkey = (v) => (String(v || '').match(/\d+(?:\.\d+)*/) || ['0'])[0].split('.').map((n) => +n || 0);
 const newer = (a, b) => { const x = vkey(a), y = vkey(b); for (let i = 0; i < Math.max(x.length, y.length); i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
 async function loadReleases() {
   try { releases = await invoke('releases'); releasesError = null; } catch (e) { releases = []; releasesError = String(e); }
