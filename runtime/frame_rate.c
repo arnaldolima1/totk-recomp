@@ -18,8 +18,13 @@
 // 280 Hz monitor): Havok's hkDefaultMemoryImpl reports "Out of memory" for the buffer the physics pre-solve (profiler
 // scope "TtPreSolve") resizes in main+0x1261630. Forced steps on the Depths save: 1/240 s plays, 1/244 s and shorter
 // abort; the field, sky island and fight saves play at 1/280 s, the town save aborts after about 800 frames. The
-// frame limit stops at 240 too (LIMIT_MAX_HZ), so the floor only catches the average dipping under 1/240 s at that
-// limit, and no limit makes the game run slower than the clock.
+// same short steps also crash a physics worker reading that buffer's contacts: an access violation in main+0x1292560
+// or its caller main+0x1286870 (narrowphase contact setup, reached from the grid task main+0x12f1ea0), reading a
+// Havok body's shape at body+0x78 as null or garbage (issues #29 and #92, 240 Hz monitors with fps_limit = display).
+// Steps drawn from 1/252..1/230 s crash the Depths load there in seconds; 1/240..1/230 s plays. The frame limit
+// stops at 240 too (LIMIT_MAX_HZ), so the floor only catches the average dipping under 1/240 s at that limit: a
+// present late by less than a period keeps the pacer's phase (nvn_api_obj.c, pace), so the next display interval is
+// shorter than the period. No limit makes the game run slower than the clock.
 //
 // The sample is the display time the pacer gives each present (nvnQueuePresentTexture), so the step follows the
 // frames as shown, pacing waits included. With the step on, the pacer ignores the game's interval and holds a frame
