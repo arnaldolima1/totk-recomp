@@ -17,11 +17,14 @@ cached in toolchain/release-dl/ and checked against the sha256 in PINS; a mismat
     VERSION    the repository's VERSION plus the commit, 0.1.0+973c626; the installer's release string
     TotK-Setup.exe  installer/launcher/launcher.c built with llvm/ (-mwindows): starts python/pythonw.exe -m installer.gui
 
---prove compiles generated/v121 and links build/release-check/totk.exe with nothing but the folder's python/, llvm/,
-runtime/ and bin/ (PATH holds the Windows system directory and those), then runs the four probes there. It needs a
-generated/v121 and build/extracted/v121 from the usual game build (they are read, nothing is written to them).
+--prove compiles the generated C and links build/release-check/totk.exe with nothing but the folder's python/, llvm/,
+runtime/ and bin/ (PATH holds the Windows system directory and those), then runs the four probes there.
 
-libtotkrt.a compiles against a generated/<version>/layout.h; generated/v121 by default. --stub-layout builds it against
+Both need one game version extracted and lifted first (tools/extract.py, recomp/gen.py): generated/v121 or, without
+it, generated/v143, and for --prove its build/extracted/<version> (they are read, nothing is written to them). The
+runtime library reads only what both versions' layout.h share (MOD_COUNT, MOD_MAIN_BASE), so either serves.
+
+libtotkrt.a compiles against a generated/<version>/layout.h: generated/v121, else generated/v143. --stub-layout builds it against
 a stand-in instead (build/release-check/stub-gen), for a machine without the game's generated C such as CI: the runtime
 reads only MOD_MAIN_BASE and MOD_COUNT of that header, and neither depends on the module sizes.
 
@@ -103,7 +106,8 @@ LLVM_SKIP_SUFFIXES = {'.idl', '.tlb'}
 
 # tools/ files the installer steps run (and what they import), copied from the repo.
 TOOLS_FILES = ['build_game.py', 'build_shaders.py', 'check_content.py', 'extract.py', 'hostmem.py', 'make_romfs_patches.py',
-               'prepare_shaders.py', 'romfs_index.py', 'shader_census.py', 'shader_list.py']
+               'pack_shader_cache.py', 'prepare_shaders.py', 'romfs_index.py', 'shader_census.py', 'shader_list.py',
+               'ultrawide_layout.py']
 TOOLS_DIRS = ['vendor/macnativegames', 'data']   # data/: expected hashes
 RUNTIME_SUFFIXES = {'.h', '.inc', '.ico'}   # .ico: the installer window icon
 
@@ -333,6 +337,15 @@ def collect_licenses(out):
 
 # ---- runtime/, recomp/, tools/, data/ ---------------------------------------------------------------------------------
 
+def lifted_version():
+    """The game version whose generated C the runtime library and --prove build against: v121, else v143."""
+    for version in ('v121', 'v143'):
+        if (MAIN_ROOT / 'generated' / version / 'layout.json').is_file():
+            return version
+    sys.exit('neither generated/v121 nor generated/v143 exists: extract a game version and lift it first '
+             '(tools/extract.py, recomp/gen.py; docs/building.md), or pass --stub-layout')
+
+
 # The module count of TotK's ExeFS (main, subsdk0, sdk), the same in every game version; the stand-in layout's MOD_COUNT.
 TOTK_MODULES = 3
 
@@ -353,10 +366,12 @@ def stub_layout():
     return gen
 
 
-def runtime_lib(out, llvm, gen):
+def runtime_lib(out, llvm, stub):
     """Build libtotkrt.a with the folder's llvm/ and copy it, the headers and the install-side sources into runtime/."""
     build = MAIN_ROOT / 'build' / 'release-check' / 'rtlib'
-    run([sys.executable, ROOT / 'tools' / 'build_game.py', '--make-runtime-lib', '--toolchain', llvm,
+    version = 'v121' if stub else lifted_version()   # with the stand-in, the version only picks the expected hashes
+    gen = stub_layout() if stub else MAIN_ROOT / 'generated' / version
+    run([sys.executable, ROOT / 'tools' / 'build_game.py', '--make-runtime-lib', '--toolchain', llvm, '--version', version,
          '--deps', out / 'runtime' / 'deps', '--ninja', out / 'bin' / 'ninja.exe', '--gen', gen, '--out', build],
         env=clean_env(llvm / 'bin', out / 'bin'))
     rt = out / 'runtime'
@@ -488,17 +503,18 @@ def write_zip(out, path):
 
 
 def prove(out):
-    """Compile generated/v121 and link totk.exe with the folder's tools only, then run the probes next to it."""
+    """Compile the generated C and link totk.exe with the folder's tools only, then run the probes next to it."""
     out = out.resolve()
-    gen = MAIN_ROOT / 'generated' / 'v121'
-    ext = MAIN_ROOT / 'build' / 'extracted' / 'v121'
+    version = lifted_version()
+    gen = MAIN_ROOT / 'generated' / version
+    ext = MAIN_ROOT / 'build' / 'extracted' / version
     chk = MAIN_ROOT / 'build' / 'release-check'
     env = clean_env(out / 'python', out / 'llvm' / 'bin', out / 'bin')
     t0 = time.time()
     run([out / 'python' / 'python.exe', out / 'tools' / 'build_game.py', '--toolchain', out / 'llvm',
          '--deps', out / 'runtime' / 'deps', '--runtime', out / 'runtime', '--runtime-lib', out / 'runtime' / 'libtotkrt.a',
-         '--ninja', out / 'bin' / 'ninja.exe', '--gen', gen, '--out', chk, '--exefs', ext / 'exefs', '--romfs', ext / 'romfs',
-         '--profile', chk / 'profile'], env=env)
+         '--ninja', out / 'bin' / 'ninja.exe', '--version', version, '--gen', gen, '--out', chk, '--exefs', ext / 'exefs',
+         '--romfs', ext / 'romfs', '--profile', chk / 'profile'], env=env)
     print(f'prove: build {time.time() - t0:.0f} s')
     for dll in ('SDL3.dll', 'libopus-0.dll'):
         shutil.copy2(out / 'bin' / dll, chk / dll)
@@ -520,7 +536,7 @@ def main():
     ap.add_argument('--zip', type=Path, help='also write the folder as this zip')
     ap.add_argument('--prove', action='store_true', help='only run the compile-and-probe check on an existing folder')
     ap.add_argument('--stub-layout', action='store_true',
-                    help='build libtotkrt.a against a stand-in layout.h instead of generated/v121 (no game files)')
+                    help='build libtotkrt.a against a stand-in layout.h instead of the generated C (no game files)')
     args = ap.parse_args()
     out = args.out.resolve()
     if args.prove:
@@ -533,7 +549,7 @@ def main():
     llvm = build_llvm(out)
     build_bin(out)
     build_deps(out)
-    runtime_lib(out, llvm, stub_layout() if args.stub_layout else MAIN_ROOT / 'generated' / 'v121')
+    runtime_lib(out, llvm, args.stub_layout)
     build_sources(out)
     build_launcher(out, llvm)
     collect_licenses(out)

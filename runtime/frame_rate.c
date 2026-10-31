@@ -24,7 +24,7 @@
 //
 // The world clock (frame_step_world_us) sums the steps from the first present that finds the player actor away from
 // the origin, where the title screen keeps it: the end of the first save load. Recorded and scripted input
-// (input_win.c) runs on it, so a replay presses at the same game time at any frame rate and after a first load of any
+// (input.c) runs on it, so a replay presses at the same game time at any frame rate and after a first load of any
 // length; a later load (fast travel) still shifts what follows by its length.
 //
 // TOTK_TRACE=perf adds a line per 120 presents: fps, the game seconds stepped against wall seconds, and with
