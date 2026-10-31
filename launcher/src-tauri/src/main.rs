@@ -622,6 +622,62 @@ struct Inputs {
 /// `python -m installer --dest <install folder> [--base --update --keys --lang] --root <release>`: one JSON event per
 /// stdout line ("build-line"; installer/events.py), the exit code in "build-done" (0 done, 1 failed, 2 bad command
 /// line, 3 cancelled). A folder with totk-install.json needs only --dest.
+/// What the launcher itself keeps in the install folder: its settings, the mods and the artwork.
+const LAUNCHER_OWNED: [&str; 3] = ["totk.ini", "mods", "launcher-art"];
+
+/// The installer takes only an empty folder for a first install (check.dest_not_empty). The launcher's own files there
+/// (settings changed or mods added before installing) move to "<folder>.launcher-hold" beside it, on the same disk,
+/// for the install; anything else stops it with the names.
+fn hold_launcher_files(h: &Path) -> Result<Option<PathBuf>, String> {
+    if h.join(STATE_FILE).is_file() || !h.is_dir() {
+        return Ok(None);
+    }
+    let names: Vec<String> = std::fs::read_dir(h).map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    if names.is_empty() {
+        return Ok(None);
+    }
+    let others: Vec<&String> = names.iter().filter(|n| !LAUNCHER_OWNED.contains(&n.to_ascii_lowercase().as_str())).collect();
+    if !others.is_empty() {
+        let list = others.iter().take(5).map(|n| n.as_str()).collect::<Vec<_>>().join(", ");
+        return Err(format!("A pasta de instalação {} não está vazia ({list}). Escolha uma pasta vazia ou esvazie essa.", h.display()));
+    }
+    let hold = PathBuf::from(format!("{}.launcher-hold", h.display()));
+    if hold.exists() {
+        return Err(format!("{} já existe (de uma instalação anterior interrompida): mova o conteúdo dela de volta ou apague-a.", hold.display()));
+    }
+    std::fs::create_dir_all(&hold).map_err(|e| e.to_string())?;
+    for n in &names {
+        std::fs::rename(h.join(n), hold.join(n)).map_err(|e| format!("não foi possível mover {n}: {e}"))?;
+    }
+    Ok(Some(hold))
+}
+
+/// Puts the held files back after the install: folders as they were, and the held totk.ini's keys over the one the
+/// installer wrote (except the language, which the install chose).
+fn restore_launcher_files(h: &Path, hold: &Path) {
+    let Ok(rd) = std::fs::read_dir(hold) else { return };
+    for e in rd.filter_map(|e| e.ok()) {
+        let name = e.file_name();
+        let (from, to) = (e.path(), h.join(&name));
+        if name.to_string_lossy().eq_ignore_ascii_case("totk.ini") {
+            let held = std::fs::read_to_string(&from).unwrap_or_default();
+            let mut text = std::fs::read_to_string(&to).unwrap_or_default();
+            for (k, v) in ini::read(&held) {
+                if k != "lang" {
+                    text = ini::set(&text, &k, &v);
+                }
+            }
+            if std::fs::create_dir_all(h).is_ok() && std::fs::write(&to, text).is_ok() {
+                let _ = std::fs::remove_file(&from);
+            }
+        } else if !to.exists() && std::fs::rename(&from, &to).is_err() {
+            continue;
+        }
+    }
+    let _ = std::fs::remove_dir(hold);   // (only when everything went back)
+}
+
 #[tauri::command]
 fn start_build(app: AppHandle, procs: State<Procs>, inputs: Inputs) -> Result<(), String> {
     let mut slot = procs.build.lock().unwrap();
@@ -631,6 +687,7 @@ fn start_build(app: AppHandle, procs: State<Procs>, inputs: Inputs) -> Result<()
     let h = home(&app);
     let root = release_root(&app).ok_or("Escolha a pasta do instalador (o release, com installer/).")?;
     let python = python(&root).ok_or_else(|| format!("O Python do instalador não foi encontrado em {}", root.join("python").display()))?;
+    let hold = hold_launcher_files(&h)?;
     let mut cmd = Command::new(python);
     cmd.args(["-m", "installer", "--dest"]).arg(&h).arg("--root").arg(&root).current_dir(&root);
     for (flag, value) in [("--base", inputs.base), ("--update", inputs.update), ("--keys", inputs.keys), ("--lang", inputs.lang)] {
@@ -645,13 +702,22 @@ fn start_build(app: AppHandle, procs: State<Procs>, inputs: Inputs) -> Result<()
     cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
     #[cfg(unix)]
     cmd.process_group(0);
-    let mut child: Child = cmd.spawn().map_err(|e| e.to_string())?;
+    let mut child: Child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            if let Some(hold) = &hold { restore_launcher_files(&h, hold); }
+            return Err(e.to_string());
+        }
+    };
     stream(app.clone(), child.stdout.take().unwrap(), false, "build-line");
     stream(app.clone(), child.stderr.take().unwrap(), true, "build-line");
     *slot = Some(child.id());
     drop(slot);
     thread::spawn(move || {
         let code = child.wait().map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
+        if let Some(hold) = &hold {
+            restore_launcher_files(&h, hold);
+        }
         *app.state::<Procs>().build.lock().unwrap() = None;
         let _ = app.emit("build-done", code);
     });
