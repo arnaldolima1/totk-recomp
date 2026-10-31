@@ -669,14 +669,12 @@ class Prepare(Step):
         if code:
             raise InstallError('prepare.romfs_patches_failed', code=code, log=str(log))
         # The same overlay with the UI laid out for each game resolution of another shape the settings menu offers
-        # (runtime/romfs.c overlay_init picks the one that matches). Only 1.4.3 has the camera aspect patch
-        # (recomp/patches-v143.txt) the layouts go with: 1.2.1 builds none.
+        # (runtime/romfs.c overlay_init picks the one that matches; the camera's side is the patch set aspect,
+        # recomp/patches-v<ver>.txt).
         for size in ASPECT_SIZES:
             remove(dest / f'romfs-patches-{size}')
-            if version_tag(game_version(ctx)) != 'v143':
-                continue
             code, log = run_tool(ctx, 'prepare', layout.tools / 'make_romfs_patches.py',
-                                 ['--version', 'v143', '--romfs', dest / 'romfs', '--out',
+                                 ['--version', version_tag(game_version(ctx)), '--romfs', dest / 'romfs', '--out',
                                   dest / f'romfs-patches-{size}', '--aspect', size])
             if code:
                 raise InstallError('prepare.romfs_patches_failed', code=code, log=str(log))

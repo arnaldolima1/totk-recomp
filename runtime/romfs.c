@@ -414,8 +414,8 @@ static void overlay_drop(size_t a, size_t b) {
 static void overlay_init(void) {
     // TOTK_ROMFS_PATCHES unset: romfs-patches next to romfs-index.bin if it has a manifest (tools/make_romfs_patches.py).
     // A game resolution that is not 16:9 takes romfs-patches-<w>x<h> instead when it is there: the same overlay with
-    // the UI laid out for that shape (make_romfs_patches.py --aspect). 1.2.1 has no camera aspect patch, so it keeps
-    // the 16:9 layout (res_wants_wide_overlay).
+    // the UI laid out for that shape (make_romfs_patches.py --aspect), when the game version has the camera aspect patch
+    // the layout goes with (res_wants_wide_overlay).
     // With prompts = xbox, the Xbox prompts' folder for the pad layout in its place (input_prompts_folder): the same
     // patches with Xbox button icons (make_romfs_patches.py --prompts). The game reads the archives once at boot, so
     // the prompts stay until restart even though the layout itself changes live. Each folder replaces romfs-patches as
