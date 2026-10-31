@@ -2095,7 +2095,7 @@ static DWORD WINAPI pipe_worker(void *arg) {
 // Starts the pool on first use: a quarter of the logical processors, 2 to 4. Caller holds P.lock.
 static int workers_start(void) {
     if (A.threads) return 1;
-    DWORD cpus = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+    DWORD cpus = plat_cpu_usable();
     int n = cpus / 4 < 2 ? 2 : cpus / 4 > MAX_WORKERS ? MAX_WORKERS : (int)(cpus / 4);
     for (int i = 0; i < n; i++) {
         HANDLE t = CreateThread(NULL, 0, pipe_worker, (void *)(intptr_t)A.threads, 0, NULL);
@@ -2444,7 +2444,7 @@ void vk_pipeline_prewarm(void) {
     size_t u = 0;
     for (size_t i = 0; i < m; i++)
         if (!u || memcmp(ids[u - 1], ids[i], 32)) memcpy(ids[u++], ids[i], 32);
-    int cpus = (int)GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+    int cpus = (int)plat_cpu_usable();
     const char *pe = cfg_get("TOTK_PREWARM_XLATE");   // no fixed default: half the CPUs, at most 16, when unset
     int procs = pe && *pe ? atoi(pe) : cpus / 2 > 16 ? 16 : cpus / 2;
     gfx_shader_prewarm((const uint8_t(*)[32])ids, u, sh, cpus, procs < 1 ? 1 : procs);
@@ -2830,7 +2830,7 @@ static void lb_start(const uint32_t pr_hist[16], const uint32_t fs_hist[4]) {
     LB.n = n;
     lb_state(pr_hist, fs_hist);
     LB.idle = 1;
-    int cpus = (int)GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+    int cpus = (int)plat_cpu_usable();
     int t = te && *te ? atoi(te) : cpus / 4;
     t = t < 1 ? 1 : t > LB_MAX_THREADS ? LB_MAX_THREADS : t;
     if ((size_t)t > n) t = (int)n;
@@ -2903,7 +2903,7 @@ static void lb_warm_prepared(const char *dir) {
     LB.n = n, LB.idle = 0, LB.t0 = now_ms();
     static const uint32_t no_pr[16], no_fs[4];
     lb_state(no_pr, no_fs);
-    int cpus = (int)GetActiveProcessorCount(ALL_PROCESSOR_GROUPS), k = 0;
+    int cpus = (int)plat_cpu_usable(), k = 0;
     HANDLE t[64];
     for (int i = 0; i < cpus && i < 64; i++)
         if ((t[k] = CreateThread(NULL, 0, lb_warm_worker, NULL, 0, NULL))) k++;
@@ -2929,7 +2929,7 @@ int vk_pipeline_prepare_shaders(void) {
     char *cut = strrchr(dir, '\\');
     if (!cut) return 1;
     *cut = 0;
-    int cpus = (int)GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+    int cpus = (int)plat_cpu_usable();
     const char *pe = cfg_get("TOTK_PREWARM_XLATE");   // no fixed default: half the CPUs, at most 16, when unset
     int procs = pe && *pe ? atoi(pe) : cpus / 2 > 16 ? 16 : cpus / 2;
     int rc = gfx_shader_prepare_seed(dir, cpus, procs < 1 ? 1 : procs);

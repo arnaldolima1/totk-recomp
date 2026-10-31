@@ -6,6 +6,7 @@
 #include <windows.h>
 
 #include "host.h"
+#include "platform/platform.h"
 #include "tex.h"
 
 #define MT_MIN_BLOCKS 1024   // below this, waking the pool costs about as much as the decode
@@ -73,7 +74,7 @@ static DWORD WINAPI worker(void *arg) {
 static BOOL CALLBACK pool_init(PINIT_ONCE once, PVOID param, PVOID *ctx) {
     (void)once, (void)param, (void)ctx;
     InitializeCriticalSection(&P.busy);
-    int cpus = (int)GetActiveProcessorCount(ALL_PROCESSOR_GROUPS) - 2;
+    int cpus = (int)plat_cpu_usable() - 2;
     int n = (cpus < 1 ? 1 : cpus > MT_MAX_THREADS ? MT_MAX_THREADS : cpus) - 1;
     for (int i = 0; i < n; i++) {
         HANDLE t = CreateThread(NULL, 0, worker, NULL, 0, NULL);
