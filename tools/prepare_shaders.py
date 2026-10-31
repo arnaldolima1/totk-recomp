@@ -142,10 +142,12 @@ def main():
     extracted = ROOT / 'build' / 'extracted' / a.version
     listed = len(variants)
     shaders, _ = inventory(a.romfs or extracted / 'romfs', a.exefs or extracted / 'exefs', everything=False)
-    missing = sum(1 for key, _ in variants if key not in shaders)
-    if missing > max(16, listed // 20):   # the list names shaders the narrowed walk did not reach
-        print(f'{missing} of the {listed} listed variants are not among the {len(shaders)} shaders found: reading every '
-              f'RomFS file instead', flush=True)
+    # A missing list row says nothing about the walk: the list covers several versions, and 1.1.1 holds 17,587 of its
+    # 41,414 rows, so most rows are absent because the game does not have them, not because the walk missed them. A walk
+    # that found next to nothing does say something: the shader directories have moved.
+    if len(shaders) < max(64, listed // 20):
+        print(f'only {len(shaders)} shaders found of the {listed} listed variants: reading every RomFS file instead',
+              flush=True)
         shaders, _ = inventory(a.romfs or extracted / 'romfs', a.exefs or extracted / 'exefs')
     t1 = time.monotonic()
     progs, recs, seen, skipped = {}, [], set(), {'not in this version': 0, 'stage': 0}
