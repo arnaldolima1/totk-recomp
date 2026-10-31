@@ -11,6 +11,7 @@
 // 575ad88e02f9a89a9a885d90039d48af33c982f4, MIT, Copyright (c) 2026 Revivedx and the Savage Wind Recomp contributors,
 // Copyright (c) 2026 Peiikai); the pages are rows of option_rows.cpp.
 #include <atomic>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +20,16 @@
 #include "imgui.h"
 #include "imgui_internal.h"   // SetFocusID, NavCursorVisible
 #include "backends/imgui_impl_vulkan.h"
+// A private copy of stb_truetype, the parser Dear ImGui builds its font atlas with, to check a system font before the
+// atlas gets it (font_usable). Its asserts only mark the font bad here.
+static int g_font_bad;
+#define STBTT_STATIC
+#define STB_TRUETYPE_IMPLEMENTATION
+#define STBTT_assert(x) ((x) ? (void)0 : (void)(g_font_bad = 1))
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-function"
+#include "imstb_truetype.h"
+#pragma clang diagnostic pop
 #include "ui/binds_page.h"
 #include "ui/option_rows.h"
 
@@ -262,6 +273,43 @@ static const struct { const char *lang; UiTextId name; } kCjk[] = {
     {"zh-Hant", UI_MENU_LANGNAME_ZH_HANT},
 };
 
+static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3]; }
+
+// 1 when Dear ImGui can take this font file: more than the 100 bytes AddFontFromMemoryTTF asserts on, every table of its
+// directory inside the file (stb_truetype reads tables without bounds checks, so a cut-off file faults when the glyphs
+// are made), and stb_truetype parses it. ImGui asserts on a font it cannot parse, and an assert ends the process with
+// 0xc0000409 and no line in the log.
+static int font_usable(const uint8_t *d, uint64_t n) {
+    if (!d || n <= 100 || n > INT_MAX) return 0;
+    int off = stbtt_GetFontOffsetForIndex(d, 0);
+    if (off < 0 || (uint64_t)off + 12 > n) return 0;
+    uint32_t tables = (uint32_t)d[off + 4] << 8 | d[off + 5];
+    if ((uint64_t)off + 12 + 16ull * tables > n) return 0;
+    for (uint32_t i = 0; i < tables; i++) {
+        const uint8_t *r = d + off + 12 + 16 * i;
+        if ((uint64_t)be32(r + 8) + be32(r + 12) > n) return 0;
+    }
+    stbtt_fontinfo fi;
+    g_font_bad = 0;
+    return stbtt_InitFont(&fi, d, off) && !g_font_bad;
+}
+
+extern "C" int menu_font_check(void) {
+    uint64_t n = sizeof roboto_ttf;
+    uint8_t *bad = (uint8_t *)malloc(n);
+    if (!bad) return 0;
+    memcpy(bad, roboto_ttf, n);
+    uint32_t tables = (uint32_t)bad[4] << 8 | bad[5];
+    for (uint32_t i = 0; i < tables; i++)
+        if (!memcmp(bad + 12 + 16 * i, "cmap", 4)) memset(bad + 12 + 16 * i, 0, 4);   // no character map
+    int ok = font_usable(roboto_ttf, n) && !font_usable(roboto_ttf, 4096) && !font_usable(roboto_ttf, 100) &&
+             !font_usable(bad, n);
+    memset(bad, 0, 4);             // an unknown font tag
+    ok = ok && !font_usable(bad, n);
+    free(bad);
+    return ok;
+}
+
 static int fonts_up(float scale) {
     enum { N = sizeof kCjk / sizeof *kCjk };
     ImFontAtlas *fa = ImGui::GetIO().Fonts;
@@ -276,6 +324,13 @@ static int fonts_up(float scale) {
         char path[512];
         uint64_t size = 0;
         if (!plat_font_path(kCjk[i].lang, path, sizeof path) || !(data[i] = plat_file_read(path, &size))) continue;
+        if (!font_usable(data[i], size)) {
+            rt_log("menu: system font %s left out: the font parser cannot read it (%llu bytes)", path,
+                   (unsigned long long)size);
+            free(data[i]);
+            data[i] = NULL;
+            continue;
+        }
         merged++;
         ImFontGlyphRangesBuilder b;
         b.AddText(ui_text_in("en", kCjk[i].name));
