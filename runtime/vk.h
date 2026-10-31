@@ -100,11 +100,11 @@ void vk_present_image(VkImage src, VkImageLayout layout, VkFormat fmt, int w, in
 // vk_present_image split in two: vk_present_blit submits the blit and leaves the present waiting, vk_present_flip
 // queues it. The next blit or a swapchain rebuild queues a waiting present first.
 void vk_present_blit(VkImage src, VkImageLayout layout, VkFormat fmt, int w, int h, const int crop[4]);
-// FSR 1 on the present (vk_fsr.c): records EASU (+ RCAS) of src's crop rectangle {x, y, w, h} into dst, a dw x dh
-// swapchain image in TRANSFER_DST; src is in GENERAL and fmt its format. 0 = nothing recorded (the setting says
-// bilinear, no upscale is needed, or FSR is not available): the caller blits.
+// FSR 1 on the present (vk_fsr.c): records EASU (+ RCAS) of src's crop rectangle {x, y, w, h} into the rectangle out
+// {x, y, w, h} of dst, a swapchain image in TRANSFER_DST; src is in GENERAL and fmt its format. 0 = nothing recorded
+// (the setting says bilinear, no upscale is needed, or FSR is not available): the caller blits.
 int vk_fsr_record(VkCommandBuffer cb, unsigned slot, VkImage src, VkFormat fmt, int sw, int sh, const int crop[4],
-                  VkImage dst, uint32_t dw, uint32_t dh);
+                  VkImage dst, const int out[4]);
 void vk_fsr_release(void);   // before the device goes away
 void vk_present_flip(void);
 // Every submission to ctx->gfx_queue (and xfer_queue when shared) takes this lock; vk_present_image and the swapchain
@@ -242,6 +242,7 @@ enum { VK_ASTC_CPU, VK_ASTC_GPU, VK_ASTC_NATIVE, VK_ASTC_CHECK };
 int vk_astc_mode(void);                 // decided once per device (logged); VK_ASTC_CPU before vk_init
 int vk_astc_native(VkFormat astc_fmt);  // 1: images of this ASTC format are created as such and get the raw blocks
 int vk_astc_gpu(void);                  // 1: ASTC images decoded to RGBA8 by the compute decoder (vk_astc_record)
+int vk_astc_bc(void);                   // 1: those images are BC3 instead, encoded after the decode (TOTK_ASTC_BC=1)
 // One image region decoded from raw blocks: tight rows of 16-byte blocks at byte src of the source buffer (slices one
 // after the other), w x h texels and slices deep, written at offset of level / layer.
 typedef struct { VkDeviceSize src; uint32_t w, h, slices, level, layer; VkOffset3D offset; } VkAstcRegion;
@@ -249,9 +250,10 @@ typedef struct { VkDeviceSize src; uint32_t w, h, slices, level, layer; VkOffset
 // bytes of blocks) goes to a device-local scratch buffer, a dispatch per region decodes it, and the texels are copied
 // into img (VK_IMAGE_LAYOUT_GENERAL). The caller records its usual barriers around an image copy before and after the
 // call. readback (optional, host-visible, TRANSFER_DST): also gets the decoded texels, the regions one after the other.
+// bc: img is BC3 (TexVkFormat.astc_bc); the texels are encoded to BC3 blocks before the copy, and readback is ignored.
 // 0 when the decoder is unavailable or the scratch buffer cannot be allocated (nothing recorded).
 int vk_astc_record(VkCommandBuffer cb, VkBuffer src, VkDeviceSize src_size, const VkAstcRegion *rg, int n, uint32_t bw,
-                   uint32_t bh, int srgb, VkImage img, VkImageAspectFlags aspect, VkBuffer readback);
+                   uint32_t bh, int srgb, int bc, VkImage img, VkImageAspectFlags aspect, VkBuffer readback);
 void vk_astc_stats(uint64_t *dispatches, uint64_t *texels);   // since start
 // TOTK_ASTC_TIME=1: GPU timestamps around each vk_astc_record's dispatches (logged per footprint and the largest one)
 void vk_astc_time_enable(int on);

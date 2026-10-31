@@ -109,7 +109,11 @@
 # gpu_index = 0
 # gpu_name = NVIDIA
 # Game resolution: the size the game draws its picture and interface in (1280x720 to 7680x4320). Above 1920x1080 the
-# game's texture heap and memory pool grow with it. Read at start.
+# game's texture heap and memory pool grow with it. A size wider than 16:9, such as 3440x1440 on a 21:9 monitor, widens
+# the camera's view to that shape and lays the HUD out for it. That is 1.4.3 only (1.2.1 keeps the 16:9 view), and the
+# installer prepares the UI layout for four sizes: 2560x1080, 3440x1440, 3840x1600 and 5120x2160. Any other shape
+# (16:10, 32:9) gets the camera's view but a 16:9 HUD, stretched over the picture, unless you build its layout with
+# tools/make_romfs_patches.py --aspect WxH (wider than 16:9 only). Read at start.
 # output_res = 1920x1080
 # 3D render scale: the scene's size relative to the game resolution, game (5/6, the game's own 1600x900 at 1080p) or
 # a percentage (25 to 400, at most 4096 pixels a side); above 100 supersamples the scene (anti-aliasing). Read at start.
@@ -118,6 +122,11 @@
 # from 0 (off) to 100. Changes while the game runs take effect at once.
 # upscaler = fsr
 # sharpness = 80
+# Picture shape when the window's shape differs from the game resolution's (a 16:9 picture in a 21:9 fullscreen
+# window): fit, the default, keeps the shape, with black bars at the sides or above and below, so a 16:9 game in a wider
+# window is no longer stretched as it used to be; stretch fills the window. Changes while the game runs take effect at
+# once.
+# aspect = fit
 # NVIDIA DLAA: DLSS anti-aliasing of the 3D scene at its own resolution, on NVIDIA RTX GPUs with nvngx_dlss.dll (from
 # NVIDIA's DLSS SDK) next to totk.exe; elsewhere the setting does nothing. Changes while the game runs take effect at
 # once.
@@ -155,8 +164,13 @@
 # rumble_triggers = 0
 # Which gamepad button is Switch A: nintendo (by position: east A, south B, west Y, north X), xbox (south A, east B,
 # west X, north Y, as an Xbox pad labels them; cross A on a PlayStation pad) or auto (nintendo for a pad with Nintendo
-# labels, xbox for the others). The bind_ lines below apply on top. Changes while the game runs take effect at once.
+# labels, xbox for the others). xbox_prompts: the buttons as nintendo, and the game's prompts swapped to the Xbox
+# labels (A with B, X with Y; it loads romfs-patches-xbox, docs/controls.md, "Xbox button prompts"). The bind_ lines
+# below apply on top. Changes while the game runs take effect at once; the xbox_prompts prompts at the next start.
 # pad_layout = auto
+# Gamepad stick dead zone in percent of full deflection (0 to 50). Raise it for a stick that drifts: inside the circle
+# the stick reads centred, and the rest of its travel is scaled to start there.
+# stick_deadzone = 8
 # Mouse camera sensitivity (0 to 10; 0 = no mouse camera and no cursor capture).
 # mouse_sens = 1
 # Write the input of this run to a file that replays as a script (docs/controls.md, "Scripted input"). Default: off.
@@ -167,6 +181,7 @@
 # A line replaces that button's defaults (pad and keyboard); buttons without a line keep them. Stick directions take keys
 # only. Invalid entries are logged and skipped. Changes while the game runs take effect at once.
 #   pad names: south east west north l r zl zr start back lstick rstick dpad_left dpad_up dpad_right dpad_down
+#   lpaddle1 rpaddle1 lpaddle2 rpaddle2 (the back buttons of an Xbox Elite, DualSense Edge or Steam Controller)
 #   key names: a-z 0-9 f2-f7 f9 f12 num0-num9 space tab enter backspace lshift rshift lctrl rctrl lalt capslock insert
 #   delete home end pageup pagedown up down left right num_add num_sub num_mul num_div num_decimal minus equals
 #   lbracket rbracket semicolon apostrophe comma period slash backslash grave mouse_l mouse_r mouse_m mouse_x1 mouse_x2

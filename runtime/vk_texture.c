@@ -328,7 +328,18 @@ static Tex *create_tex(const tex_t *t, const TexKey *k, int defer_init) {
                             .samples = (VkSampleCountFlagBits)samples, .tiling = VK_IMAGE_TILING_OPTIMAL, .usage = usage,
                             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
     int bw, bh, block_views = 0;
-    if (!ds && samples == 1 && f.vk == f.ideal && nvn_fmt_bpb(d->format, &bw, &bh) && bw == 4 && bh == 4) {
+    // TOTK_BLOCK_VIEWS_3D (default 0): a 3D BC image also gets block views. On RDNA2 cards (driver 26.10.1, issue #5)
+    // the 32x32x32 BC4 volume the game creates at the logo, made BLOCK_TEXEL_VIEW_COMPATIBLE and 2D_ARRAY_COMPATIBLE,
+    // took a GPU write just past the end of its memory: device lost at the first submit after it when the image ended
+    // its memory block. Draws into a 3D BC image go through a stand-in instead (vk_exec.c bc_target).
+    static int bv3d = -1;
+    if (bv3d < 0) {
+        bv3d = rt_knob("BLOCK_VIEWS_3D", "0");
+        rt_log("vk: 3D BC textures %s (TOTK_BLOCK_VIEWS_3D=%d)", bv3d ? "get block views (renderable)" : "have no block views",
+               bv3d);
+    }
+    if (!ds && samples == 1 && f.vk == f.ideal && nvn_fmt_bpb(d->format, &bw, &bh) && bw == 4 && bh == 4 &&
+        (type != VK_IMAGE_TYPE_3D || bv3d)) {
         VkImageCreateInfo bc = ci;   // BC formats: renderable through views of their blocks (block_views_ok)
         bc.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         bc.flags |= VK_IMAGE_CREATE_BLOCK_TEXEL_VIEW_COMPATIBLE_BIT | VK_IMAGE_CREATE_EXTENDED_USAGE_BIT;
@@ -646,7 +657,7 @@ static void upload(Tex *e) {
     int checked = 0;
     if (agpu) {
         uint64_t a0 = perf_begin();
-        checked = vk_astc_record(cb, sb, total, ar, (int)n, e->f.astc_bw, e->f.astc_bh, e->f.astc_srgb, e->pub.image,
+        checked = vk_astc_record(cb, sb, total, ar, (int)n, e->f.astc_bw, e->f.astc_bh, e->f.astc_srgb, e->f.astc_bc, e->pub.image,
                                  e->pub.aspect, rbuf);
         perf_end(PERF_ASTC, a0);
         if (!checked)
@@ -730,6 +741,7 @@ static void make_fresh_snap(Tex *e) {
 // Bytes per block and block size of the image's VkFormat (ASTC decodes to RGBA8, RGB expands to RGBA); 0 when the
 // VkFormat substitutes another one of unknown size.
 static int img_block(const Tex *e, int *bw, int *bh) {
+    if (e->f.astc_bc) { *bw = *bh = 4; return 16; }
     if (e->f.astc_bw) { *bw = *bh = 1; return 4; }
     int b = nvn_fmt_bpb(e->t.d.format, bw, bh);
     if (e->f.expand_rgb) { *bw = *bh = 1; return b / 3 * 4; }
@@ -1204,13 +1216,18 @@ static int image_texels(Tex *e, const Region *g, const NVNcopyRegion *r, uint8_t
         vmaFlushAllocation(c->vma, sa, 0, VK_WHOLE_SIZE);
         barrier(cb, ALL_RW, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
         int done = 0;
-        if (agpu) {
+        // A BC3 image takes whole 4x4 blocks, or a part that ends on the mip's edge; a region of a 5x5 or 6x6 footprint
+        // may end inside a block (vk_astc_record checks the start corner).
+        uint32_t mw = e->t.d.width >> g->level, mh = e->t.d.height >> g->level;
+        int bc_cut = e->f.astc_bc && (((w & 3) && (uint32_t)r->xoffset + w != (mw ? mw : 1)) ||
+                                      ((h & 3) && (uint32_t)r->yoffset + h != (mh ? mh : 1)));
+        if (agpu && !bc_cut) {   // bc_cut: nothing recorded, logged below as not decoded
             VkAstcRegion *ar = calloc((size_t)g->nz, sizeof *ar);
             for (int z = 0; z < g->nz; z++)
                 ar[z] = (VkAstcRegion){.src = slice * (size_t)z, .w = w, .h = h, .slices = 1, .level = rg[z].imageSubresource.mipLevel,
                                        .layer = rg[z].imageSubresource.baseArrayLayer, .offset = rg[z].imageOffset};
             uint64_t a0 = perf_begin();
-            done = vk_astc_record(cb, sb, slice * (size_t)g->nz, ar, g->nz, e->f.astc_bw, e->f.astc_bh, e->f.astc_srgb,
+            done = vk_astc_record(cb, sb, slice * (size_t)g->nz, ar, g->nz, e->f.astc_bw, e->f.astc_bh, e->f.astc_srgb, e->f.astc_bc,
                                   e->pub.image, aspect, VK_NULL_HANDLE);
             perf_end(PERF_ASTC, a0);
             free(ar);

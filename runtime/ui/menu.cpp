@@ -38,6 +38,9 @@ void vk_queue_unlock(void);
 void res_sizes(unsigned out[2], unsigned scene[2]);
 double frame_step_limit_hz(void);
 extern const int rt_game_version;
+// fs.h (romfs.c): romfs-patches-xbox was next to romfs-index.bin at start, and was loaded.
+int romfs_xbox_prompts_ready(void);
+int romfs_xbox_prompts_active(void);
 extern const char rt_port_version[];
 }
 
@@ -414,10 +417,12 @@ static void row_window_size(void) {
     opt_choice_list("TOTK_WINDOW_SIZE", UI_MENU_WINDOW_SIZE, pv, pn, n, UI_MENU_WINDOW_SIZE_DESC);
 }
 
-// The game resolution (resolution.c): 16:9 sizes from the game's own 1920x1080 up, and the current value when it is
+// The game resolution (resolution.c): 16:9 sizes from its smallest, 1280x720 (for weak GPUs), up, the common 21:9
+// monitor sizes (the camera and the HUD follow a wider shape, resolution.c res_init), and the current value when it is
 // another size.
 static void row_output_res(void) {
-    static const char *const vals[] = {"1920x1080", "2560x1440", "3200x1800", "3840x2160"};
+    static const char *const vals[] = {"1280x720", "1600x900", "1920x1080", "2560x1440", "3200x1800", "3840x2160",
+                                       "2560x1080", "3440x1440", "3840x1600", "5120x2160"};
     enum { N = sizeof vals / sizeof *vals };
     char shown[N][32];
     const char *names[N];
@@ -534,6 +539,8 @@ static void tab_screen(float scale) {
     static const UiTextId up[] = {UI_MENU_UPSCALER_FSR, UI_MENU_UPSCALER_BILINEAR};
     opt_choice("TOTK_UPSCALER", UI_MENU_UPSCALER, up, 2, UI_MENU_UPSCALER_DESC);
     opt_slider("TOTK_SHARPNESS", UI_MENU_SHARPNESS, 0, 100, UI_MENU_SHARPNESS_DESC, 5, "%.0f %%");
+    static const UiTextId aspect[] = {UI_MENU_ASPECT_FIT, UI_MENU_ASPECT_STRETCH};
+    opt_choice("TOTK_ASPECT", UI_MENU_ASPECT, aspect, 2, UI_MENU_ASPECT_DESC);
     opt_toggle("TOTK_DLAA", UI_MENU_DLAA, UI_MENU_DLAA_DESC);
     opt_toggle("TOTK_FXAA", UI_MENU_FXAA, UI_MENU_FXAA_DESC);
     opt_end();
@@ -557,8 +564,14 @@ static void tab_sound(float scale) {
     opt_end();
 }
 
-// "in use: Xbox" under the layout when it is Automatic and a gamepad is connected; NULL otherwise.
+// The note under the layout. Xbox prompts (the Nintendo layout with the A/B and X/Y prompts swapped, romfs.c
+// overlay_init) change the buttons at once but the prompts only at the next start: "files missing" without
+// romfs-patches-xbox, "prompts change after restart" while the prompts in use differ from the choice. Automatic with a
+// gamepad connected: "in use: Xbox". NULL otherwise.
 static const char *pad_layout_note(void) {
+    bool want = !_stricmp(cfg_value("TOTK_PAD_LAYOUT"), "xbox_prompts");
+    if (want && !romfs_xbox_prompts_ready()) return menu_text(UI_MENU_PAD_LAYOUT_PROMPTS_MISSING);
+    if (want != (romfs_xbox_prompts_active() != 0)) return menu_text(UI_MENU_PAD_LAYOUT_PROMPTS_RESTART);
     int got = input_pad_layout();
     if (got < 0 || strcmp(cfg_value("TOTK_PAD_LAYOUT"), "auto")) return nullptr;
     static char note[96];
@@ -569,12 +582,14 @@ static const char *pad_layout_note(void) {
 
 static void tab_controls(float scale) {
     opt_begin("##controls", scale);
-    static const UiTextId layout[] = {UI_MENU_PAD_LAYOUT_AUTO, UI_MENU_PAD_LAYOUT_NINTENDO, UI_MENU_PAD_LAYOUT_XBOX};
-    opt_choice("TOTK_PAD_LAYOUT", UI_MENU_PAD_LAYOUT, layout, 3, UI_MENU_PAD_LAYOUT_DESC, pad_layout_note());
+    static const UiTextId layout[] = {UI_MENU_PAD_LAYOUT_AUTO, UI_MENU_PAD_LAYOUT_NINTENDO, UI_MENU_PAD_LAYOUT_XBOX,
+                                      UI_MENU_PAD_LAYOUT_XBOX_PROMPTS};
+    opt_choice("TOTK_PAD_LAYOUT", UI_MENU_PAD_LAYOUT, layout, 4, UI_MENU_PAD_LAYOUT_DESC, pad_layout_note());
     opt_toggle("TOTK_MOTION", UI_MENU_MOTION, UI_MENU_MOTION_DESC);
     opt_slider("TOTK_RUMBLE_STRENGTH", UI_MENU_RUMBLE_STRENGTH, 0, 300, UI_MENU_RUMBLE_STRENGTH_DESC, 10, "%.0f %%");
     opt_slider("TOTK_RUMBLE_CURVE", UI_MENU_RUMBLE_CURVE, 0.2f, 1.5f, UI_MENU_RUMBLE_CURVE_DESC, 0.05f, "%.2f");
     opt_toggle("TOTK_RUMBLE_TRIGGERS", UI_MENU_RUMBLE_TRIGGERS, UI_MENU_RUMBLE_TRIGGERS_DESC);
+    opt_slider("TOTK_STICK_DEADZONE", UI_MENU_STICK_DEADZONE, 0, 50, UI_MENU_STICK_DEADZONE_DESC, 1, "%.0f %%");
     opt_slider("TOTK_MOUSE_SENS", UI_MENU_MOUSE_SENS, 0, 10, UI_MENU_MOUSE_SENS_DESC, 0.1f, "%.1f");
     binds_rows(scale);
     opt_end();
@@ -672,6 +687,7 @@ static void tab_advanced(float scale) {
     opt_choice("TOTK_MEMORY", UI_MENU_MEMORY, mem, 4, UI_MENU_MEMORY_DESC);
     opt_toggle("TOTK_TEX_ALIAS", UI_MENU_TEX_ALIAS, UI_MENU_TEX_ALIAS_DESC);
     opt_slider("TOTK_TEX_VRAM_PRESSURE", UI_MENU_TEX_VRAM_PRESSURE, 0, 100, UI_MENU_TEX_VRAM_PRESSURE_DESC, 1, "%.0f%%");
+    opt_toggle("TOTK_ASTC_BC", UI_MENU_ASTC_BC, UI_MENU_ASTC_BC_DESC);
 
     opt_group(UI_MENU_GROUP_FIXES);
     opt_toggle("TOTK_LOD_GUARD", UI_MENU_LOD_GUARD, UI_MENU_LOD_GUARD_DESC);
