@@ -51,6 +51,11 @@ Split build. --make-runtime-lib compiles only runtime/ into <out>/libtotkrt.a (w
 then compiles only the generated C and the install-time files (modules.c and INSTALL_SIDE, which bake the player's
 game hashes and version in) and links them with that library. The library holds no game-derived data.
 
+Object cache. --object-cache DIR fronts clang on the generated C with tools/objcache.py: a chunk whose source, flags,
+included headers and compiler match an earlier compile gets that compile's object back instead of compiling again. The
+installer keeps DIR in the install folder, so an update that lifts the same game version with an unchanged lifter
+compiles only what changed. After a successful link the cache keeps only the objects of this build.
+
 Standard library only.
 """
 import argparse
@@ -66,6 +71,7 @@ import time
 import urllib.request
 from pathlib import Path
 
+import objcache
 import romfs_index
 from build_shaders import stale as stale_shaders
 from check_content import GENERATED_MARKER
@@ -149,6 +155,7 @@ AR = UCRT / 'llvm-ar.exe' if WIN else on_path('llvm-ar')
 WINDRES = UCRT / 'windres.exe'   # runtime/totk.rc: the manifest of totk.exe
 TOOLCHAIN_BIN = None   # llvm-mingw bin directory, set by main() for --toolchain
 DEPS = None            # the deps directory of an llvm-mingw build
+OBJECT_CACHE = None    # (cache directory, compiler id) of --object-cache: tools/objcache.py fronts the cc_gen rule
 # tools/data/expected-<display version>.json for each build version name.
 DISPLAY_VERSIONS = {'v0': '1.0.0', 'v111': '1.1.1', 'v112': '1.1.2', 'v121': '1.2.1', 'v143': '1.4.3'}
 
@@ -322,6 +329,11 @@ def ninja_file(gen, out, mods, pool_depth, skip=(), prebuilt=False, runtime_lib=
     # A compiler cache (sccache) may front clang: every lift rewrites the generated chunks with the same contents, so
     # the cached objects save the compile step on the next build.
     cache = f'{cmd_arg(os.environ["SCCACHE"])} ' if os.environ.get('SCCACHE') else ''
+    gen_cache = ''
+    if OBJECT_CACHE:
+        cache_dir, ident = OBJECT_CACHE
+        gen_cache = (f'{cmd_arg(Path(sys.executable).as_posix())} {cmd_arg(Path(objcache.__file__).resolve().as_posix())} '
+                     f'--dir {cmd_arg(cache_dir.as_posix())} --id {ident} -- ')
     lines = [
         '# Written by tools/build_game.py; do not edit.',
         'ninja_required_version = 1.10',
@@ -336,7 +348,7 @@ def ninja_file(gen, out, mods, pool_depth, skip=(), prebuilt=False, runtime_lib=
         f'  depth = {pool_depth}',
         '',
         'rule cc_gen',
-        '  command = $cc $genflags -MD -MF $out.d -c $in -o $out',
+        f'  command = {gen_cache}$cc $genflags -MD -MF $out.d -c $in -o $out',
         '  deps = gcc',
         '  depfile = $out.d',
         '  description = CC $in',
@@ -729,6 +741,9 @@ def main():
                     help=f'build only <out>/{LIB_NAME} from runtime/ (no generated C, no totk.exe)')
     ap.add_argument('--runtime-lib', type=Path, help=f'link against this {LIB_NAME} instead of compiling runtime/ '
                                                     f'({", ".join(sorted(INSTALL_SIDE))} and modules.c still compile)')
+    ap.add_argument('--object-cache', type=Path,
+                    help='keep the generated objects in this directory and reuse them on later builds '
+                         '(tools/objcache.py)')
     ap.add_argument('--expected', type=Path,
                     help='expected hashes (default tools/data/expected-<display version>.json)')
     args = ap.parse_args()
@@ -831,6 +846,14 @@ def main():
     runtime_lib = args.runtime_lib.resolve() if args.runtime_lib else None
     if runtime_lib and not runtime_lib.is_file():
         sys.exit(f'{runtime_lib} not found: build it with --make-runtime-lib')
+    global OBJECT_CACHE
+    cache_start, cache_before = time.time(), {}
+    if args.object_cache and mods and pairs is None:
+        cache_dir = args.object_cache.resolve()
+        (cache_dir / 'entries').mkdir(parents=True, exist_ok=True)
+        version = subprocess.run([str(CLANG), '--version'], capture_output=True, text=True).stdout
+        OBJECT_CACHE = (cache_dir, hashlib.sha256((objcache.FORMAT + version).encode()).hexdigest()[:32])
+        cache_before = {e.name: e.read_bytes() for e in (cache_dir / 'entries').glob('*.json')}
     text, objs, exe = ninja_file(gen, out, mods, jobs, skip, pairs is not None, runtime_lib,
                                  args.make_runtime_lib)
     write_if_changed(out / 'build.ninja', text)
@@ -846,6 +869,10 @@ def main():
     print(f'compile: {dt:.1f} s, peak {mib(peak_one)} per process' + (f', {mib(peak_all)} all processes' if WIN else ''))
     if code:
         sys.exit(code)
+    if OBJECT_CACHE:
+        used = [e for e in (OBJECT_CACHE[0] / 'entries').glob('*.json') if e.stat().st_mtime >= cache_start - 2]
+        reused = sum(1 for e in used if cache_before.get(e.name) == e.read_bytes())
+        print(f'object cache: {reused} of {nfiles} generated objects reused, {len(used) - reused} compiled')
     for mod, files in objs.items():
         size = sum(o.stat().st_size for o in files)
         print(f'  {mod:8} {len(files):5} objects {mib(size):>14}')
@@ -863,6 +890,9 @@ def main():
     if args.make_runtime_lib:
         print(f'{below_root(exe)}: {mib(exe.stat().st_size)}')
         return
+    if OBJECT_CACHE:
+        kept, dropped, gone = objcache.prune(OBJECT_CACHE[0], cache_start - 2)
+        print(f'object cache: {kept} entries kept, {dropped} older entries and {gone} objects deleted')
     for dll in dlls:   # dynamic SDL3 (zlib) and its libiconv (LGPL, unmodified DLL), found next to totk.exe
         shutil.copy2(dll, exe.parent / dll.name)
     sections, image = pe_sections(exe) if WIN else elf_sections(exe)

@@ -566,6 +566,9 @@ class Lift(Step):
 # ---- 4. compile
 
 NINJA_LINE = re.compile(r'^\[(\d+)/(\d+)\] ')
+# The generated objects of the last build (tools/objcache.py), in the install folder so the cleanup of the temp folder
+# keeps them: the next update that lifts the same code copies them instead of compiling (about 310 MiB for 1.4.3).
+OBJECT_CACHE = 'cache/objects'
 
 
 class Compile(Step):
@@ -606,7 +609,7 @@ class Compile(Step):
             '--runtime', layout.runtime, '--runtime-lib', layout.runtime_lib, '--ninja', layout.ninja,
             '--version', version_tag(game_version(ctx)), '--expected', layout.expected(game_version(ctx)),
             '--exefs', dest / 'exefs', '--romfs', dest / 'romfs',
-            '--profile', dest / 'profile'], parse)
+            '--profile', dest / 'profile', '--object-cache', dest / OBJECT_CACHE], parse)
         exe = build / ('totk' + EXE)
         if code or not exe.is_file():
             raise InstallError('compile.failed', code=code, log=str(log))

@@ -25,6 +25,7 @@ The install folder (`main.c` `portable_paths()` reads this layout; it stays port
   profile/                       saves
   logs/                          totk.log of the last run, totk.1.log to totk.4.log of the runs before it
   shader and pipeline caches     prepared by the setup; shader-cache/shader-cache.pack holds the translations
+  cache/objects/                 the generated objects of the last compile (tools/objcache.py), about 310 MiB
   totk-install.json              what built this folder: release version, input hashes, finished steps
 ```
 
@@ -32,7 +33,9 @@ The install folder (`main.c` `portable_paths()` reads this layout; it stays port
 
 The player runs a newer installer on the same folder. It reads `totk-install.json`, keeps `romfs/`, `exefs/`,
 `profile/` and `totk.ini` after checking their hashes, rebuilds `totk.exe` and re-prepares the shaders. A newer
-release that changes nothing game-derived skips the rebuild.
+release that changes nothing game-derived skips the rebuild. The rebuild compiles only the chunks of generated C whose
+source or included headers changed since the last one: the others come from `cache/objects/`, as long as the release's
+clang is the same version.
 
 Given an update file other than the recorded one (1.2.1, then 1.4.3), the installer extracts and builds again from it and
 keeps `profile/`. Saves carry over both ways: 1.4.3 converts a 1.2.1 save on load, and 1.2.1 loads the saves 1.4.3 wrote.
@@ -48,7 +51,10 @@ keeps `profile/`. Saves carry over both ways: 1.4.3 converts a 1.2.1 save on loa
    to the installer.
 4. **Compile** the generated C, `modules.c`, `romfs.c`, `patches.c` and `ov_zstd.c` (they bake the per-install layout, RomFS
    hashes and the game version's patch page) and link
-   them with the prebuilt runtime library into `totk.exe` (`build_game.py --runtime-lib`; about 3 min on 24 cores).
+   them with the prebuilt runtime library into `totk.exe` (`build_game.py --runtime-lib`; about 3 min on 24 cores, 12 on
+   16 threads). `--object-cache <dest>/cache/objects` (`tools/objcache.py`) keeps the objects for the next update: a
+   chunk with the same source, headers, flags and compiler is copied instead of compiled, and the cache keeps only the
+   objects of the latest build.
 5. **Prepare** the RomFS patches and the shaders (`tools/make_romfs_patches.py`, `tools/prepare_shaders.py`,
    `totk.exe --prepare-shaders`) in the install folder, then fold the shader cache's loose files (four per shader, about
    117,000) into `shader-cache/shader-cache.pack` (`tools/pack_shader_cache.py`). totk.exe reads the pack first and
