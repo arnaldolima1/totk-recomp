@@ -47,13 +47,19 @@ static int g_started;
 
 void gfx_window_mark_dirty(void) { plat_xchg32(&g_dirty, 1); }
 
-// The window gained or lost the focus: the game hears it as nn::oe's focus state and a notification message.
+// The window gained or lost the focus: the game hears it as nn::oe's focus state and a notification message. The line
+// carries the local wall time, the only one in the log: when a GPU hang takes the whole system down, the log ends
+// without an error, and this time set against the driver's entry in the Windows event log (nvlddmkm 153, Display 4101)
+// tells whether an alt-tab or an overlay came before the hang or followed it.
 void gfx_window_focus_changed(int in) {
     plat_xchg32(&g_focused, in);
     oe_set_focus(in);                          // pinned to 1 by TOTK_ASSUME_FOCUS inside
     oe_push_message(OE_MSG_FOCUS_STATE_CHANGED);
     plat_inc32(&g_focus_msgs);
-    rt_log("gfx: window %s the focus", in ? "gained" : "lost");
+    struct tm t;
+    plat_local_time(&t);
+    rt_log("gfx: window %s the focus at %04d-%02d-%02d %02d:%02d:%02d local time", in ? "gained" : "lost",
+           t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec);
 }
 
 // The window was closed: the process ends with it, as in MNG, once a save Commit still running in the background is
