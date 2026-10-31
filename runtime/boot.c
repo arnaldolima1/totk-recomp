@@ -18,6 +18,7 @@
 #include "fs.h"
 #include "gfx.h"
 #include "nvn_api.h"
+#include "platform/platform.h"
 #include "vk.h"
 
 #define SYM_INIT_START "_ZN2nn4init5StartEmmPFvvES2_S2_"
@@ -326,7 +327,7 @@ static DWORD WINAPI prewarm_main(void *arg) {
     vk_pipeline_prewarm();
     const char *prep = cfg_get("TOTK_TEST_PREPARE_SHADERS");   // Task 2.3 test hook; Task 2.6 builds the preparation
     if (prep && !strcmp(prep, "1")) {
-        int cpus = (int)GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+        int cpus = (int)plat_cpu_usable();
         gfx_shader_prepare_recorded(cpus, cpus / 2 > 16 ? 16 : cpus / 2 < 1 ? 1 : cpus / 2);
     }
     return 0;

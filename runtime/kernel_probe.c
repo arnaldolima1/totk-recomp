@@ -416,7 +416,7 @@ static void test_cores(Cpu *c) {
     for (int i = 0; i < CORE_WORKERS; i++) join(c, h[i]);
     int now, held_max;
     kern_core_stats(&now, &held_max);
-    DWORD cpus = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+    DWORD cpus = plat_cpu_usable();
     int gate = !cfg_bool("TOTK_FREE_CORES");   // the kernel's own switch
     int ok = g_run_max <= 3 && held_max <= 3 && !g_core_clash && (cpus < 4 || g_run_max == 3);
     printf("virtual cores: %d threads x %d runs on %lu host CPUs: at most %ld running guest code at once, at most %d "

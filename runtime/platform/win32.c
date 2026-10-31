@@ -66,6 +66,18 @@ uint32_t plat_cpu_count(void) {
     return n ? (uint32_t)n : 1;
 }
 
+// The processors of the process's affinity mask: what `start /affinity`, Task Manager's "Set affinity" or a launcher
+// leaves this process. A process that spans processor groups (more than 64 logical processors) gets no mask from
+// GetProcessAffinityMask (both masks 0): every active processor counts then.
+uint32_t plat_cpu_usable(void) {
+    DWORD_PTR proc = 0, sys = 0;
+    if (GetProcessAffinityMask(GetCurrentProcess(), &proc, &sys) && proc && sys) {
+        uint32_t n = (uint32_t)__builtin_popcountll((unsigned long long)proc);
+        if (n) return n;
+    }
+    return plat_cpu_count();
+}
+
 // ---- time
 
 static uint64_t qpc_freq(void) {

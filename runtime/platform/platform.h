@@ -19,7 +19,8 @@ void plat_thread_detach(PlatThread *t);   // frees t; the thread runs on
 // Restricts t (NULL: the calling thread) to the logical processors in mask (bit n = processor n of the first group).
 // Returns the previous mask, 0 on failure.
 uint64_t plat_thread_affinity(PlatThread *t, uint64_t mask);
-uint32_t plat_cpu_count(void);            // logical processors
+uint32_t plat_cpu_count(void);            // logical processors of the machine (system info)
+uint32_t plat_cpu_usable(void);           // the ones this process may run on (its affinity mask): size thread pools by it
 
 // ---- time
 uint64_t plat_now_ns(void);               // monotonic, high resolution, arbitrary epoch
