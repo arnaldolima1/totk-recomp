@@ -241,7 +241,7 @@ static char *lang(void) {
     return s;
 }
 
-static void set_env(const char *name, const char *value) { plat_setenv(name, value ? value : ""); }
+static void set_env(const char *name, const char *value) { plat_setenv(name, value); }   // NULL removes it
 
 static void probe_oe(void) {
     char *keep_lang = cfg_get("TOTK_LANG") ? strdup(cfg_get("TOTK_LANG")) : NULL;

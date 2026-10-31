@@ -621,7 +621,9 @@ void plat_exit(int code) {
     ExitProcess((UINT)code);
 }
 
-int plat_setenv(const char *name, const char *value) { return SetEnvironmentVariableA(name, value) != 0; }
+// _putenv_s, not SetEnvironmentVariableA: getenv reads the C runtime's copy of the environment, which only the CRT's
+// own calls update. An empty value removes the variable.
+int plat_setenv(const char *name, const char *value) { return _putenv_s(name, value ? value : "") == 0; }
 
 uint32_t plat_process_id(void) { return GetCurrentProcessId(); }
 
