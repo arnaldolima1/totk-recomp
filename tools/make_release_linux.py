@@ -88,7 +88,8 @@ LLVM_MEMBERS = [f'bin/clang-{LLVM_MAJOR}', 'bin/clang', 'bin/clang++', 'bin/lld'
 SNIPER_MEMBERS = ['usr/include', 'usr/share/pkgconfig', 'usr/lib/x86_64-linux-gnu', 'usr/lib/gcc/x86_64-linux-gnu',
                   'lib/x86_64-linux-gnu', 'lib64', 'usr/share/doc/libsdl3-0', 'usr/share/doc/libopus0',
                   'usr/share/doc/libvpx6', 'usr/share/doc/libc6', 'usr/share/doc/gcc-10-base',
-                  'usr/share/doc/libvulkan1']
+                  'usr/share/doc/libvulkan1',
+                  'usr/share/doc/libxft2', 'usr/share/doc/libxrender1']
 # glibc's link libraries and their scripts (lib<name>.so, .a, _nonshared.a), and the GCC runtime pieces clang links.
 GLIBC_LIBS = ['c', 'm', 'mvec', 'dl', 'pthread', 'rt', 'util']
 GCC_LIBS = {'libgcc.a', 'libgcc_eh.a', 'libgcc_s.so', 'libstdc++.a', 'libsupc++.a'}
@@ -143,7 +144,7 @@ def full_sysroot():
     """The sniper SDK's x86_64 compile and link files in toolchain/release-work/sniper, absolute symlinks made relative
     (the SDK points some at /lib and /usr/lib, which outside its container are the host's)."""
     root = WORK / 'sniper'
-    if (root / '.relinked').is_file() and (root / 'usr/share/pkgconfig/xproto.pc').is_file():
+    if (root / '.relinked').is_file() and (root / 'usr/share/doc/libxft2/copyright').is_file():
         return root
     # Older cached SDK extractions omitted the font libraries' architecture-independent pkg-config files.
     (root / '.unpacked').unlink(missing_ok=True)
@@ -343,6 +344,12 @@ def build_tk_xft(out, llvm, sysroot):
     dst = out / 'python' / 'lib'
     for name in ('libtcl9.0.so', 'libtcl9tk9.0.so'):
         shutil.copy2(lib / name, dst / name)
+    # libXft is not on every desktop (the old Tk did not need it) and without it _tkinter fails to import, so the
+    # window would not open at all. python's RPATH ($ORIGIN/../lib) finds these beside the Tk library.
+    sys_lib = sysroot / 'usr' / 'lib' / 'x86_64-linux-gnu'
+    for pattern in ('libXft.so.2*', 'libXrender.so.1*'):
+        for f in sys_lib.glob(pattern):
+            shutil.copy2(f, dst / f.name, follow_symlinks=False)
     for name in ('tcl9.0', 'tk9.0'):
         shutil.rmtree(dst / name)
         shutil.copytree(lib / name, dst / name, symlinks=True)
@@ -390,6 +397,8 @@ def collect_licenses(out, sysroot):
         (doc / 'libc6' / 'copyright', 'glibc-copyright.txt'),
         (doc / 'gcc-10-base' / 'copyright', 'libstdc++-copyright.txt'),
         (doc / 'libvulkan1' / 'copyright', 'vulkan-loader-copyright.txt'),
+        (doc / 'libxft2' / 'copyright', 'libXft-copyright.txt'),
+        (doc / 'libxrender1' / 'copyright', 'libXrender-copyright.txt'),
         (WORK / 'vulkan-headers' / 'LICENSE.md', 'vulkan-headers-LICENSE.txt'),
         (WORK / 'zstd' / 'LICENSE', 'zstd-LICENSE.txt'),
         (out / 'python' / 'lib' / f'python{sys_version(out)}' / 'LICENSE.txt', 'python-LICENSE.txt'),
