@@ -1172,7 +1172,13 @@ size_t plat_getenv(const char *name, char *out, size_t cap) {
     return n;
 }
 
-uint32_t plat_thread_id(void) { return (uint32_t)syscall(SYS_gettid); }
+// gettid is a system call, and plat_rmutex_lock (common.c) asks for the id on every lock, so each thread reads it
+// once. A thread's id never changes, and child processes come from posix_spawn, never fork, so no stale id survives.
+uint32_t plat_thread_id(void) {
+    static __thread uint32_t tid;
+    if (!tid) tid = (uint32_t)syscall(SYS_gettid);
+    return tid;
+}
 
 // The first set variable of names ("ru_RU.UTF-8") as a BCP-47 tag ("ru-RU") into tag; "" for C and POSIX.
 static void locale_tag(const char *const *names, int n, char *tag, size_t cap) {
