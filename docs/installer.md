@@ -34,7 +34,7 @@ The player runs a newer installer on the same folder. It reads `totk-install.jso
 `profile/` and `totk.ini` after checking their hashes, rebuilds `totk.exe` and re-prepares the shaders. A newer
 release that changes nothing game-derived skips the rebuild.
 
-Given another update file than the recorded one (1.2.1, then 1.4.3), the installer extracts and builds again from it and
+Given an update file other than the recorded one (1.2.1, then 1.4.3), the installer extracts and builds again from it and
 keeps `profile/`. Saves carry over both ways: 1.4.3 converts a 1.2.1 save on load, and 1.2.1 loads the saves 1.4.3 wrote.
 
 ## Setup steps
