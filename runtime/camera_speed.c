@@ -3,9 +3,8 @@
 // StickSensitivity {0.8, 1.2, 1.6, 2.0, 2.4} in Component/PlayerCameraParam/PlayerCamera.game__component__
 // PlayerCameraParam.bgyml inside Pack/Actor/PlayerCamera.pack.zs. romfs.c serves a copy of that pack with every entry
 // multiplied (cam_pack_build), so the setting raises the camera's top speed as well as its speed at a partial tilt, at
-// any of the five sensitivities. The mouse camera reaches the game as a right-stick deflection (input_win.c,
-// mouse_camera); input_win.c divides it by the same factor (cam_speed_applied), so TOTK_MOUSE_SENS alone sets the
-// mouse's speed.
+// any of the five sensitivities. The mouse camera reaches the game as a right-stick deflection (input.c, mouse_camera),
+// which divides it by the same factor (cam_speed_applied), so TOTK_MOUSE_SENS alone sets the mouse's speed.
 //
 // The pack is a SARC archive compressed with the dictionary pack.zsdic of Pack/ZsDic.pack.zs. A float in a BYML array
 // is stored in the array itself, so the multiplied values take the bytes of the old ones and no offset moves.
