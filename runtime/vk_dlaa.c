@@ -28,7 +28,7 @@ typedef int NgxResult;   // NVSDK_NGX_Result: 1 success, 0xBAD00000 | n failures
 #define NGX_OK(r) (((unsigned)(r) & 0xFFF00000u) != 0xBAD00000u)
 #define NGX_VERSION_API 0x15
 #define NGX_FEATURE_SUPERSAMPLING 1
-#define NGX_PERFQ_DLAA 5
+#define NGX_PERFQ_DLAA 5   // NVSDK_NGX_PerfQuality_Value: 0 performance, 1 balanced, 2 quality, 3 ultra performance
 typedef struct NgxParam NgxParam;
 typedef struct NgxHandle NgxHandle;
 typedef struct { void *slot[17]; } NgxParamVtbl;
@@ -203,13 +203,21 @@ void vk_dlaa_init(void) {
 // quarter of the scene starts the bloom chain, which reads it. After the bloom come the tonemap and post passes, then
 // the HUD is drawn into the same target and a last pass copies it to the 8-bit output.
 // So: after the G-buffer, a pass at the scene size with exactly one colour target (R11G11B10F or RGBA16F) and the D32F
-// depth arms the frame with that pair; the next pass at most a quarter as wide runs DLAA on the armed target first.
-// Bloom, tonemap, post and HUD then all work on the anti-aliased picture.
+// depth arms the frame with that pair; the next pass at most a quarter as wide ends the scene (no jitter after it) and,
+// when the scene is as wide as the output, runs DLAA on the armed target first. Bloom, tonemap, post and HUD then all
+// work on the anti-aliased picture.
+// Upscaling (a scene smaller than the output: TOTK_DLSS quality/balanced/performance, or the game's own 5/6): measured
+// at a 960x536 scene, 1920x1080 output, the bloom and its composite write back into the light target at the scene size,
+// then one full-screen draw (the FXAA shader below, which also scales) reads it into an output-sized R11G11B10F target
+// with no depth, and the HUD is drawn over that target at the output size. DLSS runs at the begin of that pass: it
+// reads the light target and its result is blitted into the pass's target, whose scaling draw is then skipped. The
+// HUD, drawn afterwards into the same target, is never jittered nor passed through DLSS.
 static struct {
     VkExecTarget color, depth;   // the armed pair, valid in the frame it was armed
     int armed, done, gbuf;       // this frame: armed on the light target, DLAA ran, the G-buffer was drawn
+    int ended, up;               // this frame: the scene is drawn (jitter over), DLSS wrote the scaled output
     struct Size {                // a DLSS feature and its work images per scene size (dynamic resolution flips it)
-        uint32_t w, h;
+        uint32_t w, h, ow, oh;   // render size, output size
         VkImage out, mv;
         VmaAllocation out_mem, mv_mem;
         VkImageView out_view, mv_view;
@@ -275,13 +283,14 @@ static void free_size(struct Size *e) {
     memset(e, 0, sizeof *e);
 }
 
-// The entry for a scene size: its output (RGBA16F, written by DLSS, then blitted back into the scene target) and
-// motion vectors (RG16F, render pixels), both kept in GENERAL like every image of the back end. TotK's dynamic
-// resolution switches between a few sizes; each keeps its feature, the least recently used goes for a new one.
-static struct Size *size_for(VkCommandBuffer cb, uint32_t w, uint32_t h) {
+// The entry for a scene and output size: its output (RGBA16F at the output size, written by DLSS, then blitted into
+// the target) and motion vectors (RG16F at the scene size, render pixels), both kept in GENERAL like every image of the
+// back end. TotK's dynamic resolution switches between a few sizes; each keeps its feature, the least recently used
+// goes for a new one.
+static struct Size *size_for(VkCommandBuffer cb, uint32_t w, uint32_t h, uint32_t ow, uint32_t oh) {
     struct Size *e = NULL, *lru = &D.sizes[0];
     for (int i = 0; i < 3; i++) {
-        if (D.sizes[i].w == w && D.sizes[i].h == h) return &D.sizes[i];
+        if (D.sizes[i].w == w && D.sizes[i].h == h && D.sizes[i].ow == ow && D.sizes[i].oh == oh) return &D.sizes[i];
         if (!D.sizes[i].out && !e) e = &D.sizes[i];
         if (D.sizes[i].used < lru->used) lru = &D.sizes[i];
     }
@@ -291,7 +300,7 @@ static struct Size *size_for(VkCommandBuffer cb, uint32_t w, uint32_t h) {
     }
     VkImageUsageFlags u = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                           VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    if (!image2d(w, h, VK_FORMAT_R16G16B16A16_SFLOAT, u, &e->out, &e->out_mem, &e->out_view) ||
+    if (!image2d(ow, oh, VK_FORMAT_R16G16B16A16_SFLOAT, u, &e->out, &e->out_mem, &e->out_view) ||
         !image2d(w, h, VK_FORMAT_R16G16_SFLOAT, u, &e->mv, &e->mv_mem, &e->mv_view))
         return NULL;
     VkImageMemoryBarrier2 ib[2];
@@ -308,7 +317,7 @@ static struct Size *size_for(VkCommandBuffer cb, uint32_t w, uint32_t h) {
     VkDependencyInfo di = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .imageMemoryBarrierCount = 2,
                            .pImageMemoryBarriers = ib};
     vkCmdPipelineBarrier2(cb, &di);
-    e->w = w, e->h = h;
+    e->w = w, e->h = h, e->ow = ow, e->oh = oh;
     return e;
 }
 
@@ -435,13 +444,13 @@ static float halton(uint32_t i, uint32_t b) {
 }
 
 void vk_dlaa_viewport(VkExec *ex, VkViewport *v) {
-    if (!D.jit_ok || D.done || !ex->depth.image || ex->depth.image != D.jdepth) return;
+    if (!D.jit_ok || D.ended || !ex->depth.image || ex->depth.image != D.jdepth) return;
     v->x += D.jx, v->y += D.jy;
     D.ux = D.jx, D.uy = D.jy, D.jit_used = 1;
 }
 
 void vk_dlaa_draw(VkExec *ex) {
-    if (!dl_active() || D.done) return;
+    if (!dl_active() || D.ended) return;
     const p_bind_buf *b = &ex->ubo[0][1];   // constant bank c4: the replay keeps user banks from c3 on
     const VkExecTarget *z = &ex->depth;
     if (b->size == 0x940 && b->addr && z->image && z->width >= 640 && z->format == VK_FORMAT_D32_SFLOAT &&
@@ -460,12 +469,21 @@ static void next_jitter(void) {
     D.jit_ok = !D.hold && !nj;
 }
 
-static void evaluate(VkExec *ex) {
+// The quality setting DLSS is created with, from the scene's share of the output width.
+static int perf_quality(uint32_t w, uint32_t ow) {
+    if (w >= ow) return NGX_PERFQ_DLAA;
+    double k = (double)w / ow;
+    return k >= 0.66 ? 2 : k >= 0.57 ? 1 : k >= 0.49 ? 0 : 3;
+}
+
+// dst: the target DLSS's picture goes to, NULL for the light target itself (DLAA in place).
+static void evaluate(VkExec *ex, const VkExecTarget *dst) {
     const VkExecTarget *t = &D.color, *z = &D.depth;
-    uint32_t w = t->width, h = t->height;
+    if (!dst) dst = t;
+    uint32_t w = t->width, h = t->height, ow = dst->width, oh = dst->height;
     VkCommandBuffer cb = ex->cb;
     vk_exec_barrier(ex);   // what drew the scene is done (no pass is open here)
-    struct Size *e = size_for(cb, w, h);
+    struct Size *e = size_for(cb, w, h, ow, oh);
     if (!e) return dl_fail("work image creation", 0);
     if (e != D.last) D.reset = 1, D.why[0]++;   // another size's history is from another moment
     if (!D.params && !NGX_OK(N.alloc_params(&D.params))) return dl_fail("parameter allocation", 0);
@@ -488,23 +506,23 @@ static void evaluate(VkExec *ex) {
         p_setu(p, "VisibilityNodeMask", 1);
         p_setu(p, "Width", w);
         p_setu(p, "Height", h);
-        p_setu(p, "OutWidth", w);
-        p_setu(p, "OutHeight", h);
-        p_seti(p, "PerfQualityValue", NGX_PERFQ_DLAA);
+        p_setu(p, "OutWidth", ow);
+        p_setu(p, "OutHeight", oh);
+        p_seti(p, "PerfQualityValue", perf_quality(w, ow));
         // IsHDR | MVLowRes | AutoExposure: linear scene light, motion vectors at the render size, no exposure texture
         p_seti(p, "DLSS.Feature.Create.Flags", (1 << 0) | (1 << 1) | (1 << 6));
         p_seti(p, "DLSS.Enable.Output.Subrects", 0);
         NgxResult r = N.create(cb, NGX_FEATURE_SUPERSAMPLING, p, &e->feat);
         if (!NGX_OK(r) || !e->feat) return dl_fail("DLSS feature creation", r);
         D.reset = 1;
-        rt_log("dlaa: DLSS feature created at %ux%u (scene format %d, depth format %d)", w, h, (int)t->format,
-               (int)z->format);
+        rt_log("dlaa: DLSS feature created at %ux%u -> %ux%u, quality value %d (scene format %d, depth format %d)", w,
+               h, ow, oh, perf_quality(w, ow), (int)t->format, (int)z->format);
     }
     if (D.last_color != t->image) D.reset = 1, D.why[2]++, D.last_color = t->image;
     VkImageView cv = vk_exec_target_view(t->img, t->format, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_COLOR_BIT, t->level,
                                          t->base_layer, 1, 0);
     NgxResourceVK rc = res_image(cv, t->image, t->format, w, h, VK_IMAGE_ASPECT_COLOR_BIT, 0);
-    NgxResourceVK ro = res_image(e->out_view, e->out, VK_FORMAT_R16G16B16A16_SFLOAT, w, h, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+    NgxResourceVK ro = res_image(e->out_view, e->out, VK_FORMAT_R16G16B16A16_SFLOAT, ow, oh, VK_IMAGE_ASPECT_COLOR_BIT, 1);
     NgxResourceVK rz = res_image(zv, z->image, z->format, w, h, VK_IMAGE_ASPECT_DEPTH_BIT, 0);
     NgxResourceVK rm = res_image(e->mv_view, e->mv, VK_FORMAT_R16G16_SFLOAT, w, h, VK_IMAGE_ASPECT_COLOR_BIT, 0);
     p_setp(p, "Color", &rc);
@@ -527,21 +545,22 @@ static void evaluate(VkExec *ex) {
     D.reset = 0;
     D.last = e, e->used = D.evals + 1;
     full_barrier(cb);
-    // the result back into the scene target, which the bloom, the post passes and the HUD read and draw over
+    // the result into the scene target (DLAA: the bloom, the post passes and the HUD read it and draw over it) or into
+    // the scaling pass's target (the HUD draws over it)
     VkImageBlit b = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                     .srcOffsets = {{0, 0, 0}, {(int32_t)w, (int32_t)h, 1}},
-                     .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, t->level, t->base_layer, 1},
-                     .dstOffsets = {{0, 0, 0}, {(int32_t)w, (int32_t)h, 1}}};
-    vkCmdBlitImage(cb, e->out, VK_IMAGE_LAYOUT_GENERAL, t->image, VK_IMAGE_LAYOUT_GENERAL, 1, &b, VK_FILTER_NEAREST);
+                     .srcOffsets = {{0, 0, 0}, {(int32_t)ow, (int32_t)oh, 1}},
+                     .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, dst->level, dst->base_layer, 1},
+                     .dstOffsets = {{0, 0, 0}, {(int32_t)ow, (int32_t)oh, 1}}};
+    vkCmdBlitImage(cb, e->out, VK_IMAGE_LAYOUT_GENERAL, dst->image, VK_IMAGE_LAYOUT_GENERAL, 1, &b, VK_FILTER_NEAREST);
     full_barrier(cb);
     ex->recorded += 4;
     vk_exec_draw_new_cb();   // NGX bound pipelines and descriptor sets of its own: the next draw binds everything again
     D.jdepth = z->image;
     next_jitter();
     if (++D.evals == 1 || D.evals % 3600 == 0)
-        rt_log("dlaa: %llu frames anti-aliased (scene %ux%u; %llu frames without the DLAA point, %llu with camera "
+        rt_log("dlaa: %llu frames anti-aliased (scene %ux%u, output %ux%u; %llu frames without the DLAA point, %llu with camera "
                "motion, %llu without a camera, %llu jitter holds; resets: %llu size, %llu camera, %llu target)",
-               (unsigned long long)D.evals, w, h, (unsigned long long)D.frames_missed,
+               (unsigned long long)D.evals, w, h, ow, oh, (unsigned long long)D.frames_missed,
                (unsigned long long)D.mv_frames, (unsigned long long)D.mv_none, (unsigned long long)D.holds,
                (unsigned long long)D.why[0], (unsigned long long)D.why[1], (unsigned long long)D.why[2]);
 }
@@ -568,9 +587,20 @@ void vk_dlaa_pass(VkExec *ex) {
         return;
     }
     if (!D.armed) return;
-    if (!ex->pass_w || ex->pass_w * 4 > D.color.width) return;
-    D.done = 1;
-    evaluate(ex);
+    if (!D.ended) {
+        if (!ex->pass_w || ex->pass_w * 4 > D.color.width) return;
+        D.ended = 1;
+        unsigned o[2], s[2];
+        res_sizes(o, s);
+        if (D.color.width >= o[0]) D.done = 1, evaluate(ex, NULL);   // DLAA in place; else wait for the scaling pass
+        return;
+    }
+    // the game's scaling pass: one colour target wider than the scene, no depth
+    if (ex->pass_ncolor == 1 && c->image && !z->image && scene_color(c->format) && c->width > D.color.width &&
+        c->samples <= 1 && !c->is3d) {
+        D.done = D.up = 1;
+        evaluate(ex, c);
+    }
 }
 
 void vk_dlaa_frame(void) {
@@ -579,7 +609,8 @@ void vk_dlaa_frame(void) {
         rt_log("dlaa: %s", on ? "on" : "off");
         D.on = on;
         // either way the next DLAA frame starts a new history from an unjittered frame
-        D.reset = 1, D.cam_prev_ok = 0, D.jit_ok = D.jit_used = D.armed = D.done = D.gbuf = 0, D.hold = 0;
+        D.reset = 1, D.cam_prev_ok = 0, D.jit_ok = D.jit_used = D.armed = D.done = D.gbuf = D.ended = D.up = 0;
+        D.hold = 0;
         return;
     }
     if (!dl_active()) return;
@@ -587,7 +618,7 @@ void vk_dlaa_frame(void) {
     if (D.jit_used && !D.done) D.hold = 60, D.holds++;   // jittered but not resolved: that frame shook
     else if (D.hold) D.hold--;
     if (!D.done) D.jit_ok = 0;
-    D.armed = D.done = D.jit_used = D.gbuf = 0;
+    D.armed = D.done = D.jit_used = D.gbuf = D.ended = D.up = 0;
     D.cam_addr = 0;
 }
 
@@ -597,7 +628,12 @@ void vk_dlaa_frame(void) {
 // game's own switch, ModelSceneExtensionParam EnableFXAA, on and off). With fxaa = 0 the draws of that second pass's
 // fragment shader are skipped, so the scene reaches the HUD as it was. Shaders are known by the FNV-1a hash of their
 // SPIR-V, as vk_dump.c names them; a translator change gives new hashes and the switch then does nothing.
-#define FXAA_FS 0xf450003ebeb3dc52ull
+// With a scene smaller than the output (the game's own 5/6 render scale, or a DLSS mode) the same shader draws the
+// scaled picture into the output-sized target, in a pass without the depth attachment the in-place FXAA has: there it
+// is always drawn, whatever fxaa says (skipping it would leave the 3D picture out), unless DLSS already wrote that
+// target this frame.
+// The stock translator's hash, and the one with tools/xlate patch 0010 (PCSS, PR #89) applied.
+static const uint64_t FXAA_FS[] = {0xf450003ebeb3dc52ull, 0x0a12f4bc2a9a4fbeull};
 
 static uint64_t spirv_hash(const GfxShader *s) {
     static struct { const GfxShader *s; uint64_t h; } tab[8192];
@@ -615,10 +651,14 @@ static uint64_t spirv_hash(const GfxShader *s) {
     return 0;   // table full: no skip
 }
 
-int vk_dlaa_skip_draw(const GfxShader *fs) {
+int vk_dlaa_skip_draw(VkExec *ex, const GfxShader *fs) {
     static uint64_t frame_read = ~0ull;
     static int fxaa = 1;
     uint64_t f = __atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED);
     if (f != frame_read) frame_read = f, fxaa = cfg_bool("TOTK_FXAA");   // once a frame: the menu switches it live
-    return !fxaa && fs && spirv_hash(fs) == FXAA_FS;
+    if (!fs) return 0;
+    uint64_t h = spirv_hash(fs);
+    if (h != FXAA_FS[0] && h != FXAA_FS[1]) return 0;
+    if (!ex->depth.image) return D.up;   // the scaling pass
+    return !fxaa;
 }
