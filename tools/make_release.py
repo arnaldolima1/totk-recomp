@@ -21,6 +21,10 @@ cached in toolchain/release-dl/ and checked against the sha256 in PINS; a mismat
 runtime/ and bin/ (PATH holds the Windows system directory and those), then runs the four probes there. It needs a
 generated/v121 and build/extracted/v121 from the usual game build (they are read, nothing is written to them).
 
+libtotkrt.a compiles against a generated/<version>/layout.h; generated/v121 by default. --stub-layout builds it against
+a stand-in instead (build/release-check/stub-gen), for a machine without the game's generated C such as CI: the runtime
+reads only MOD_MAIN_BASE and MOD_COUNT of that header, and neither depends on the module sizes.
+
 The folder contains nothing derived from the game: check_content runs over it before the script finishes. Then the
 folder's own python runs a check-only installer pass (no game files: it must get through the release, toolchain and host
 checks and stop at the missing game files) and the window's --selftest.
@@ -29,6 +33,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -328,10 +333,29 @@ def collect_licenses(out):
 
 # ---- runtime/, recomp/, tools/, data/ ---------------------------------------------------------------------------------
 
-def runtime_lib(out, llvm):
+# The module count of TotK's ExeFS (main, subsdk0, sdk), the same in every game version; the stand-in layout's MOD_COUNT.
+TOTK_MODULES = 3
+
+
+def stub_layout():
+    """A generated directory with no modules and a layout.h holding only what the runtime reads: MOD_MAIN_BASE, the
+    FIRST_BASE of recomp/layout.py, and MOD_COUNT."""
+    gen = MAIN_ROOT / 'build' / 'release-check' / 'stub-gen'
+    gen.mkdir(parents=True, exist_ok=True)
+    m = re.search(r'^FIRST_BASE = (0x[0-9a-fA-F]+)$', (ROOT / 'recomp' / 'layout.py').read_text(), re.M)
+    if not m:
+        sys.exit('recomp/layout.py: no FIRST_BASE')
+    (gen / 'layout.json').write_text('[]\n', encoding='utf-8')
+    (gen / 'layout.h').write_text(
+        '// Stand-in layout for building libtotkrt.a without the game (tools/make_release.py stub_layout).\n'
+        f'#pragma once\n\n#define MOD_MAIN_BASE {m.group(1)}ull\n#define MOD_COUNT {TOTK_MODULES}\n',
+        encoding='utf-8', newline='\n')
+    return gen
+
+
+def runtime_lib(out, llvm, gen):
     """Build libtotkrt.a with the folder's llvm/ and copy it, the headers and the install-side sources into runtime/."""
     build = MAIN_ROOT / 'build' / 'release-check' / 'rtlib'
-    gen = MAIN_ROOT / 'generated' / 'v121'
     run([sys.executable, ROOT / 'tools' / 'build_game.py', '--make-runtime-lib', '--toolchain', llvm,
          '--deps', out / 'runtime' / 'deps', '--ninja', out / 'bin' / 'ninja.exe', '--gen', gen, '--out', build],
         env=clean_env(llvm / 'bin', out / 'bin'))
@@ -495,6 +519,8 @@ def main():
     ap.add_argument('--out', type=Path, required=True, help='release folder (replaced)')
     ap.add_argument('--zip', type=Path, help='also write the folder as this zip')
     ap.add_argument('--prove', action='store_true', help='only run the compile-and-probe check on an existing folder')
+    ap.add_argument('--stub-layout', action='store_true',
+                    help='build libtotkrt.a against a stand-in layout.h instead of generated/v121 (no game files)')
     args = ap.parse_args()
     out = args.out.resolve()
     if args.prove:
@@ -507,7 +533,7 @@ def main():
     llvm = build_llvm(out)
     build_bin(out)
     build_deps(out)
-    runtime_lib(out, llvm)
+    runtime_lib(out, llvm, stub_layout() if args.stub_layout else MAIN_ROOT / 'generated' / 'v121')
     build_sources(out)
     build_launcher(out, llvm)
     collect_licenses(out)

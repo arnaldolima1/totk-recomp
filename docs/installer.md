@@ -105,6 +105,15 @@ totk.ini.example, VERSION  the default ini; the release string (the repository's
 - The release contains nothing game-derived; `make_release.py` runs `tools/check_content.py` over the folder before it
   finishes.
 
+### Publishing (fork)
+
+A tag `game-v<version>`, where the version is the one in `VERSION`, runs `.github/workflows/game-release.yml`. It builds
+hactool and the shader translator on a Windows runner, then runs `make_release.py --stub-layout`, which compiles
+`libtotkrt.a` without the game's generated C. It publishes `TotK-Setup-<version>-windows.zip` in a release whose text is
+`release-notes/game/<version>.md` when that file exists. The launcher lists every release that carries such a zip.
+Game releases are never marked Latest: the launcher's updater reads `releases/latest/download/latest.json`, which only
+the `launcher-v*` releases carry.
+
 ## Constraints
 
 - The installer steps contain no Win32 calls: Linux follows with its own compiler and the same steps.

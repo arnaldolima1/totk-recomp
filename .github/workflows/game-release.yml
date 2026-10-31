@@ -1,0 +1,85 @@
+# The game's installer release (fork). A tag game-v<version> (the version in VERSION) builds
+# TotK-Setup-<version>-windows.zip with tools/make_release.py and publishes it in a release, which the launcher lists:
+# launcher/src-tauri/src/release.rs takes every release that carries a TotK-Setup-*-windows.zip. The release is never
+# marked Latest, because the launcher's updater reads releases/latest/download/latest.json (tauri.conf.json), which
+# only the launcher-v* releases (launcher-release.yml) carry.
+name: Game release
+
+on:
+  push:
+    tags: ['game-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag matches VERSION
+        run: |
+          $v = (Get-Content VERSION -Raw).Trim()
+          if ("game-v$v" -ne $env:GITHUB_REF_NAME) { throw "tag $env:GITHUB_REF_NAME does not match VERSION $v" }
+          "VERSION=$v" >> $env:GITHUB_ENV
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - uses: astral-sh/setup-uv@v6
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # hactool builds with the UCRT64 gcc and make of the image's own C:\msys64 (tools/build_hactool.py MSYS_BASH)
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          release: false
+          update: false
+          install: mingw-w64-ucrt-x86_64-gcc make
+
+      # the pinned downloads of make_release.py, checked against their sha256 on every use
+      - uses: actions/cache@v4
+        with:
+          path: toolchain/release-dl
+          key: release-dl-${{ hashFiles('tools/make_release.py') }}
+          restore-keys: release-dl-
+
+      # MacNativeGames at the commit tools/fetch_refs.sh pins, with its history: build_xlate.py reads its vendor tree and
+      # data/shader_list.tsv gathers the rows of every revision of the list (tools/shader_list.py history), which a
+      # shallow clone would not have
+      - name: refs/MacNativeGames
+        run: |
+          git clone -q --filter=blob:none https://github.com/ly05010419/MacNativeGames.git refs/MacNativeGames
+          git -C refs/MacNativeGames checkout -q b75be8cfa704df3701e86130c8ced268e79d6b11
+
+      - run: python tools/build_hactool.py
+
+      - run: python tools/build_xlate.py
+
+      # --stub-layout: libtotkrt.a without the game's generated C (make_release.py stub_layout)
+      - run: >-
+          python tools/make_release.py --stub-layout
+          --out "build/release/TotK-Setup-$env:VERSION-windows"
+          --zip "build/release/TotK-Setup-$env:VERSION-windows.zip"
+
+      # the release's text: release-notes/game/<version>.md, else a plain line
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = "release-notes/game/$env:VERSION.md"
+          if (-not (Test-Path $notes)) {
+            $notes = "$env:RUNNER_TEMP/notes.md"
+            "Instalador do jogo, TotK Recomp $env:VERSION. / Game installer, TotK Recomp $env:VERSION." | Out-File -Encoding utf8 $notes
+          }
+          gh release create $env:GITHUB_REF_NAME "build/release/TotK-Setup-$env:VERSION-windows.zip" `
+            --title "TotK Recomp $env:VERSION" --notes-file $notes --latest=false
