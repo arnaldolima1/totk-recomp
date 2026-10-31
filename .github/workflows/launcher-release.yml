@@ -53,6 +53,18 @@ jobs:
             echo 'NOTES_EOF'
           } >> "$GITHUB_OUTPUT"
 
+      # The release is made here with gh, not Latest yet: tauri-action's own create call is refused on this repository
+      # ("Resource not accessible by integration") while gh's goes through. tauri-action then finds it by its tag and
+      # only uploads the installer, its signature and latest.json. A rerun finds the release already there.
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ steps.notes.outputs.body }}
+        shell: bash
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "TotK Recomp Launcher $GITHUB_REF_NAME"               --notes "$NOTES" --latest=false
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -67,3 +79,10 @@ jobs:
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
+
+      # Latest only once the files are there: installed launchers read releases/latest/download/latest.json
+      - name: Mark the release Latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh release edit "$GITHUB_REF_NAME" --latest
