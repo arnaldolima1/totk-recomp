@@ -190,9 +190,9 @@ async function loadReleases() {
 function selectedRelease() { return releases[+$('#rel-list').value] || null; }
 function renderRelease() {
   const r = selectedRelease(), btn = $('#rel-get');
-  const current = status.release_version && r && !newer(r.tag, status.release_version) && !newer(status.release_version, r.tag);
+  const current = !status.dev && status.release_version && r && !newer(r.tag, status.release_version) && !newer(status.release_version, r.tag);
   btn.disabled = !r || status.downloading || status.building || current;
-  btn.textContent = current ? 'Em uso' : status.release ? 'Trocar' : 'Baixar';
+  btn.textContent = current ? 'Em uso' : status.release && !status.dev ? 'Trocar' : 'Baixar';
   if (!status.downloading && !dlError) $('#dl-status').textContent = releasesError || '';
 }
 let dlError = null;
@@ -908,7 +908,7 @@ function renderUpdates() {
       showView('install');
       const i = releases.indexOf(g);
       $('#rel-list').value = String(i);
-      const current = status.release_version && !newer(g.tag, status.release_version) && !newer(status.release_version, g.tag);
+      const current = !status.dev && status.release_version && !newer(g.tag, status.release_version) && !newer(status.release_version, g.tag);
       if (!current) await downloadRelease(g);
       else install();
     });

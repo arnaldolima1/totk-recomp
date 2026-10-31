@@ -143,17 +143,16 @@ fn free_space(p: &Path) -> Option<u64> {
     }
 }
 
-/// The release folder the install runs from: TOTK_LAUNCHER_RELEASE, the one chosen in the launcher, the launcher's
-/// own folder or a folder above it (a release unpacked around it, or the checkout it was built in:
-/// launcher/src-tauri/target/<profile>/).
+/// The release folder the install runs from: TOTK_LAUNCHER_RELEASE, the one chosen or downloaded in the launcher, else
+/// a release unpacked around the launcher (its own folder or one above it, with the release's python/). A repository
+/// checkout is used only when chosen: its dev mode needs the build toolchain (docs/building.md), which players lack.
 fn release_root(app: &AppHandle) -> Option<PathBuf> {
     let env = std::env::var("TOTK_LAUNCHER_RELEASE").ok().map(PathBuf::from);
     let saved = read_config(app).get("release").and_then(|r| r.as_str()).map(PathBuf::from);
     let exe = std::env::current_exe().ok();
-    env.into_iter()
-        .chain(saved)
-        .chain(exe.iter().flat_map(|e| e.ancestors().skip(1).take(8).map(Path::to_path_buf)))
-        .find(|d| is_release(d))
+    let around = exe.iter().flat_map(|e| e.ancestors().skip(1).take(8).map(Path::to_path_buf))
+        .filter(|d| d.join(if cfg!(windows) { "python/python.exe" } else { "python/bin/python3" }).is_file());
+    env.into_iter().chain(saved).filter(|d| is_release(d)).chain(around.filter(|d| is_release(d))).next()
 }
 
 /// The install folder: TOTK_LAUNCHER_HOME, the one chosen in the launcher, the launcher's own folder when the game is
