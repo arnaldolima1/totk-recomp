@@ -291,6 +291,31 @@ class CleanupTest(unittest.TestCase):
         self.assertEqual(self.run_cleanup(), 'cleanup.romfs_unreadable')
 
 
+class BaseGameCheckTest(unittest.TestCase):
+    """Issue #261: an update NSP chosen as the base game was reported as "not Tears of the Kingdom"."""
+    BASE, UPDATE = '0100F2C0115B6000', '0100F2C0115B6800'
+
+    @staticmethod
+    def nca(content_type, title_id):
+        return ({'name': 'x.nca', 'nca_offset': 0, 'size': 0xc00, 'content_type': content_type, 'title_id': title_id}, b'')
+
+    def test_update_package_names_the_update(self):
+        # An update NSP keeps the base title id on its Program NCA; only its Meta NCA carries the update id.
+        records = [self.nca(0, self.BASE), self.nca(1, self.UPDATE)]
+        with self.assertRaises(ValueError):
+            steps.program_nca(records)
+        self.assertEqual(steps.base_misuse(records), 'check.base_is_update')
+
+    def test_combined_package_is_named(self):
+        records = [self.nca(0, self.BASE), self.nca(1, self.BASE), self.nca(1, self.UPDATE)]
+        self.assertEqual(steps.base_misuse(records), 'check.base_combined')
+
+    def test_plain_base_game_passes(self):
+        records = [self.nca(0, self.BASE), self.nca(1, self.BASE), self.nca(3, self.BASE)]
+        self.assertIsNone(steps.base_misuse(records))
+        self.assertEqual(steps.program_nca(records)[0]['title_id'], self.BASE)
+
+
 class EventsTest(unittest.TestCase):
     def test_lines_are_json_and_the_log_is_english(self):
         with tempfile.TemporaryDirectory() as d:
