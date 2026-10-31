@@ -319,8 +319,8 @@ fn write_ini(app: AppHandle, changes: BTreeMap<String, String>) -> Result<(), St
 }
 
 /// Where the installer releases come from: "official" (valentderah/totk-pc-recomp) or "alt" (a repository of the
-/// player's choice, by default this launcher's own). A GitHub token, when set, is sent to the API only, for a private
-/// repository.
+/// player's choice, by default this launcher's own). A GitHub token, when set (in the launcher, else the
+/// TOTK_GITHUB_TOKEN environment variable), is sent to GitHub only, for a private repository.
 #[derive(Serialize)]
 struct Source {
     source: String,
@@ -340,12 +340,13 @@ fn source(app: &AppHandle) -> Source {
         source: which,
         official: release::DEFAULT_REPO.into(),
         alt,
-        has_token: s("token").is_some(),
+        has_token: token(app).is_some(),
     }
 }
 
 fn token(app: &AppHandle) -> Option<String> {
-    read_config(app).get("token").and_then(|v| v.as_str()).map(str::trim).filter(|v| !v.is_empty()).map(String::from)
+    let saved = read_config(app).get("token").and_then(|v| v.as_str()).map(str::trim).filter(|v| !v.is_empty()).map(String::from);
+    saved.or_else(|| std::env::var("TOTK_GITHUB_TOKEN").ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()))
 }
 
 #[tauri::command]
