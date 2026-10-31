@@ -992,6 +992,16 @@ static void tab_achievements(float scale) {
     dl->AddRectFilled(ImVec2(bx, by), ImVec2(bx + bw, by + bh), ui_col(kUiMuted, 0.25f), bh);
     dl->AddRectFilled(ImVec2(bx, by), ImVec2(bx + bw * done / (float)n, by + bh), ui_col(kUiZonai, 0.9f), bh);
     ImGui::Dummy(ImVec2(avail.x, fs * 1.6f));
+    if (int blocked = ach_blocked_count()) {   // a save from elsewhere: why some done ones stay locked
+        char note[512];
+        snprintf(note, sizeof note, menu_text(UI_MENU_ACH_BLOCKED_NOTE), blocked);
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + avail.x);
+        ImGui::PushStyleColor(ImGuiCol_Text, kUiWarn);
+        ImGui::TextUnformatted(note);
+        ImGui::PopStyleColor();
+        ImGui::PopTextWrapPos();
+        ImGui::Dummy(ImVec2(1, 4 * scale));
+    }
 
     float list_h = ImGui::GetContentRegionAvail().y - g_page_bottom;
     ImGui::BeginChild("##ach", ImVec2(avail.x, fmaxf(list_h, fs * 4)), ImGuiChildFlags_NavFlattened);
@@ -1030,6 +1040,8 @@ static void tab_achievements(float scale) {
             char d[32];
             ach_date(v.when, d, sizeof d);
             snprintf(right2, sizeof right2, menu_text(UI_MENU_ACH_UNLOCKED_ON), d);
+        } else if (v.blocked) {
+            snprintf(right2, sizeof right2, "%s", menu_text(UI_MENU_ACH_BLOCKED));
         } else if (v.target > 1) {
             snprintf(right2, sizeof right2, "%.0f / %.0f", floor(fmin(v.cur, v.target)), v.target);
         } else {

@@ -20,14 +20,19 @@ typedef struct {
     int rarity;
     int hidden;            // shown as a secret until unlocked
     int unlocked;
+    int blocked;           // already done in a save from elsewhere: counts only once earned again
     int64_t when;          // unix time of the unlock, 0 when locked
     double cur, target;    // progress in shown units (target 1 for a yes/no condition)
     const uint8_t *icon;   // ACH_ICON * ACH_ICON * 4 bytes, NULL when the file is missing
 } AchView;
 
-// The save storage's newest save directory (save/<uid> or the finished commit in save-tx) after a commit or at start:
-// evaluates the slot whose progress.sav was written last. Runs in the caller's thread (the commit thread).
+// The save storage's newest save directory (save/<uid> or the finished commit in save-tx): after a commit, or once at
+// start. Evaluates the slot whose progress.sav was written last. A commit is the game's own save; at start the save
+// counts as the game's only when every slot matches the fingerprint taken after the last commit, else what it already
+// holds is blocked (a save copied in, a backup put back). Runs in the caller's thread.
 void ach_save_committed(const char *save_dir);
+void ach_save_opened(const char *save_dir);
+int ach_blocked_count(void);         // locked achievements a save from elsewhere already held
 
 int ach_count(void);                 // achievements loaded (0 without compiled.tsv); loads them on the first call
 int ach_get(int i, AchView *out);    // 1 when i is in range; the strings live until exit

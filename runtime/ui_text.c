@@ -66,6 +66,9 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_ACH_NOTICE] = "Achievement unlocked", [UI_MENU_ACH_NOTICE_PLATINUM] = "Platinum trophy!",
     [UI_MENU_ACH_NOTICE_MANY] = "%d achievements unlocked",
     [UI_MENU_ACH_NOTICE_MANY_SUB] = "See them in the menu, on the Achievements tab",
+    [UI_MENU_ACH_BLOCKED] = "Done in a save from elsewhere",
+    [UI_MENU_ACH_BLOCKED_NOTE] = "%d achievements were already done in a save this game did not write here (copied in, "
+                                 "or a backup put back). They count once you earn them by playing, in a new game.",
     [UI_MENU_PERF_OVERLAY] = "Performance overlay",
     [UI_MENU_PERF_OVERLAY_DESC] = "Frame rate in the top right corner. Full adds frame times with a graph, CPU, GPU and "
                                   "memory load, temperatures and the render thread's waits. F10 cycles the modes.",
@@ -357,6 +360,10 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_ACH_NOTICE] = "Достижение получено", [UI_MENU_ACH_NOTICE_PLATINUM] = "Платиновый трофей!",
     [UI_MENU_ACH_NOTICE_MANY] = "Получено достижений: %d",
     [UI_MENU_ACH_NOTICE_MANY_SUB] = "Смотрите в меню, на вкладке «Достижения»",
+    [UI_MENU_ACH_BLOCKED] = "Сделано в чужом сохранении",
+    [UI_MENU_ACH_BLOCKED_NOTE] = "Достижений, уже выполненных в сохранении, которое записала не эта игра здесь "
+                                 "(скопированном или восстановленном из копии): %d. Они засчитаются, когда вы "
+                                 "выполните их в игре, в новой игре.",
     [UI_MENU_PERF_OVERLAY] = "Индикатор производительности",
     [UI_MENU_PERF_OVERLAY_DESC] = "Частота кадров в правом верхнем углу. «Полный» добавляет время кадров с графиком, "
                                   "загрузку ЦП, GPU и памяти, температуры и ожидания потока отрисовки. F10 переключает "
@@ -656,6 +663,10 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_ACH_NOTICE] = "Conquista desbloqueada", [UI_MENU_ACH_NOTICE_PLATINUM] = "Troféu de platina!",
     [UI_MENU_ACH_NOTICE_MANY] = "%d conquistas desbloqueadas",
     [UI_MENU_ACH_NOTICE_MANY_SUB] = "Veja no menu, na aba Conquistas",
+    [UI_MENU_ACH_BLOCKED] = "Feita num save de fora",
+    [UI_MENU_ACH_BLOCKED_NOTE] = "%d conquistas já estavam feitas num save que não foi gravado por este jogo aqui "
+                                 "(copiado ou restaurado de um backup). Elas contam quando você as fizer jogando, num "
+                                 "jogo novo.",
     [UI_MENU_PERF_OVERLAY] = "Indicador de desempenho",
     [UI_MENU_PERF_OVERLAY_DESC] = "Taxa de quadros no canto superior direito. Completo acrescenta os tempos de quadro com "
                                   "um gráfico, o uso de CPU, GPU e memória, as temperaturas e as esperas da thread de "

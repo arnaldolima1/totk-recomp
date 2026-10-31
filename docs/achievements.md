@@ -45,6 +45,12 @@ pieces of its base id are. `tools/achievements.py` `ARMOR_SETS` lists the 33 set
    *Achievements* tab with every achievement, its progress and its unlock date. The icons ride in
    the font atlas as custom rectangles.
 
+Achievements count only for progress made in play. After every commit the runtime keeps a fingerprint (FNV-1a) of each
+slot's `progress.sav` in `profile/achievements-state.tsv`. At start, a save whose slots do not all match was put there
+while the game was closed (copied from elsewhere, or a backup restored): the achievements it already satisfies are
+blocked instead of unlocked, listed with that note on the tab, and become earnable again once their condition is false
+in a later save (a new game).
+
 The notice comes with the save after the feat, not at the feat itself: the game autosaves often, so that is seconds to
 a few minutes.
 
@@ -66,3 +72,4 @@ reads them at its next start.
 | `achievements/sources/<id>.png` | the editor (imported pictures) |
 | `achievements/compiled.tsv`, `achievements/icons/<id>.rgba` | the compiler |
 | `profile/achievements.tsv` | the game: the unlocked ids and when |
+| `profile/achievements-state.tsv` | the game: the slots' fingerprints and the blocked ids |

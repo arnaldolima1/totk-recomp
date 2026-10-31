@@ -589,7 +589,7 @@ static void storage_init(void *param) {
     make_dirs(p);
     plat_xchg32(&storage_ready, 1);
     rt_log("host save storage: %s", save_root);
-    ach_save_committed(newest_save());   // the progress the newest save already holds
+    ach_save_opened(newest_save());   // the progress the newest save already holds
     return;
 }
 

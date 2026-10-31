@@ -19,6 +19,7 @@ typedef struct {
     double min, unit;
     uint8_t *icon;
     int unlocked;
+    int blocked;   // already true in a save the game did not write here: unlocks only after it is false again
     int64_t when;
     double cur;
 } Ach;
@@ -34,7 +35,14 @@ static HashList *lists;
 static int nlists;
 static PlatMutex lock = PLAT_MUTEX_INIT;
 static PlatOnce load_once = PLAT_ONCE_INIT;
-static char unlocked_path[1100];
+static char unlocked_path[1100], state_path[1100];
+
+// The saves this game wrote: a fingerprint (FNV-1a, 64-bit) of each slot's progress.sav after every commit, kept in
+// <profile>/achievements-state.tsv with the blocked achievements. A slot that differs at start was replaced while the
+// game was closed (a save from elsewhere, or a backup put back): what it already holds does not unlock.
+enum { SLOTS = 10 };
+static uint64_t slot_print[SLOTS];
+static int slot_known[SLOTS];
 
 // Announcements: unlocks in batches, one batch per evaluation.
 enum { NOTICE_CAP = 256 };
@@ -125,12 +133,69 @@ static void save_unlocked(void) {
     free(out);
 }
 
+static void load_state(void) {
+    uint64_t size = 0;
+    char *text = (char *)plat_file_read(state_path, &size);
+    if (!text) return;
+    char *pos = text;
+    for (char *line; (line = next_line(&pos));) {
+        char *f[3];
+        int n = split(line, f, 3);
+        if (!strcmp(f[0], "F") && n >= 3) {
+            int slot = atoi(f[1]);
+            if (slot >= 0 && slot < SLOTS) slot_print[slot] = strtoull(f[2], NULL, 16), slot_known[slot] = 1;
+        } else if (!strcmp(f[0], "B") && n >= 2) {
+            for (int i = 0; i < nach; i++)
+                if (!strcmp(achs[i].id, f[1])) achs[i].blocked = 1;
+        }
+    }
+    free(text);
+}
+
+static void save_state(void) {
+    size_t cap = 256 + (size_t)nach * 64 + SLOTS * 40, n = 0;
+    char *out = malloc(cap);
+    if (!out) return;
+    n += snprintf(out + n, cap - n, "# F slot fingerprint of the progress.sav this game wrote; B an achievement that "
+                                    "was already done in a save from elsewhere (runtime/achievements.c)\n");
+    for (int i = 0; i < SLOTS; i++)
+        if (slot_known[i]) n += snprintf(out + n, cap - n, "F\t%d\t%016llx\n", i, (unsigned long long)slot_print[i]);
+    for (int i = 0; i < nach && n < cap; i++)
+        if (achs[i].blocked) n += snprintf(out + n, cap - n, "B\t%s\n", achs[i].id);
+    if (!plat_file_write_atomic(state_path, out, n)) rt_log("achievements: cannot write %s", state_path);
+    free(out);
+}
+
+static uint64_t fnv1a(const uint8_t *d, uint64_t n) {
+    uint64_t h = 0xcbf29ce484222325ull;
+    for (uint64_t i = 0; i < n; i++) h = (h ^ d[i]) * 0x100000001b3ull;
+    return h;
+}
+
+// The fingerprint of each slot's progress.sav under save_dir into print (present[i]: the slot has one); returns how
+// many slots have one.
+static int slot_prints(const char *save_dir, uint64_t *print, int *present) {
+    int found = 0;
+    for (int slot = 0; slot < SLOTS; slot++) {
+        char path[1200];
+        uint64_t size = 0;
+        snprintf(path, sizeof path, "%s/slot_%02d/progress.sav", save_dir, slot);
+        uint8_t *d = plat_file_read(path, &size);
+        present[slot] = d != NULL;
+        print[slot] = d ? fnv1a(d, size) : 0;
+        found += d != NULL;
+        free(d);
+    }
+    return found;
+}
+
 static void load(void *arg) {
     (void)arg;
     char dir[1024], path[1200], tsv[1200];
     exe_dir(dir, sizeof dir);
     snprintf(tsv, sizeof tsv, "%sachievements/compiled.tsv", dir);
     snprintf(unlocked_path, sizeof unlocked_path, "%s/achievements.tsv", rt_config()->profile);
+    snprintf(state_path, sizeof state_path, "%s/achievements-state.tsv", rt_config()->profile);
     uint64_t size = 0;
     char *text = (char *)plat_file_read(tsv, &size);
     if (!text) {
@@ -202,6 +267,7 @@ static void load(void *arg) {
     for (int i = 0; i < nach; i++)
         if (achs[i].kind == K_ALL) achs[i].min = others;
     load_unlocked();
+    load_state();
     int done = 0;
     for (int i = 0; i < nach; i++) done += achs[i].unlocked;
     rt_log("achievements: %d loaded from %s, %d unlocked before", nach, tsv, done);
@@ -333,9 +399,9 @@ static int newest_progress(const char *save_dir, char *out, size_t cap) {
     return found;
 }
 
-void ach_save_committed(const char *save_dir) {
-    ensure_loaded();
-    if (!nach || !save_dir) return;
+// trusted: the newest save is one this game wrote (a commit just now, or the save at start matching the fingerprints);
+// otherwise what it already holds is blocked instead of unlocked.
+static void evaluate(const char *save_dir, int trusted) {
     char path[1200];
     if (!newest_progress(save_dir, path, sizeof path)) return;
     Save s = {0};
@@ -351,14 +417,20 @@ void ach_save_committed(const char *save_dir) {
     save_free(&s);
 
     plat_mutex_lock(&lock);
-    int fresh[1024], nfresh = 0, others = 0, others_done = 0;
+    int fresh[1024], nfresh = 0, others = 0, others_done = 0, changed = 0, blocked = 0;
     int64_t now = (int64_t)time(NULL);
     for (int i = 0; i < n; i++) {
         Ach *a = &achs[i];
         if (a->kind == K_ALL || a->kind < 0) continue;
         a->cur = vals[i];
         others++;
-        if (!a->unlocked && vals[i] >= a->min) {
+        int done = vals[i] >= a->min;
+        if (!done && a->blocked) {   // false again (a new game): it can be earned
+            a->blocked = 0, changed = 1;
+        } else if (done && !a->unlocked && !a->blocked && !trusted) {
+            a->blocked = 1, changed = 1;
+            blocked++;
+        } else if (done && !a->unlocked && !a->blocked) {
             a->unlocked = 1, a->when = now;
             fresh[nfresh++] = i;
         }
@@ -381,7 +453,41 @@ void ach_save_committed(const char *save_dir) {
         rt_log("achievements: unlocked %s (%s)", achs[fresh[k]].id, achs[fresh[k]].name);
     }
     if (nfresh) save_unlocked();
+    if (blocked) rt_log("achievements: the save at start was not written by this game here; %d achievements it already "
+                        "holds do not unlock until they are earned again", blocked);
+    if (changed) save_state();
     plat_mutex_unlock(&lock);
+}
+
+// After evaluating: the slots as they are now are the ones this game wrote.
+static void remember_slots(const char *save_dir) {
+    uint64_t print[SLOTS];
+    int present[SLOTS];
+    slot_prints(save_dir, print, present);
+    plat_mutex_lock(&lock);
+    for (int i = 0; i < SLOTS; i++) slot_print[i] = print[i], slot_known[i] = present[i];
+    save_state();
+    plat_mutex_unlock(&lock);
+}
+
+void ach_save_committed(const char *save_dir) {
+    ensure_loaded();
+    if (!nach || !save_dir) return;
+    evaluate(save_dir, 1);
+    remember_slots(save_dir);
+}
+
+void ach_save_opened(const char *save_dir) {
+    ensure_loaded();
+    if (!nach || !save_dir) return;
+    uint64_t print[SLOTS];
+    int present[SLOTS], same = 1;
+    if (!slot_prints(save_dir, print, present)) return;   // no save yet: a new game
+    for (int i = 0; i < SLOTS; i++)
+        if (present[i] && (!slot_known[i] || slot_print[i] != print[i])) same = 0;
+    if (!same) rt_log("achievements: the save at start differs from the one this game last wrote");
+    evaluate(save_dir, same);
+    remember_slots(save_dir);
 }
 
 int ach_count(void) {
@@ -395,10 +501,19 @@ int ach_get(int i, AchView *out) {
     plat_mutex_lock(&lock);
     const Ach *a = &achs[i];
     double unit = a->unit > 0 ? a->unit : 1;
-    *out = (AchView){a->id, a->name, a->desc, a->rarity, a->hidden, a->unlocked, a->when,
+    *out = (AchView){a->id, a->name, a->desc, a->rarity, a->hidden, a->unlocked, a->blocked, a->when,
                      a->unlocked && a->cur < a->min ? a->min / unit : a->cur / unit, a->min / unit, a->icon};
     plat_mutex_unlock(&lock);
     return 1;
+}
+
+int ach_blocked_count(void) {
+    ensure_loaded();
+    plat_mutex_lock(&lock);
+    int c = 0;
+    for (int i = 0; i < nach; i++) c += achs[i].blocked && !achs[i].unlocked;
+    plat_mutex_unlock(&lock);
+    return c;
 }
 
 int ach_unlocked_count(void) {
