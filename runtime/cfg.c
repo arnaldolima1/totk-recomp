@@ -207,7 +207,8 @@ int cfg_load(const char *path) {
 // (default: the Steam Deck when the firmware says so), desktop (none) or deck.
 //
 // The Steam Deck (LCD Jupiter, OLED Galileo; 1280x800, 16:10, 4 Zen 2 cores, RDNA 2 with 8 CUs sharing 16 GB): the game
-// at the screen's 1280x800 with its own 5/6 scene (the aspect patch gives camera and interface its 16:10, resolution.c);
+// at the screen's 1280x800 with its own 5/6 scene (on 1.4.3 the aspect patch gives the camera its 16:10, resolution.c,
+// and the romfs-patches-1280x800 overlay the HUD's);
 // fullscreen and vsync, as gamescope composes Game Mode; 40 fps, which divides 40 Hz (and 120 Hz on the OLED).
 // Starting points to replace with measured ones (docs/tester-guide.md, Steam Deck).
 static const struct { const char *key, *value; } DECK[] = {

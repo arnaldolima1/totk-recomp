@@ -53,7 +53,8 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_OUTPUT_RES] = "Game resolution",
     [UI_MENU_OUTPUT_RES_DESC] = "The size the game draws its picture and interface in. Above 1920 x 1080 the game needs "
                                 "more video memory and GPU time. A wider size (21:9) widens the camera's view and moves "
-                                "the HUD to the screen's corners.",
+                                "the HUD to the screen's corners; a taller one (16:10, Steam Deck) moves it to the top "
+                                "and bottom edges.",
     [UI_MENU_RENDER_SCALE] = "3D render scale",
     [UI_MENU_RENDER_SCALE_DESC] = "Size of the 3D scene relative to the game resolution; the game's FSR scales it to "
                                   "that size. Above 100 % smooths jagged edges (supersampling) at a high GPU cost.",
@@ -297,7 +298,8 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_OUTPUT_RES] = "Разрешение игры",
     [UI_MENU_OUTPUT_RES_DESC] = "Размер, в котором игра рисует картинку и интерфейс. Выше 1920 × 1080 игре нужно больше "
                                 "видеопамяти и времени GPU. Более широкий размер (21:9) расширяет обзор камеры и "
-                                "переносит интерфейс в углы экрана.",
+                                "переносит интерфейс в углы экрана, более высокий (16:10, Steam Deck) переносит его к "
+                                "верхнему и нижнему краям.",
     [UI_MENU_RENDER_SCALE] = "Масштаб 3D-отрисовки",
     [UI_MENU_RENDER_SCALE_DESC] = "Размер 3D-сцены относительно разрешения игры; FSR игры доводит её до этого размера. "
                                   "Выше 100 % сглаживает лесенки на краях (суперсэмплинг) ценой большой нагрузки на GPU.",

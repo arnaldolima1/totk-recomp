@@ -625,8 +625,10 @@ class Compile(Step):
 TRANSLATED = re.compile(r'gfx_shader: prepare: (\d+) of (\d+) pairs')
 
 
-# 21:9 and 32:9 monitor sizes, as runtime/ui/menu.cpp row_output_res lists them
-WIDE_SIZES = ('2560x1080', '3440x1440', '3840x1600', '5120x2160', '3840x1080', '5120x1440')
+# The game resolutions of another shape than 16:9 that runtime/ui/menu.cpp row_output_res lists: 21:9 and 32:9 monitors,
+# and 16:10 screens (the Steam Deck's 1280x800, handhelds and laptops)
+ASPECT_SIZES = ('2560x1080', '3440x1440', '3840x1600', '5120x2160', '3840x1080', '5120x1440',
+                '1280x800', '1680x1050', '1920x1200', '2560x1600')
 
 
 class Prepare(Step):
@@ -666,10 +668,10 @@ class Prepare(Step):
                               dest / 'romfs-patches'])
         if code:
             raise InstallError('prepare.romfs_patches_failed', code=code, log=str(log))
-        # The same overlay with the UI laid out for the 21:9 game resolutions the settings menu offers (runtime/romfs.c
-        # overlay_init picks the one that matches). Only 1.4.3 has the camera aspect patch (recomp/patches-v143.txt) the
-        # layouts go with, and ultrawide_layout.py is checked against 1.4.3's layout archive: 1.2.1 builds none.
-        for size in WIDE_SIZES:
+        # The same overlay with the UI laid out for each game resolution of another shape the settings menu offers
+        # (runtime/romfs.c overlay_init picks the one that matches). Only 1.4.3 has the camera aspect patch
+        # (recomp/patches-v143.txt) the layouts go with: 1.2.1 builds none.
+        for size in ASPECT_SIZES:
             remove(dest / f'romfs-patches-{size}')
             if version_tag(game_version(ctx)) != 'v143':
                 continue
