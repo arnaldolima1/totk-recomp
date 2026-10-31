@@ -61,6 +61,23 @@ void plat_fiber_unself(void);             // the calling thread stops being a fi
 PlatFiber *plat_fiber_new(size_t stack, void (*fn)(void *arg), void *arg);
 void plat_fiber_switch(PlatFiber *to);    // from the fiber the calling thread runs
 void plat_fiber_free(PlatFiber *f);       // a fiber nobody runs
+
+// A jump back to a point saved earlier on the same thread, without unwinding the frames in between (no SEH, no C++
+// cleanups): the kernel's ExitThread leaves the lifted frames this way. plat_jmp_save returns 0 when it saves and 1
+// when plat_jmp_go comes back to it; the function that called it must still be running. It keeps the callee-saved
+// registers and the floating-point control state. On Windows this is not the C runtime's setjmp: a non-unwinding
+// setjmp leaves the buffer's frame 0, and the C runtime's longjmp ends the process with 0xc0000409 (fast fail 13) on
+// such a buffer when Control Flow Guard is on for the process, which Exploit protection can force on any program.
+#ifdef _WIN32
+typedef struct { uint64_t gpr[10]; uint32_t mxcsr, fpcw; uint64_t pad; uint8_t xmm[160]; } PlatJmp;
+int plat_jmp_save(PlatJmp *j) __attribute__((returns_twice, nothrow));
+_Noreturn void plat_jmp_go(PlatJmp *j);
+#else
+#include <setjmp.h>
+typedef struct { jmp_buf b; } PlatJmp;
+#define plat_jmp_save(j) setjmp((j)->b)
+#define plat_jmp_go(j) longjmp((j)->b, 1)
+#endif
 // Scheduling priority, Windows' seven levels: of the calling thread, or of t. On Linux a thread lowered without the
 // right to raise its priority again (CAP_SYS_NICE, or an RLIMIT_NICE of 20) could never return to normal, and the
 // runtime lowers threads that later take shared locks at normal priority; without that right every change is skipped
