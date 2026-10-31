@@ -373,11 +373,28 @@ static void heapdef_overlay(void) {
     res_heapdef_served();
 }
 
-static int xbox_prompts_ready;    // romfs-patches-xbox/manifest.tsv was next to romfs-index.bin at start
-static int xbox_prompts_active;   // and overlay_init loaded it
+// The pad layouts whose button prompts come from an overlay of their own (tools/make_romfs_patches.py
+// --xbox-prompts, --playstation-prompts), each the whole romfs-patches with the prompt files changed.
+static const struct { const char *layout, *dir, *name; } prompt_sets[] = {
+    {"xbox_prompts", "romfs-patches-xbox", "Xbox"},
+    {"playstation", "romfs-patches-ps", "PlayStation"},
+};
+#define PROMPT_SETS (int)(sizeof prompt_sets / sizeof *prompt_sets)
+static int prompts_ready[PROMPT_SETS];   // <dir>/manifest.tsv was next to romfs-index.bin at start
+static int prompts_active = -1;          // the set overlay_init loaded, -1 for none
 
-int romfs_xbox_prompts_ready(void) { return xbox_prompts_ready; }
-int romfs_xbox_prompts_active(void) { return xbox_prompts_active; }
+static int prompt_set(const char *layout) {
+    for (int i = 0; i < PROMPT_SETS; i++)
+        if (layout && !strcasecmp(layout, prompt_sets[i].layout)) return i;
+    return -1;
+}
+
+int romfs_prompts_ready(const char *layout) {
+    int i = prompt_set(layout);
+    return i < 0 ? -1 : prompts_ready[i];
+}
+
+const char *romfs_prompts_active(void) { return prompts_active < 0 ? NULL : prompt_sets[prompts_active].layout; }
 
 static void overlay_init(void) {
     // TOTK_ROMFS_PATCHES unset: romfs-patches next to romfs-index.bin if it has a manifest (tools/make_romfs_patches.py).
@@ -385,10 +402,11 @@ static void overlay_init(void) {
     // the UI laid out for that shape (make_romfs_patches.py --aspect), when the game version has the camera aspect patch
     // the layout goes with (res_wants_wide_overlay).
     // With pad_layout = xbox_prompts, romfs-patches-xbox in its place: the same patches with the A/B and X/Y prompts
-    // swapped (make_romfs_patches.py --xbox-prompts). The game reads the archives once at boot, so the prompts stay
-    // until restart even though the layout itself changes live. Each folder replaces romfs-patches as a whole and the
-    // setup builds no wide folder with Xbox prompts, so a wide game resolution keeps the Switch prompts.
-    char def[2100], xbox[2100];
+    // swapped (make_romfs_patches.py --xbox-prompts); with pad_layout = playstation, romfs-patches-ps, with PlayStation
+    // symbols (--playstation-prompts). The game reads the archives once at boot, so the prompts stay until restart
+    // even though the layout itself changes live. Each folder replaces romfs-patches as a whole and the setup builds no
+    // wide folder with other prompts, so a wide game resolution keeps the Switch prompts.
+    char def[2100], set_dir[2100];
     const char *patches = cfg_get("TOTK_ROMFS_PATCHES");
     int wide = 0;
     unsigned out[2];
@@ -403,22 +421,26 @@ static void overlay_init(void) {
                    "(tools/make_romfs_patches.py --aspect %ux%u)", out[0], out[1], out[0], out[1]);
         }
     }
-    xbox_prompts_ready =
-        snprintf(xbox, sizeof xbox, "%s/romfs-patches-xbox/manifest.tsv", index_dir) < (int)sizeof xbox &&
-        plat_file_exists(xbox);
-    int want_xbox = !strcasecmp(cfg_value("TOTK_PAD_LAYOUT"), "xbox_prompts");
-    if (!patches && want_xbox && xbox_prompts_ready) {
-        xbox[strlen(xbox) - strlen("/manifest.tsv")] = 0;
-        xbox_prompts_active = overlay_load(xbox, 1);
-        if (xbox_prompts_active) rt_log("RomFS overlay: Xbox button prompts (%s)", xbox);
-        else rt_log("RomFS overlay: %s failed its check (run the setup again); romfs-patches loads instead", xbox);
-    } else if (want_xbox) {
-        rt_log("RomFS overlay: pad_layout = xbox_prompts, but %s; Switch prompts stay",
+    for (int i = 0; i < PROMPT_SETS; i++)
+        prompts_ready[i] = snprintf(set_dir, sizeof set_dir, "%s/%s/manifest.tsv", index_dir, prompt_sets[i].dir) <
+                               (int)sizeof set_dir &&
+                           plat_file_exists(set_dir);
+    int want = prompt_set(cfg_value("TOTK_PAD_LAYOUT"));
+    if (!patches && want >= 0 && prompts_ready[want]) {
+        snprintf(set_dir, sizeof set_dir, "%s/%s", index_dir, prompt_sets[want].dir);
+        if (overlay_load(set_dir, 1)) {
+            prompts_active = want;
+            rt_log("RomFS overlay: %s button prompts (%s)", prompt_sets[want].name, set_dir);
+        } else {
+            rt_log("RomFS overlay: %s failed its check (run the setup again); romfs-patches loads instead", set_dir);
+        }
+    } else if (want >= 0) {
+        rt_log("RomFS overlay: pad_layout = %s, but %s; Switch prompts stay", prompt_sets[want].layout,
                wide      ? "the game resolution takes the wide UI layout"
                : patches ? "TOTK_ROMFS_PATCHES is set"
-                         : "romfs-patches-xbox has no manifest.tsv (run the setup again)");
+                         : "its folder has no manifest.tsv (run the setup again)");
     }
-    if (!patches && !xbox_prompts_active && snprintf(def, sizeof def, "%s/romfs-patches/manifest.tsv", index_dir) < (int)sizeof def &&
+    if (!patches && prompts_active < 0 && snprintf(def, sizeof def, "%s/romfs-patches/manifest.tsv", index_dir) < (int)sizeof def &&
         plat_file_exists(def)) {
         def[strlen(def) - strlen("/manifest.tsv")] = 0;
         patches = def;

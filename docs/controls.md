@@ -8,8 +8,9 @@ Input comes from the first SDL3 gamepad, the keyboard and the mouse, merged into
 - `xbox`: south A, east B, west X, north Y, as an Xbox pad labels them; on a PlayStation pad cross is A, circle B, square X, triangle Y.
 - `auto` (default): `nintendo` for a pad whose east button SDL reports labelled A (Switch Pro Controller, Nintendo-layout pads), `xbox` for the others.
 - `xbox_prompts`: the buttons as `nintendo`, and the game's prompts name the Xbox labels (see Xbox button prompts below).
+- `playstation`: the buttons as `xbox` (cross is A), and the game's prompts show the PlayStation symbols (see PlayStation button prompts below).
 
-The log names the layout in effect (`input: gamepad layout ...`); the menu shows it under *Automatic*. With `nintendo`, `xbox` and `auto` the game's button prompts stay Switch letters; `xbox_prompts` changes them.
+The log names the layout in effect (`input: gamepad layout ...`); the menu shows it under *Automatic*. With `nintendo`, `xbox` and `auto` the game's button prompts stay Switch letters; `xbox_prompts` and `playstation` change them.
 
 | Switch | Gamepad (by position, Nintendo layout) | Keyboard and mouse | Action in the world |
 |---|---|---|---|
@@ -43,6 +44,18 @@ The buttons change at once, but the game reads its UI archive and fonts once at 
 - every other prompt is text in the button font (`scft/External.bfotf` in each `Font/Font*.Nin_NX_NVN.bfarc.zs`, glyphs U+E040 to U+E043); the A and B, X and Y glyphs are swapped.
 
 Without the folder (an install made by an older setup, or one where the setup could not prepare it and showed a warning) the menu says the files are missing, the log has `RomFS overlay: pad_layout = xbox_prompts, but ...`, and the Switch prompts stay; running the setup again on the install folder writes it. In a source build, `.venv-py314\Scripts\python tools\make_romfs_patches.py --version <ver> --xbox-prompts` writes `build\<ver>\romfs-patches-xbox`.
+
+## PlayStation button prompts
+
+`pad_layout = playstation` (*PlayStation (cross confirms)* on the Controls tab) is for a PlayStation pad played by its labels, as the `xbox` layout plays it: cross does Switch A (interact, confirm), circle Switch B (run, cancel), square Switch X (jump) and triangle Switch Y (attack). The prompts show the symbols instead of the letters: A becomes cross, B circle, X square and Y triangle.
+
+The symbols are drawn by `tools/ps_prompts.py`, not copied from anywhere, and written into the same files the Xbox prompts change, by `tools/make_romfs_patches.py --playstation-prompts` into `romfs-patches-ps` (the setup runs it next to the other overlays; `runtime/romfs.c` `overlay_init` loads it in place of `romfs-patches`):
+
+- the letter images `Nt_KeyTexA/B/X/Y_00` are 108x108 alpha masks of a white disc with the letter cut out; they are drawn again as the same disc, measured from the game's A image, with the symbol cut out.
+- the button glyphs U+E040 to U+E043 of `scft/External.bfotf` get outlines of the same disc and symbol (`bfotf_symbols`: the CFF CharStrings are written again and the Private DICT after them moves).
+- the diamond around the action prompt shows the Switch positions (A right, B bottom); its letters become the characters U+00D7, U+25CB, U+25A1 and U+25B3 of the game's text font. With cross as A, the diamond marks the action button at the right while cross sits at the bottom of the pad.
+
+As with the Xbox prompts, the symbols follow the layout and not remapped buttons, and they change at the next start. In a source build, `.venv-py314\Scripts\python tools\make_romfs_patches.py --version <ver> --playstation-prompts` writes `build\<ver>\romfs-patches-ps`.
 
 ## Window keys
 

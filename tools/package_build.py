@@ -95,6 +95,8 @@ def main():
     n = copy_tree(build / 'romfs-patches', out / 'romfs-patches')
     if (build / 'romfs-patches-xbox').is_dir():   # pad_layout = xbox_prompts (make_romfs_patches.py --xbox-prompts)
         n += copy_tree(build / 'romfs-patches-xbox', out / 'romfs-patches-xbox')
+    if (build / 'romfs-patches-ps').is_dir():     # pad_layout = playstation (make_romfs_patches.py --playstation-prompts)
+        n += copy_tree(build / 'romfs-patches-ps', out / 'romfs-patches-ps')
     n += copy_tree(exefs, out / 'exefs')
     n += copy_tree(fonts, out / 'shared-fonts')
     if not a.no_shader_cache and (build / 'shader-cache').is_dir():

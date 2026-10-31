@@ -235,8 +235,9 @@ def copy_romfs_patches(version, out):
     """totk.exe loads romfs-patches beside romfs-index.bin (runtime/romfs.c overlay_init). tools/make_romfs_patches.py
     writes them into build/<version> only, so a build in another directory ran without the 60 fps overlay (the quick
     menus' captured background turned black). Copies them when their manifest differs; romfs-patches-xbox (the same with
-    the A/B and X/Y prompts swapped, pad_layout = xbox_prompts) the same way when it was made."""
-    for name in ('romfs-patches', 'romfs-patches-xbox'):
+    the A/B and X/Y prompts swapped, pad_layout = xbox_prompts) and romfs-patches-ps (PlayStation symbols, pad_layout =
+    playstation) the same way when they were made."""
+    for name in ('romfs-patches', 'romfs-patches-xbox', 'romfs-patches-ps'):
         src = ROOT / 'build' / version / name
         dst = out / name
         if src.resolve() == dst.resolve() or not (src / 'manifest.tsv').is_file():

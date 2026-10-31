@@ -50,9 +50,10 @@ uint32_t vk_pipeline_building(void);
 void res_sizes(unsigned out[2], unsigned scene[2]);
 double frame_step_limit_hz(void);
 extern const int rt_game_version;
-// fs.h (romfs.c): romfs-patches-xbox was next to romfs-index.bin at start, and was loaded.
-int romfs_xbox_prompts_ready(void);
-int romfs_xbox_prompts_active(void);
+// fs.h (romfs.c): a layout's prompt folder (romfs-patches-xbox, -ps) was next to romfs-index.bin at start, and the
+// layout whose prompts were loaded.
+int romfs_prompts_ready(const char *layout);
+const char *romfs_prompts_active(void);
 extern const char rt_port_version[];
 }
 
@@ -673,14 +674,17 @@ static void tab_sound(float scale) {
     opt_end();
 }
 
-// The note under the layout. Xbox prompts (the Nintendo layout with the A/B and X/Y prompts swapped, romfs.c
-// overlay_init) change the buttons at once but the prompts only at the next start: "files missing" without
-// romfs-patches-xbox, "prompts change after restart" while the prompts in use differ from the choice. Automatic with a
-// gamepad connected: "in use: Xbox". NULL otherwise.
+// The note under the layout. Xbox prompts (the Nintendo layout with the A/B and X/Y prompts swapped) and PlayStation
+// (the Xbox layout with PlayStation symbols) load their prompts from an overlay of their own (romfs.c overlay_init):
+// they change the buttons at once but the prompts only at the next start. "files missing" without the layout's folder,
+// "prompts change after restart" while the prompts in use differ from the choice. Automatic with a gamepad connected:
+// "in use: Xbox". NULL otherwise.
 static const char *pad_layout_note(void) {
-    bool want = !strcasecmp(cfg_value("TOTK_PAD_LAYOUT"), "xbox_prompts");
-    if (want && !romfs_xbox_prompts_ready()) return menu_text(UI_MENU_PAD_LAYOUT_PROMPTS_MISSING);
-    if (want != (romfs_xbox_prompts_active() != 0)) return menu_text(UI_MENU_PAD_LAYOUT_PROMPTS_RESTART);
+    const char *choice = cfg_value("TOTK_PAD_LAYOUT"), *active = romfs_prompts_active();
+    int ready = romfs_prompts_ready(choice);
+    if (ready == 0) return menu_text(UI_MENU_PAD_LAYOUT_PROMPTS_MISSING);
+    if ((ready > 0) != (active != nullptr) || (active && strcasecmp(active, choice)))
+        return menu_text(UI_MENU_PAD_LAYOUT_PROMPTS_RESTART);
     int got = input_pad_layout();
     if (got < 0 || strcmp(cfg_value("TOTK_PAD_LAYOUT"), "auto")) return nullptr;
     static char note[96];
@@ -692,8 +696,8 @@ static const char *pad_layout_note(void) {
 static void tab_controls(float scale) {
     opt_begin("##controls", scale);
     static const UiTextId layout[] = {UI_MENU_PAD_LAYOUT_AUTO, UI_MENU_PAD_LAYOUT_NINTENDO, UI_MENU_PAD_LAYOUT_XBOX,
-                                      UI_MENU_PAD_LAYOUT_XBOX_PROMPTS};
-    opt_choice("TOTK_PAD_LAYOUT", UI_MENU_PAD_LAYOUT, layout, 4, UI_MENU_PAD_LAYOUT_DESC, pad_layout_note());
+                                      UI_MENU_PAD_LAYOUT_XBOX_PROMPTS, UI_MENU_PAD_LAYOUT_PLAYSTATION};
+    opt_choice("TOTK_PAD_LAYOUT", UI_MENU_PAD_LAYOUT, layout, 5, UI_MENU_PAD_LAYOUT_DESC, pad_layout_note());
     opt_toggle("TOTK_MOTION", UI_MENU_MOTION, UI_MENU_MOTION_DESC);
     opt_slider("TOTK_RUMBLE_STRENGTH", UI_MENU_RUMBLE_STRENGTH, 0, 300, UI_MENU_RUMBLE_STRENGTH_DESC, 10, "%.0f %%");
     opt_slider("TOTK_RUMBLE_CURVE", UI_MENU_RUMBLE_CURVE, 0.2f, 1.5f, UI_MENU_RUMBLE_CURVE_DESC, 0.05f, "%.2f");

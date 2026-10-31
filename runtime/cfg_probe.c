@@ -301,6 +301,9 @@ int probe_cfg(void) {
     CHECK(input_pad_layout_pick("xbox_prompts", 0) == PAD_LAYOUT_NINTENDO &&
               input_pad_layout_pick("Xbox_Prompts", 1) == PAD_LAYOUT_NINTENDO,
           "pad layout: Xbox prompts keep the Nintendo positions (only the prompts change, romfs.c overlay_init)");
+    CHECK(input_pad_layout_pick("playstation", 1) == PAD_LAYOUT_XBOX &&
+              input_pad_layout_pick("PlayStation", 0) == PAD_LAYOUT_XBOX,
+          "pad layout: PlayStation keeps the Xbox positions, cross is A (only the prompts change)");
     uint8_t pd[PAD_COUNT] = {0};
     pd[PAD_SOUTH] = pd[PAD_NORTH] = 1;
     CHECK(input_map_pad_buttons(pd, PAD_LAYOUT_NINTENDO) == (1ull << B_B | 1ull << B_X) &&

@@ -284,7 +284,7 @@ void input_map_line(const InputMap *m, int action, char *out, size_t n) {
 
 int input_pad_layout_pick(const char *setting, int east_labelled_a) {
     if (setting && (!strcasecmp(setting, "nintendo") || !strcasecmp(setting, "xbox_prompts"))) return PAD_LAYOUT_NINTENDO;
-    if (setting && !strcasecmp(setting, "xbox")) return PAD_LAYOUT_XBOX;
+    if (setting && (!strcasecmp(setting, "xbox") || !strcasecmp(setting, "playstation"))) return PAD_LAYOUT_XBOX;
     return east_labelled_a ? PAD_LAYOUT_NINTENDO : PAD_LAYOUT_XBOX;
 }
 

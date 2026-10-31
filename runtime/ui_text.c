@@ -139,10 +139,12 @@ static const char *const text_en[UI_TEXT_COUNT] = {
                                 "labelled on an Xbox controller (cross on a PlayStation controller). Automatic picks "
                                 "Nintendo for controllers with Nintendo labels and Xbox for the others. Xbox prompts: "
                                 "A is the right one as with Nintendo, and the game shows the Xbox labels (B for A, A "
-                                "for B, Y for X, X for Y); the prompts change after a restart. The letters are part of the "
+                                "for B, Y for X, X for Y). PlayStation: A is cross as with Xbox, and the game shows the "
+                                "PlayStation symbols. Prompts change after a restart. The letters are part of the "
                                  "game's files, so a button you remap in Controls keeps the old letter on screen.",
     [UI_MENU_PAD_LAYOUT_AUTO] = "Automatic", [UI_MENU_PAD_LAYOUT_NINTENDO] = "Nintendo (A right)",
     [UI_MENU_PAD_LAYOUT_XBOX] = "Xbox (A bottom)", [UI_MENU_PAD_LAYOUT_XBOX_PROMPTS] = "Xbox prompts (A right)",
+    [UI_MENU_PAD_LAYOUT_PLAYSTATION] = "PlayStation (cross confirms)",
     [UI_MENU_PAD_LAYOUT_IN_USE] = "in use: %s",
     [UI_MENU_PAD_LAYOUT_PROMPTS_MISSING] = "prompt files missing: run the setup again",
     [UI_MENU_PAD_LAYOUT_PROMPTS_RESTART] = "prompts change after restart",
@@ -414,11 +416,13 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
                                 "подписано на контроллере Xbox (крест на контроллере PlayStation). Автоматически: "
                                 "Nintendo для контроллеров с подписями Nintendo, Xbox для остальных. Подсказки Xbox: "
                                 "A справа, как в Nintendo, а игра показывает надписи Xbox (B вместо A, A вместо B, Y "
-                                "вместо X, X вместо Y); подсказки меняются после перезапуска. Буквы записаны в файлах "
+                                "вместо X, X вместо Y). PlayStation: A — крест, как в Xbox, а игра показывает символы "
+                                "PlayStation. Подсказки меняются после перезапуска. Буквы записаны в файлах "
                                  "игры, поэтому у кнопки, переназначенной на вкладке управления, на экране остаётся "
                                  "прежняя буква.",
     [UI_MENU_PAD_LAYOUT_AUTO] = "Автоматически", [UI_MENU_PAD_LAYOUT_NINTENDO] = "Nintendo (A справа)",
     [UI_MENU_PAD_LAYOUT_XBOX] = "Xbox (A снизу)", [UI_MENU_PAD_LAYOUT_XBOX_PROMPTS] = "Подсказки Xbox (A справа)",
+    [UI_MENU_PAD_LAYOUT_PLAYSTATION] = "PlayStation (крест — подтвердить)",
     [UI_MENU_PAD_LAYOUT_IN_USE] = "сейчас: %s",
     [UI_MENU_PAD_LAYOUT_PROMPTS_MISSING] = "нет файлов подсказок: запустите установку снова",
     [UI_MENU_PAD_LAYOUT_PROMPTS_RESTART] = "подсказки сменятся после перезапуска",
@@ -697,11 +701,12 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
                                 "escrito no controle Xbox (a cruz no controle PlayStation). Automático escolhe Nintendo "
                                 "para controles com os rótulos da Nintendo e Xbox para os demais. Ícones Xbox: o A é o da "
                                 "direita, como no Nintendo, e o jogo mostra as letras do Xbox (B no lugar de A, A no "
-                                "de B, Y no de X, X no de Y); os ícones mudam depois de reiniciar. As letras fazem "
+                                "de B, Y no de X, X no de Y). PlayStation: o A é o X (cruz), como no Xbox, e o jogo "
+                                "mostra os símbolos do PlayStation. Os ícones mudam depois de reiniciar. As letras fazem "
                                 "parte dos arquivos do jogo, então um botão remapeado em Controles continua com a "
                                 "letra antiga na tela.",
     [UI_MENU_PAD_LAYOUT_AUTO] = "Automático", [UI_MENU_PAD_LAYOUT_NINTENDO] = "Nintendo (A à direita)",
-    [UI_MENU_PAD_LAYOUT_XBOX] = "Xbox (A embaixo)",
+    [UI_MENU_PAD_LAYOUT_XBOX] = "Xbox (A embaixo)", [UI_MENU_PAD_LAYOUT_PLAYSTATION] = "PlayStation (X confirma)",
     [UI_MENU_PAD_LAYOUT_XBOX_PROMPTS] = "Ícones Xbox (A à direita)", [UI_MENU_PAD_LAYOUT_IN_USE] = "em uso: %s",
     [UI_MENU_PAD_LAYOUT_PROMPTS_MISSING] = "faltam os arquivos dos ícones: rode a instalação de novo",
     [UI_MENU_PAD_LAYOUT_PROMPTS_RESTART] = "os ícones mudam depois de reiniciar",

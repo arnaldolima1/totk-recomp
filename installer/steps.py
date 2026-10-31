@@ -6,7 +6,7 @@ tools/prepare_shaders.py, whose output goes to <temp>/logs/<step>-<tool>.log and
 here: the host check is a small C program built with the bundled clang (hostcheck.c).
 
 Install folder: exefs/, romfs/ (romfs.bin, index.json), profile/, totk.exe and its DLLs, romfs-index.bin,
-romfs-patches/, romfs-patches-xbox/, totk_xlate.exe, the shader state of totk.exe --prepare-shaders, totk.ini,
+romfs-patches/, romfs-patches-xbox/, romfs-patches-ps/, totk_xlate.exe, the shader state of totk.exe --prepare-shaders, totk.ini,
 totk-install.json.
 Temp folder (<temp>/<dest name>-<hash>): check/ (ExeFS of both inputs, the host check), gen/ (C), build/ (objects),
 logs/ (kept by the cleanup).
@@ -641,7 +641,7 @@ class Prepare(Step):
         layout = ctx.layout
         xlate_id = layout.xlate.with_suffix('.id')
         tools = [layout.tools / n for n in ('prepare_shaders.py', 'shader_census.py', 'make_romfs_patches.py',
-                                            'pack_shader_cache.py', 'ultrawide_layout.py')]
+                                            'pack_shader_cache.py', 'ultrawide_layout.py', 'ps_prompts.py')]
         return fingerprint('prepare-1', ctx.keys['compile'], layout.xlate, xlate_id, shader_list_text(layout), *tools)
 
     def current(self, ctx, record):
@@ -691,6 +691,15 @@ class Prepare(Step):
         if code:
             remove(dest / 'romfs-patches-xbox')
             rep.warning('warn.xbox_prompts_failed', code=code, log=str(log))
+        # romfs-patches-ps: PlayStation symbols in place of the letters, for pad_layout = playstation; optional the
+        # same way.
+        remove(dest / 'romfs-patches-ps')
+        code, log = run_tool(ctx, 'prepare-ps', layout.tools / 'make_romfs_patches.py',
+                             ['--version', version_tag(game_version(ctx)), '--romfs', dest / 'romfs', '--out',
+                              dest / 'romfs-patches-ps', '--playstation-prompts'])
+        if code:
+            remove(dest / 'romfs-patches-ps')
+            rep.warning('warn.ps_prompts_failed', code=code, log=str(log))
 
         shader_list = layout.shader_list
         if not shader_list:

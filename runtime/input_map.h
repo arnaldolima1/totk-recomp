@@ -81,7 +81,8 @@ int input_map_bind(const char *button, const char *list);
 void input_map_configure(void);
 
 // The layout for a TOTK_PAD_LAYOUT value: "nintendo" or "xbox" (any case); "xbox_prompts" is the Nintendo layout with
-// the A/B and X/Y prompts swapped (runtime/romfs.c overlay_init), so the buttons map as "nintendo". Anything else
+// the A/B and X/Y prompts swapped (runtime/romfs.c overlay_init), so the buttons map as "nintendo"; "playstation" is
+// the Xbox layout (cross is A) with PlayStation symbols in the prompts, so the buttons map as "xbox". Anything else
 // ("auto", NULL) picks Nintendo when the pad's east button is labelled A (a Switch Pro Controller, a GuliKit) and Xbox
 // otherwise.
 int input_pad_layout_pick(const char *setting, int east_labelled_a);
