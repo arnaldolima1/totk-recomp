@@ -1128,7 +1128,8 @@ struct PlatLoad {
     wchar_t luid[40];                    // "luid_0x<high>_0x<low>" of the adapter, lower case; empty for any
 };
 
-PlatLoad *plat_load_open(const uint8_t *gpu_luid) {
+PlatLoad *plat_load_open(const uint8_t *gpu_luid, int pci_bus) {
+    (void)pci_bus;   // the LUID names the adapter
     PlatLoad *l = calloc(1, sizeof *l);
     if (!l) return NULL;
     if (gpu_luid) {   // Vulkan's deviceLUID is the LUID struct's memory: LowPart, then HighPart

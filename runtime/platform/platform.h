@@ -357,8 +357,9 @@ void *plat_lib_sym(void *lib, const char *name);
 // the system does not give is -1.
 typedef struct PlatLoad PlatLoad;
 // Opens the counters: CPU times, the thermal zones, and the GPU engine and memory counters of the adapter whose LUID is
-// gpu_luid (8 bytes, Vulkan's deviceLUID; NULL: the busiest adapter). Never NULL.
-PlatLoad *plat_load_open(const uint8_t *gpu_luid);
+// gpu_luid (8 bytes, Vulkan's deviceLUID; NULL: the busiest adapter) or, where the system names GPUs by PCI address,
+// on PCI bus pci_bus (-1: unknown). Never NULL.
+PlatLoad *plat_load_open(const uint8_t *gpu_luid, int pci_bus);
 void plat_load_close(PlatLoad *l);
 // Since the previous call on l (the first call gives -1): CPU use of the machine and of this process, percent of all
 // logical processors, and the hottest ACPI thermal zone in degrees Celsius.

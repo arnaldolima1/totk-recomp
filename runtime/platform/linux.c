@@ -1442,9 +1442,10 @@ static void find_cpu_temp(char *out, size_t cap) {
     closedir(d);
 }
 
-// The DRM card with gpu_busy_percent (amdgpu); with several, the one with the most VRAM in use, as the game's device
-// is not known by LUID on Linux.
-static void find_gpu(char *out, size_t cap) {
+// The DRM card with gpu_busy_percent (amdgpu) on PCI bus bus, the game's device. With bus -1 (no VK_EXT_pci_bus_info):
+// of several, the one with the most VRAM in use. None when the game's GPU has no such file (NVIDIA): the overlay then
+// takes its load and VRAM from NVML, not from an idle integrated GPU.
+static void find_gpu(char *out, size_t cap, int bus) {
     out[0] = 0;
     uint64_t best = 0;
     DIR *d = opendir("/sys/class/drm");
@@ -1456,6 +1457,12 @@ static void find_gpu(char *out, size_t cap) {
         snprintf(path, sizeof path, "%s/gpu_busy_percent", dev);
         uint64_t v, used = 0;
         if (!read_u64_file(path, &v)) continue;
+        if (bus >= 0) {   // device links to the PCI function, "0000:03:00.0": domain, bus, device, function
+            char real[PATH_MAX];
+            unsigned dom, b;
+            const char *base = realpath(dev, real) ? strrchr(real, '/') : NULL;
+            if (!base || sscanf(base + 1, "%x:%x:", &dom, &b) != 2 || (int)b != bus) continue;
+        }
         snprintf(path, sizeof path, "%s/mem_info_vram_used", dev);
         read_u64_file(path, &used);
         if (!out[0] || used > best) snprintf(out, cap, "%s", dev), best = used;
@@ -1463,12 +1470,12 @@ static void find_gpu(char *out, size_t cap) {
     closedir(d);
 }
 
-PlatLoad *plat_load_open(const uint8_t *gpu_luid) {
-    (void)gpu_luid;
+PlatLoad *plat_load_open(const uint8_t *gpu_luid, int pci_bus) {
+    (void)gpu_luid;   // Linux has no adapter LUIDs; the PCI bus names the card
     PlatLoad *l = calloc(1, sizeof *l);
     if (!l) return NULL;
     find_cpu_temp(l->temp, sizeof l->temp);
-    find_gpu(l->gpu, sizeof l->gpu);
+    find_gpu(l->gpu, sizeof l->gpu, pci_bus);
     return l;
 }
 
