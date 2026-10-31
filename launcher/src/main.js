@@ -867,10 +867,25 @@ listen('build-done', async (e) => {
 // The launcher's own (tauri-plugin-updater: the GitHub release's latest.json, signed) and the game's: a newer installer
 // release than the one that built the install folder. Both show a card on Início.
 let launcherUpdate = null;
-async function checkUpdates() {
-  try { launcherUpdate = await checkLauncherUpdate(); } catch { launcherUpdate = null; }   // (offline, or no release yet)
+async function checkUpdates(manual = false) {
+  let failed = null;
+  try { launcherUpdate = await checkLauncherUpdate(); } catch (e) { launcherUpdate = null; failed = String(e); }   // (offline, or no release yet)
+  if (manual) await loadReleases();
   renderUpdates();
+  if (!manual) return;
+  const g = gameUpdate(), lines = [];
+  lines.push(launcherUpdate ? `Launcher ${launcherUpdate.version} disponível.` : failed ? 'Não foi possível verificar o launcher (sem conexão, ou o repositório é privado).' : 'O launcher está atualizado.');
+  if (g) lines.push(`Jogo ${g.tag} disponível.`);
+  else if (status.installed) lines.push('O jogo está na versão mais nova.');
+  $$('.update-result').forEach((el) => (el.textContent = lines.join(' ')));
+  if (launcherUpdate || g) showView('home');   // the update cards are on Início
 }
+$$('[data-check-updates]').forEach((b) => (b.onclick = async () => {
+  $$('[data-check-updates]').forEach((x) => (x.disabled = true));
+  $$('.update-result').forEach((el) => (el.textContent = 'Buscando atualizações…'));
+  await checkUpdates(true);
+  $$('[data-check-updates]').forEach((x) => (x.disabled = false));
+}));
 function gameUpdate() {
   const r = releases.find((x) => !x.prerelease);
   return status.installed && r && status.installed_release && newer(r.tag, status.installed_release) ? r : null;

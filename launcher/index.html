@@ -345,7 +345,8 @@
               <input type="range" id="set-volume" min="0" max="100" />
             </label>
             <label class="toggle"><input type="checkbox" id="set-close" /><span class="knob"></span><div><b>Fechar o launcher ao jogar</b><small>Desligado, o launcher volta quando o jogo fecha (e mostra o erro se ele parar).</small></div></label>
-            <div class="actions left"><button class="ghost" data-open="launcher-art">Arte do launcher</button></div>
+            <div class="actions left"><button class="ghost" data-open="launcher-art">Arte do launcher</button><button class="gold" data-check-updates>Buscar atualizações</button></div>
+            <p class="hint update-result"></p>
           </div>
           <div class="set-page" id="set-advanced">
             <h3>Avançado</h3>
@@ -406,6 +407,8 @@
         </ul>
 
         <p class="versions" id="about-versions"></p>
+        <div class="actions left"><button class="gold" data-check-updates>Buscar atualizações</button></div>
+        <p class="hint update-result"></p>
         <div class="legal">
           <p>O código do TotK Recomp é MIT; cada componente de terceiros mantém sua licença.</p>
           <p>Nada do jogo vem com o recomp: tudo é gerado no seu PC a partir do seu próprio dump e deve ficar aqui. Não afiliado nem endossado pela Nintendo. <i>The Legend of Zelda</i> e <i>Tears of the Kingdom</i> são marcas da Nintendo.</p>

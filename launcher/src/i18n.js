@@ -500,6 +500,11 @@ const EN = {
   'Copiando o mod…': 'Copying the mod…',
   'vozes': 'voices', 'sons': 'sounds', 'textos': 'text', 'interface': 'interface', 'fontes': 'fonts', 'texturas': 'textures',
   'modelos': 'models', 'sistema': 'system', 'cenas': 'cutscenes', 'vídeos': 'videos', 'pacotes': 'packs',
+  'Buscar atualizações': 'Check for updates',
+  'Buscando atualizações…': 'Checking for updates…',
+  'O launcher está atualizado.': 'The launcher is up to date.',
+  'Não foi possível verificar o launcher (sem conexão, ou o repositório é privado).': 'Could not check the launcher (offline, or the repository is private).',
+  'O jogo está na versão mais nova.': 'The game is on the newest version.',
 };
 
 const PATTERNS = [
@@ -529,6 +534,8 @@ const PATTERNS = [
   [/^(\d+) MB · substitui (\d+) arquivos do jogo, adiciona (\d+)$/, (m, a, b, c) => `${a} MB · replaces ${b} game files, adds ${c}`],
   [/^Preparando os mods · (\d+) de (\d+) arquivos$/, (m, a, b) => `Preparing the mods · ${a} of ${b} files`],
   [/^Pronto: (\d+) arquivos para o jogo\.(.*)$/, (m, a, b) => `Ready: ${a} files for the game.${b}`],
+  [/^(.*)Launcher (\S+) disponível\.(.*)$/, (m, a, b, c) => `${a}Launcher ${b} available.${c}`],
+  [/^(.*)Jogo (\S+) disponível\.(.*)$/, (m, a, b, c) => `${a}Game ${b} available.${c}`],
   [/^Apagar o mod "(.+)"\?$/, (m, a) => `Delete the mod "${a}"?`],
   [/^Já existe um mod chamado "(.+)"\.$/, (m, a) => `There is already a mod named "${a}".`],
   [/^mod não encontrado: (.+)$/, (m, a) => `mod not found: ${a}`],
