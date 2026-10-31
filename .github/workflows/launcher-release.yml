@@ -1,5 +1,5 @@
 # The launcher's installers and its update feed (fork). A tag launcher-v<version> (the version in
-# launcher/src-tauri/tauri.conf.json) builds the macOS .dmg (Apple silicon) and the Windows setup .exe, signs the update
+# launcher/src-tauri/tauri.conf.json) builds the Windows setup .exe, signs the update
 # packages with the TAURI_SIGNING_PRIVATE_KEY secret and publishes them in a release with latest.json, which the
 # installed launchers read (plugins.updater in tauri.conf.json).
 name: Launcher release
@@ -17,8 +17,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
-            target: aarch64-apple-darwin
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.platform }}
@@ -49,9 +47,9 @@ jobs:
           f="launcher/release-notes/${GITHUB_REF_NAME#launcher-v}.md"
           {
             echo 'body<<NOTES_EOF'
-            if [ -f "$f" ]; then cat "$f"; else echo 'Instaladores do UltraTears Launcher. / UltraTears Launcher installers.'; fi
+            if [ -f "$f" ]; then cat "$f"; else echo 'Instalador do TotK Recomp Launcher. / TotK Recomp Launcher installer.'; fi
             echo
-            echo 'Windows: `_x64-setup.exe` · macOS (Apple silicon): `.dmg` · Launchers já instalados se atualizam sozinhos. / Installed launchers update themselves.'
+            echo 'Windows: `_x64-setup.exe` · Launchers já instalados se atualizam sozinhos. / Installed launchers update themselves.'
             echo 'NOTES_EOF'
           } >> "$GITHUB_OUTPUT"
 
@@ -64,7 +62,7 @@ jobs:
           projectPath: launcher
           args: --target ${{ matrix.target }}
           tagName: ${{ github.ref_name }}
-          releaseName: UltraTears Launcher ${{ github.ref_name }}
+          releaseName: TotK Recomp Launcher ${{ github.ref_name }}
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false

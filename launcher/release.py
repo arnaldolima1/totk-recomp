@@ -3,7 +3,7 @@
 usage: python launcher/release.py 0.2.1 | patch | minor | major [--notes FILE] [--replace] [--no-push]
   - writes the version into tauri.conf.json, Cargo.toml, Cargo.lock, package.json and package-lock.json;
   - commits "launcher <version>" and tags launcher-v<version>;
-  - pushes the branch, fast-forwards main to it (the game updates read main) and pushes the tag, which starts
+  - pushes the branch, pushes the tag, which starts
     .github/workflows/launcher-release.yml (installers + latest.json, signed with the TAURI_SIGNING_PRIVATE_KEY secret).
 --replace releases the current version again: deletes its GitHub release and tag first (gh), no bump.
 --notes FILE: the release notes (Markdown, Portuguese then English: what players see on the release and on the
@@ -28,7 +28,7 @@ PACKAGE = LAUNCHER / 'package.json'
 PACKAGE_LOCK = LAUNCHER / 'package-lock.json'
 NOTES = LAUNCHER / 'release-notes'
 PUBKEY = pathlib.Path.home() / '.tauri/ultratears-launcher.key.pub'
-REPO = 'arnaldolima1/ultratears'
+REPO = 'arnaldolima1/totk-recomp'
 SEMVER = re.compile(r'^\d+\.\d+\.\d+$')
 
 
@@ -50,10 +50,10 @@ def write_version(v):
     sub_once(TAURI_CONF, r'^(  "version": )"[^"]+"', rf'\g<1>"{v}"')
     sub_once(PACKAGE, r'^(  "version": )"[^"]+"', rf'\g<1>"{v}"')
     sub_once(PACKAGE_LOCK, r'^(  "version": )"[^"]+"', rf'\g<1>"{v}"')
-    sub_once(PACKAGE_LOCK, r'^(    "": \{\n      "name": "ultratears-launcher",\n      "version": )"[^"]+"',
+    sub_once(PACKAGE_LOCK, r'^(    "": \{\n      "name": "totk-recomp-launcher",\n      "version": )"[^"]+"',
              rf'\g<1>"{v}"')
-    sub_once(CARGO_TOML, r'^(\[package\]\nname = "ultratears-launcher"\nversion = )"[^"]+"', rf'\g<1>"{v}"')
-    sub_once(CARGO_LOCK, r'^(name = "ultratears-launcher"\nversion = )"[^"]+"', rf'\g<1>"{v}"')
+    sub_once(CARGO_TOML, r'^(\[package\]\nname = "totk-recomp-launcher"\nversion = )"[^"]+"', rf'\g<1>"{v}"')
+    sub_once(CARGO_LOCK, r'^(name = "totk-recomp-launcher"\nversion = )"[^"]+"', rf'\g<1>"{v}"')
 
 
 def write_notes(v, src):

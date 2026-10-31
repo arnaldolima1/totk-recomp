@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "UltraTears Launcher",
-  "version": "0.2.2",
-  "identifier": "dev.ultratears.launcher",
+  "productName": "TotK Recomp Launcher",
+  "version": "0.3.0",
+  "identifier": "dev.totkrecomp.launcher",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "UltraTears",
+        "title": "TotK Recomp",
         "width": 1280,
         "height": 720,
         "minWidth": 1024,
@@ -37,9 +37,9 @@
     ],
     "createUpdaterArtifacts": true,
     "category": "Game",
-    "shortDescription": "UltraTears Launcher",
-    "longDescription": "Builds and runs UltraTears, a native PC port of Tears of the Kingdom, from your own game files.",
-    "copyright": "GPL-3.0-or-later. Not affiliated with Nintendo.",
+    "shortDescription": "TotK Recomp Launcher",
+    "longDescription": "Installs, updates and runs TotK Recomp, a static recompilation of Tears of the Kingdom for PC, from your own game files.",
+    "copyright": "Not affiliated with Nintendo.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -65,7 +65,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY1NDg1NjkyRDg1M0JGNjIKUldSaXYxUFlrbFpJWlJrL1lBKzdkNEhBZWl3c0hybWw1S1JOZ1ZzN3BIUzNuOEg3bkc4MjZjYjAK",
       "endpoints": [
-        "https://github.com/arnaldolima1/ultratears/releases/latest/download/latest.json"
+        "https://github.com/arnaldolima1/totk-recomp/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"

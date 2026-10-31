@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>UltraTears</title>
+  <title>TotK Recomp</title>
   <script type="module" src="/src/main.js"></script>
 </head>
 <body>
@@ -19,7 +19,7 @@
       <path class="glyph g2" d="M86 150 H214 M150 62 V238"/>
       <circle class="core" cx="150" cy="150" r="14"/>
     </svg>
-    <div class="intro-title"><h1><span style="--i:0">U</span><span style="--i:1">L</span><span style="--i:2">T</span><span style="--i:3">R</span><span style="--i:4">A</span><span style="--i:5">T</span><span style="--i:6">E</span><span style="--i:7">A</span><span style="--i:8">R</span><span style="--i:9">S</span></h1><p>Uma nova jornada começa no céu</p></div>
+    <div class="intro-title"><h1><span style="--i:0">T</span><span style="--i:1">O</span><span style="--i:2">T</span><span style="--i:3">K</span><span style="--i:4">&nbsp;</span><span style="--i:5">R</span><span style="--i:6">E</span><span style="--i:7">C</span><span style="--i:8">O</span><span style="--i:9">M</span><span style="--i:10">P</span></h1><p>Uma nova jornada começa no céu</p></div>
     <small class="intro-skip">clique para pular</small>
   </div>
   <!-- background slideshow -->
@@ -31,13 +31,13 @@
   <header class="titlebar" data-tauri-drag-region>
     <div class="brand" data-tauri-drag-region>
       <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.2 4.6L12 22 9.8 6.6z" fill="currentColor"/><path d="M7 7.5h10" stroke="currentColor" stroke-width="1.6"/></svg>
-      <span>ULTRATEARS</span>
+      <span>TOTK RECOMP</span>
       <small id="version" data-tauri-drag-region></small>
     </div>
     <nav class="tabs" data-tauri-drag-region>
       <button class="tab active" data-view="home">Início</button>
       <button class="tab" data-view="install">Instalação</button>
-      <button class="tab" data-view="mods">Mods</button>
+      <button class="tab" data-view="mods">Ajustes rápidos</button>
       <button class="tab" data-view="settings">Configurações</button>
       <button class="tab" data-view="about">Sobre</button>
     </nav>
@@ -58,11 +58,11 @@
         <div class="logo" id="logo">
           <div class="neutral-logo">
             <div class="orn"><i></i><u></u><i></i></div>
-            <div class="wordmark"><b>ULTRATEARS</b><span>Tears of the Kingdom · PC</span></div>
+            <div class="wordmark"><b>TOTK RECOMP</b><span>Tears of the Kingdom · PC</span></div>
           </div>
         </div>
         <div class="divider"><span></span><i></i><span></span></div>
-        <p class="tagline">Port nativo para PC · Vulkan</p>
+        <p class="tagline">Recompilação nativa para PC · Vulkan</p>
         <button id="play" class="play" disabled>
           <span class="play-glow"></span>
           <span class="play-label">Jogar</span>
@@ -80,13 +80,22 @@
         <p class="lead">Traduz e compila o jogo a partir dos <b>seus</b> arquivos (base 1.0.0 com a atualização 1.2.1 ou 1.4.3). Roda uma vez; o jogo fica na pasta de instalação.</p>
         <div class="panel-scroll">
 
+        <!-- the installer release (TotK-Setup): downloaded from GitHub (main.rs download_release) or a folder chosen by hand -->
+        <label class="field">
+          <span>Instalador <small id="release-version"></small></span>
+          <div class="path">
+            <select id="rel-list"><option value="">Buscando versões…</option></select>
+            <input id="release-path" placeholder="nenhum instalador baixado" readonly />
+            <button class="gold" id="rel-get">Baixar</button>
+            <button class="ghost" id="pick-release" title="Usar uma pasta TotK-Setup já descompactada">Pasta…</button>
+          </div>
+          <div class="bar dl-bar idle hidden" id="dl-bar"><div id="dl-fill"></div></div>
+          <small id="dl-status"></small>
+        </label>
+
         <label class="field">
           <span>Pasta de instalação <small id="home-free"></small></span>
           <div class="path"><input id="home-path" readonly /><button class="ghost" id="pick-home">Alterar</button></div>
-        </label>
-        <label class="field">
-          <span>Pasta do instalador <small id="release-version"></small></span>
-          <div class="path"><input id="release-path" placeholder="o release descompactado (com installer/)" readonly /><button class="ghost" id="pick-release">Alterar</button></div>
         </label>
 
         <!-- the game files: needed for a first install; a folder with totk-install.json resumes or updates without them -->
@@ -109,6 +118,7 @@
             <select id="in-lang"></select>
           </label>
         </div>
+        <div class="actions left"><button class="ghost small" id="find-files">Procurar os arquivos numa pasta…</button></div>
         <p class="hint">As chaves são lidas no lugar pelo instalador: o conteúdo delas nunca é mostrado, copiado nem guardado.</p>
 
         <div class="row">
@@ -137,45 +147,50 @@
       </div>
     </section>
 
-    <!-- MODS -->
+    <!-- QUICK SETTINGS: presets over the totk.ini keys of Configurações -->
     <section class="view" id="view-mods">
       <div class="panel wide">
-        <h2>Mods</h2>
-        <p class="lead">Melhorias aplicadas pelo port na hora de abrir o jogo. Nenhum arquivo do jogo é modificado.</p>
+        <h2>Ajustes rápidos</h2>
+        <p class="lead">Atalhos para as configurações do <code>totk.ini</code>. Nenhum arquivo do jogo é modificado; tudo pode ser refinado em <b>Configurações</b> ou no menu do jogo (<kbd>F1</kbd>).</p>
         <div class="panel-scroll">
 
+        <h3>Qualidade gráfica</h3>
+        <div class="presets" id="presets">
+          <button class="preset" data-preset="perf"><b>Desempenho</b><small>1080p · cena a 67% · FSR</small></button>
+          <button class="preset" data-preset="balanced"><b>Equilibrado</b><small>1080p · escala do jogo · FSR</small></button>
+          <button class="preset" data-preset="quality"><b>Qualidade</b><small>1440p · cena a 100%</small></button>
+          <button class="preset" data-preset="ultra"><b>Ultra</b><small>4K · cena a 100% · GPU forte</small></button>
+        </div>
+
         <div class="mods">
-          <article class="mod soon" id="mod-fps60">
-            <div class="mod-art"><span class="mod-num">60</span><small>FPS</small></div>
+          <article class="mod soon" id="mod-fps">
+            <div class="mod-art"><span class="mod-num" id="mod-fps-num">60</span><small>FPS</small></div>
             <div class="mod-body">
               <div class="mod-head">
-                <h3>60 FPS</h3>
-                <span class="badge">Experimental</span>
+                <h3>Taxa de quadros</h3>
+                <span class="badge">Acima de 60: experimental</span>
               </div>
-              <p>Dobra a taxa de quadros do jogo de 30 para 60, com a física, as animações e a passagem do tempo ajustadas para continuar na velocidade certa.</p>
-              <ul class="mod-tags"><li>Desempenho</li><li>Requer CPU forte</li></ul>
+              <p>O limite de quadros do jogo. A física e o tempo seguem o relógio, então o jogo roda na velocidade certa em qualquer taxa.</p>
+              <div class="seg" id="fps-seg">
+                <button data-fps="30">30</button><button data-fps="60">60</button><button data-fps="90">90</button><button data-fps="120">120</button><button data-fps="144">144</button><button data-fps="display">Monitor</button>
+              </div>
             </div>
-            <label class="toggle mod-toggle" title="Ligar / desligar"><input type="checkbox" id="set-fps60" /><span class="knob"></span></label>
           </article>
 
-          <article class="mod soon" id="mod-res">
-            <div class="mod-art"><span class="mod-num">HD</span><small>RES</small></div>
+          <article class="mod" id="mod-handheld">
+            <div class="mod-art"><span class="mod-num">720</span><small>PORTÁTIL</small></div>
             <div class="mod-body">
-              <div class="mod-head">
-                <h3>Resolução maior</h3>
-                <span class="badge">Experimental</span>
-              </div>
-              <p>Renderiza a cena acima dos 1600×900 do Switch (até 4K), com a memória gráfica do jogo aumentada na medida. Ligado, a resolução é escolhida em <b>Configurações</b>.</p>
-              <ul class="mod-tags"><li>Qualidade</li><li>Requer GPU forte</li></ul>
+              <div class="mod-head"><h3>Modo portátil</h3></div>
+              <p>O jogo se comporta como no Switch fora da base: resolução interna menor. Mais leve em PCs fracos.</p>
             </div>
-            <label class="toggle mod-toggle" title="Ligar / desligar"><input type="checkbox" id="set-resmod" /><span class="knob"></span></label>
+            <label class="toggle mod-toggle" title="Ligar / desligar"><input type="checkbox" id="q-handheld" /><span class="knob"></span></label>
           </article>
 
           <article class="mod placeholder">
             <div class="mod-art empty"><i></i></div>
             <div class="mod-body">
-              <h3>Mais mods em breve</h3>
-              <p>Distância de visão e outras melhorias vão aparecer aqui.</p>
+              <h3>Mods em breve</h3>
+              <p>Mods de arquivos do jogo (formato de emulador) vão aparecer aqui.</p>
             </div>
           </article>
         </div>
@@ -183,7 +198,7 @@
       </div>
     </section>
 
-    <!-- SETTINGS -->
+    <!-- SETTINGS: totk.ini (main.rs read_ini / write_ini; keys as totk.ini.example) -->
     <section class="view" id="view-settings">
       <div class="panel wide">
         <h2>Configurações</h2>
@@ -191,98 +206,140 @@
         <div class="settings">
           <nav class="set-nav">
             <button class="active" data-set="display">Exibição</button>
-            <button data-set="control">Controle</button>
+            <button data-set="game">Jogo</button>
+            <button data-set="control">Controles</button>
             <button data-set="launcher">Launcher</button>
             <button data-set="advanced">Avançado</button>
           </nav>
           <div class="set-body">
+          <p class="hint" id="ini-note"></p>
           <div class="set-page active" id="set-display">
             <h3>Exibição</h3>
-            <label class="toggle"><input type="checkbox" id="set-fps" /><span class="knob"></span><div><b>Contador de FPS</b><small>Mostra o FPS no canto do jogo. <kbd>F3</kbd> liga/desliga durante o jogo.</small></div></label>
-            <label class="toggle"><input type="checkbox" id="set-fullscreen" /><span class="knob"></span><div><b>Tela cheia</b><small>Abre o jogo em tela cheia. <kbd>F11</kbd> alterna durante o jogo.</small></div></label>
-            <label class="toggle"><input type="checkbox" id="set-borderless" /><span class="knob"></span><div><b>Janela sem borda</b><small>Tira a barra de título do jogo (minimizar, maximizar, fechar). Desligado: janela normal.</small></div></label>
-            <label class="toggle"><input type="checkbox" id="set-handheld" /><span class="knob"></span><div><b>Modo portátil</b><small>O jogo se comporta como no Switch fora da base: saída 1280×720 e resolução interna menor. Mais leve em máquinas fracas.</small></div></label>
-            <label class="field res-field" id="res-field">
-              <span>Resolução da cena <small>(mod Resolução maior)</small></span>
-              <select id="set-res">
-                <option value="1920x1080">1080p · Full HD (1920×1080)</option>
-                <option value="2560x1440">1440p · 2K (2560×1440)</option>
-                <option value="3200x1800">1800p (3200×1800)</option>
-                <option value="3840x2160">2160p · 4K (3840×2160) — experimental</option>
-              </select>
-              <small id="res-status"></small>
-            </label>
+            <label class="toggle"><input type="checkbox" data-ini="fullscreen" data-on="1" data-off="" /><span class="knob"></span><div><b>Tela cheia</b><small>Janela sem borda sobre o monitor. <kbd>F11</kbd> alterna durante o jogo.</small></div></label>
+            <div class="grid2">
+              <label class="field">
+                <span>Tamanho da janela</span>
+                <select data-ini="window_size" data-default="1920x1080">
+                  <option value="1280x720">1280×720</option>
+                  <option value="1600x900">1600×900</option>
+                  <option value="1920x1080">1920×1080</option>
+                  <option value="2560x1440">2560×1440</option>
+                  <option value="3840x2160">3840×2160</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Resolução do jogo <small>(ao abrir)</small></span>
+                <select data-ini="output_res" data-default="1920x1080">
+                  <option value="1280x720">720p (1280×720)</option>
+                  <option value="1600x900">900p (1600×900)</option>
+                  <option value="1920x1080">1080p (1920×1080)</option>
+                  <option value="2560x1440">1440p (2560×1440)</option>
+                  <option value="3200x1800">1800p (3200×1800)</option>
+                  <option value="3840x2160">2160p · 4K (3840×2160)</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Escala da cena 3D <small>(ao abrir)</small></span>
+                <select data-ini="render_scale" data-default="game">
+                  <option value="game">Do jogo (5/6)</option>
+                  <option value="50">50%</option>
+                  <option value="67">67%</option>
+                  <option value="75">75%</option>
+                  <option value="100">100%</option>
+                  <option value="125">125% · antisserrilhado</option>
+                  <option value="150">150% · antisserrilhado</option>
+                  <option value="200">200% · antisserrilhado</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Ampliação para a janela</span>
+                <select data-ini="upscaler" data-default="fsr">
+                  <option value="fsr">AMD FSR 1</option>
+                  <option value="bilinear">Bilinear</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Nitidez do FSR: <b id="sharp-val"></b></span>
+                <input type="range" min="0" max="100" step="5" data-ini="sharpness" data-default="80" data-label="#sharp-val" data-unit="%" />
+              </label>
+              <label class="field">
+                <span>Sincronia vertical</span>
+                <select data-ini="vk_present" data-default="mailbox">
+                  <option value="mailbox">Mailbox (sem tearing, baixa latência)</option>
+                  <option value="fifo">VSync (fifo)</option>
+                  <option value="immediate">Desligada (immediate)</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Painel de desempenho <small>(<kbd>F10</kbd>)</small></span>
+                <select data-ini="perf_overlay" data-default="off">
+                  <option value="off">Desligado</option>
+                  <option value="fps">FPS</option>
+                  <option value="full">Completo</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div class="set-page" id="set-game">
+            <h3>Jogo</h3>
+            <div class="grid2">
+              <label class="field">
+                <span>Limite de quadros</span>
+                <select data-ini="fps_limit" data-default="60">
+                  <option value="30">30</option>
+                  <option value="60">60</option>
+                  <option value="90">90 · experimental</option>
+                  <option value="120">120 · experimental</option>
+                  <option value="144">144 · experimental</option>
+                  <option value="display">Taxa do monitor · experimental</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Idioma do jogo <small>(ao abrir)</small></span>
+                <select data-ini="lang" id="set-game-lang"></select>
+              </label>
+              <label class="field">
+                <span>Volume: <b id="vol-val"></b></span>
+                <input type="range" min="0" max="100" step="5" data-ini="volume" data-default="100" data-label="#vol-val" data-unit="%" />
+              </label>
+            </div>
+            <label class="toggle"><input type="checkbox" data-ini="operation_mode" data-on="handheld" data-off="" /><span class="knob"></span><div><b>Modo portátil</b><small>O jogo se comporta como no Switch fora da base: resolução interna menor. Vale ao abrir.</small></div></label>
           </div>
           <div class="set-page" id="set-control">
             <h3>Controle de jogo</h3>
-            <p class="hint">Qualquer controle que o sistema reconheça (Xbox, PlayStation, Switch Pro, 8BitDo). Os botões seguem o Switch: <b>A</b> é o da direita, <b>B</b> o de baixo.</p>
-            <label class="toggle"><input type="checkbox" id="set-rumble" /><span class="knob"></span><div><b>Vibração</b><small>O jogo vibra o controle (quando ele tem motores).</small></div></label>
-            <label class="toggle"><input type="checkbox" id="set-gyro-on" /><span class="knob"></span><div><b>Giroscópio</b><small>Mira e quebra-cabeças por movimento, com controles que têm sensor (DualSense, Switch Pro).</small></div></label>
-
-            <div class="sub-block" id="gyro-block">
-              <h3 class="mt">Giroscópio</h3>
+            <p class="hint">Qualquer controle que o sistema reconheça (Xbox, PlayStation, Switch Pro, 8BitDo).</p>
+            <div class="grid2">
               <label class="field">
-                <span>Zona morta: <b id="gyro-dz-val"></b> <small>(rotação mais lenta que isso conta como parado; tira o tremor da mão)</small></span>
-                <div class="range-row"><input type="range" id="set-gyro-dz" min="0" max="5" step="0.1" /><button class="ghost small" id="gyro-dz-auto">Automático</button></div>
+                <span>Layout dos botões</span>
+                <select data-ini="pad_layout" data-default="auto">
+                  <option value="auto">Automático (pelas letras do controle)</option>
+                  <option value="nintendo">Nintendo (A à direita)</option>
+                  <option value="xbox">Xbox (A embaixo)</option>
+                </select>
               </label>
               <label class="field">
-                <span>Eixos <small>(se a mira gira para o lado errado)</small></span>
-                <div class="path">
-                  <select id="set-gyro-preset">
-                    <option value="">Padrão do controle</option>
-                    <option value="x,-y,z">Inverter vertical</option>
-                    <option value="-x,y,-z">Inverter horizontal</option>
-                    <option value="-x,-y,-z">Inverter os dois</option>
-                    <option value="custom">Personalizado…</option>
-                  </select>
-                  <input id="set-gyro" placeholder="ex.: -x,y,-z" spellcheck="false" />
-                </div>
+                <span>Força da vibração: <b id="rumble-val"></b></span>
+                <input type="range" min="0" max="300" step="10" data-ini="rumble_strength" data-default="130" data-label="#rumble-val" data-unit="%" />
               </label>
             </div>
+            <label class="toggle"><input type="checkbox" data-ini="motion" data-on="" data-off="0" /><span class="knob"></span><div><b>Giroscópio</b><small>Mira e quebra-cabeças por movimento, com controles que têm sensor (DualSense, Switch Pro).</small></div></label>
+            <label class="toggle"><input type="checkbox" data-ini="rumble_triggers" data-on="1" data-off="" /><span class="knob"></span><div><b>Vibração nos gatilhos</b><small>Usa os motores dos gatilhos de um controle de Xbox.</small></div></label>
 
             <h3 class="mt">Teclado e mouse</h3>
             <label class="field">
-              <span>Câmera</span>
-              <select id="set-cam">
-                <option value="">Teclas (setas)</option>
-                <option value="mouse">Mouse</option>
-              </select>
+              <span>Sensibilidade da câmera com o mouse: <b id="mouse-val"></b> <small>(0 desliga a câmera com o mouse)</small></span>
+              <input type="range" min="0" max="10" step="0.1" data-ini="mouse_sens" data-default="1" data-label="#mouse-val" data-unit="×" />
             </label>
-            <div class="sub-block" id="mouse-block">
-              <label class="field">
-                <span>Sensibilidade: <b id="mouse-sens-val"></b></span>
-                <input type="range" id="set-mouse-sens" min="0.005" max="0.2" step="0.005" />
-              </label>
-              <label class="field">
-                <span>Mirando (arco, armas): <b id="mouse-aim-val"></b></span>
-                <input type="range" id="set-mouse-aim" min="0.1" max="2" step="0.05" />
-              </label>
-              <label class="field">
-                <span>Luneta: <b id="mouse-scope-val"></b></span>
-                <input type="range" id="set-mouse-scope" min="0.1" max="2" step="0.05" />
-              </label>
-              <label class="field">
-                <span>Suavização</span>
-                <select id="set-mouse-smooth">
-                  <option value="0">Nenhuma</option>
-                  <option value="5">Leve (5 ms)</option>
-                  <option value="10">Média (10 ms)</option>
-                </select>
-              </label>
-              <label class="toggle"><input type="checkbox" id="set-mouse-invert" /><span class="knob"></span><div><b>Inverter vertical</b><small>Mouse para cima olha para baixo.</small></div></label>
-              <p class="hint">No jogo o cursor fica preso na janela: <kbd>F8</kbd> solta e prende de novo (clicar na janela também prende). Com o mouse na câmera, o giroscópio do controle não gira a câmera.</p>
-            </div>
-            <p class="hint">Clique num campo e aperte a tecla ou o botão do mouse. Clique fora para cancelar; <b>×</b> apaga. Um controle conectado funciona junto.</p>
+            <p class="hint">Clique num campo e aperte a tecla ou o botão do mouse. Clique fora para cancelar; <b>×</b> apaga. Os botões do controle ficam como estão (o menu do jogo, <kbd>F1</kbd>, também remapeia o controle).</p>
             <div class="bindings" id="bindings"></div>
             <div class="keys-foot">
               <div class="fkeys">
                 <span class="hint">No jogo</span>
                 <ul>
-                  <li><kbd>F1</kbd> Painel de desempenho</li>
-                  <li><kbd>F2</kbd> 60 FPS</li>
-                  <li><kbd>F3</kbd> Contador de FPS</li>
-                  <li><kbd>F8</kbd> Soltar / prender o cursor</li>
+                  <li><kbd>F1</kbd> Menu de configurações</li>
+                  <li><kbd>F10</kbd> Painel de desempenho</li>
                   <li><kbd>F11</kbd> Tela cheia</li>
+                  <li><kbd>Esc</kbd> Soltar o cursor</li>
                 </ul>
               </div>
               <button class="ghost small" id="keys-reset">Restaurar padrão</button>
@@ -303,18 +360,24 @@
               <span>Volume</span>
               <input type="range" id="set-volume" min="0" max="100" />
             </label>
+            <label class="toggle"><input type="checkbox" id="set-close" /><span class="knob"></span><div><b>Fechar o launcher ao jogar</b><small>Desligado, o launcher volta quando o jogo fecha (e mostra o erro se ele parar).</small></div></label>
             <div class="actions left"><button class="ghost" data-open="launcher-art">Arte do launcher</button></div>
           </div>
           <div class="set-page" id="set-advanced">
             <h3>Avançado</h3>
             <label class="field">
-              <span>Variáveis extras (<code>TOTK_NOME=valor</code>, uma por linha)</span>
-              <textarea id="set-extra" rows="3" spellcheck="false" placeholder="TOTK_DRS=1"></textarea>
+              <span>Outras chaves do <code>totk.ini</code> (<code>chave = valor</code>, uma por linha; a lista completa está no <code>totk.ini.example</code>)</span>
+              <textarea id="set-extra" rows="5" spellcheck="false" placeholder="replay_async = 1"></textarea>
+            </label>
+            <label class="field">
+              <span>Repositório dos instaladores <small>(GitHub, dono/nome)</small></span>
+              <div class="path"><input id="set-repo" spellcheck="false" /><button class="ghost" id="repo-save">Salvar</button></div>
             </label>
             <div class="actions left">
               <button class="ghost" data-open=".">Pasta do jogo</button>
-              <button class="ghost" data-open="userdata">Saves</button>
-              <button class="ghost" data-open="lasrecomp.log">Log do jogo</button>
+              <button class="ghost" data-open="profile">Saves</button>
+              <button class="ghost" data-open="logs">Logs</button>
+              <button class="ghost" data-open="totk.ini">totk.ini</button>
             </div>
           </div>
           </div>
@@ -328,47 +391,43 @@
     <section class="view" id="view-about">
       <div class="panel wide about">
         <h2>Sobre</h2>
-        <p class="lead"><b>UltraTears</b> é um port nativo não oficial de <i>The Legend of Zelda: Tears of the Kingdom</i> 1.4.3 para PC. Não é um emulador: o código do jogo é traduzido antes (recompilação estática ARM64 → C, compilado para o processador do PC) e o sistema do Switch e a API gráfica NVN são substituídos por implementações próprias sobre Vulkan, no Windows e no macOS.</p>
+        <p class="lead"><b>TotK Recomp</b> é uma recompilação estática não oficial de <i>The Legend of Zelda: Tears of the Kingdom</i> para Windows x86-64. Não é um emulador: o código ARM64 do jogo é traduzido para C e compilado no seu PC, e o sistema do Switch e a API gráfica NVN são substituídos por implementações próprias sobre Vulkan.</p>
         <div class="panel-scroll">
 
         <div class="hero-credit">
           <div class="hero-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.2 4.6L12 22 9.8 6.6z" fill="currentColor"/><path d="M7 7.5h10" stroke="currentColor" stroke-width="1.6"/></svg></div>
           <div class="hero-text">
-            <small>Criador e desenvolvedor principal</small>
-            <b>kuraeow</b>
-            <span>Todo o port — recompilação, runtime, camada gráfica Vulkan, áudio e o processo de build — é trabalho dele.</span>
+            <small>Criador e mantenedor do recomp</small>
+            <b>valentderah</b>
+            <span>A recompilação, o runtime, o renderizador Vulkan e o instalador são o projeto TotK Recomp.</span>
           </div>
-          <button class="gold" data-url="https://github.com/kuraeow/ultratears">Ver projeto</button>
+          <button class="gold" data-url="https://github.com/valentderah/totk-pc-recomp">Ver projeto</button>
         </div>
 
         <h3 class="mt">Construído sobre</h3>
         <div class="credits">
-          <div><b>MacNativeGames</b><span>Camada NVN, serviço de tradução de shaders e inventário de shaders (MIT)</span></div>
-          <div><b>Ryujinx Team</b><span>Tradutor de shaders Maxwell → SPIR-V, versão 1.3.2 (MIT)</span></div>
-          <div><b>LASRecomp e B2recomp</b><span>Partes do runtime de recompilação (MIT / GPL-3.0)</span></div>
-          <div><b>Rich Geldreich</b><span>bc7enc e rgbcx, codificação de texturas BC7 / BC1 (MIT)</span></div>
-          <div><b>SavageWind</b><span>Técnicas de BotW usadas como referência no controle de quadros e na renderização</span></div>
-          <div><b>RxEmam</b><span>Câmera com mouse e teclado remapeável (PR #20)</span></div>
-          <div><b>PashaKagan</b><span>Tabelas de salto do lifter e pacote único de shaders (PRs #24 e #25)</span></div>
-          <div><b>Khronos · MoltenVK</b><span>Vulkan sobre Metal no macOS e a camada de shader objects</span></div>
-          <div><b>LibHac</b><span>Leitura de NSP/XCI na extensão de extração (BSD-3)</span></div>
-          <div><b>SDL3 · LLVM/Clang · Tauri</b><span>Janela, controles e áudio · compilador · este launcher</span></div>
+          <div><b>LAS Recomp</b><span>Base do lifter ARM64 → C</span></div>
+          <div><b>MacNativeGames</b><span>Camada NVN e lista de shaders (MIT)</span></div>
+          <div><b>d2r-mobile · nxnative</b><span>Partes do runtime Horizon</span></div>
+          <div><b>SavageWindRecomp</b><span>Técnicas de recomp usadas como referência</span></div>
+          <div><b>Ryujinx</b><span>Tradutor de shaders Maxwell → SPIR-V (MIT)</span></div>
+          <div><b>deko3d · hactool</b><span>Referência da GPU · extração de NSP/XCI</span></div>
+          <div><b>SDL3 · Dear ImGui · AMD FSR 1</b><span>Janela, controles e áudio · menu do jogo · ampliação</span></div>
+          <div><b>Switchbrew</b><span>Documentação do Switch e a comunidade homebrew</span></div>
         </div>
 
-        <h3 class="mt">Este fork</h3>
-        <p class="fork">Por <b>arnaldolima1</b>:</p>
+        <h3 class="mt">Este launcher</h3>
+        <p class="fork">Por <b>arnaldolima1</b>, vindo do fork do UltraTears:</p>
         <ul class="fork-list">
-          <li><b>Port para macOS</b> em Apple silicon (M1 em diante), sobre MoltenVK</li>
-          <li><b>Este launcher</b>: instalação guiada, extensões, configurações e abertura animada</li>
-          <li><b>Extração direta</b> dos seus NSP/XCI com a extensão nxextract</li>
-          <li><b>Build incremental</b>: uma mudança recompila só o que ela afeta</li>
-          <li>Contador de FPS, correção de iluminação para GPUs AMD e ajustes de janela</li>
+          <li><b>Instalação guiada</b>: baixa o instalador do GitHub, verifica e roda com barra de progresso</li>
+          <li><b>Configurações</b> do <code>totk.ini</code> com remapeamento de teclas e ajustes rápidos</li>
+          <li>Controle navega no launcher, música e arte personalizáveis</li>
         </ul>
 
         <p class="versions" id="about-versions"></p>
         <div class="legal">
-          <p>Distribuído sob a <b>GNU GPL v3</b> ou posterior; cada componente de terceiros mantém sua licença.</p>
-          <p>Nada do jogo vem com o port: tudo é gerado no seu PC a partir do seu próprio dump e deve ficar aqui. Não afiliado nem endossado pela Nintendo. <i>The Legend of Zelda</i> e <i>Tears of the Kingdom</i> são marcas da Nintendo.</p>
+          <p>O código do TotK Recomp é MIT; cada componente de terceiros mantém sua licença.</p>
+          <p>Nada do jogo vem com o recomp: tudo é gerado no seu PC a partir do seu próprio dump e deve ficar aqui. Não afiliado nem endossado pela Nintendo. <i>The Legend of Zelda</i> e <i>Tears of the Kingdom</i> são marcas da Nintendo.</p>
         </div>
         </div>
       </div>
@@ -378,10 +437,8 @@
   <!-- transition to the game -->
   <div id="transition" aria-hidden="true">
     <div class="t-bg"></div>
-    <div class="t-emblem"><img id="t-img" alt="" hidden /><div class="t-neutral" id="t-neutral"><div class="t-word"><div class="orn"><i></i><u></u><i></i></div><div class="wordmark"><b>ULTRATEARS</b><span>Tears of the Kingdom · PC</span></div><div class="orn"><i></i><u></u><i></i></div></div></div></div>
+    <div class="t-emblem"><img id="t-img" alt="" hidden /><div class="t-neutral" id="t-neutral"><div class="t-word"><div class="orn"><i></i><u></u><i></i></div><div class="wordmark"><b>TOTK RECOMP</b><span>Tears of the Kingdom · PC</span></div><div class="orn"><i></i><u></u><i></i></div></div></div></div>
     <div class="t-text"><span id="t-msg">Uma nova jornada começa no céu</span><span class="t-dots"><i></i><i></i><i></i></span></div>
-    <!-- the game's start-up (startup.txt, main.js watchStartup): compiling shaders n / total -->
-    <div class="t-status" id="t-status"><span id="t-status-text"></span><div class="t-bar"><i id="t-bar"></i></div></div>
   </div>
 
   <!-- dialog -->

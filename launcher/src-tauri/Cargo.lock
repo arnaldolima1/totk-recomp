@@ -4040,6 +4040,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06bdbd8cfc056b8d2e2e85f29b56a3bdbecb527cef81eb39e3e7b98af4652770"
 
 [[package]]
+name = "totk-recomp-launcher"
+version = "0.3.0"
+dependencies = [
+ "base64 0.22.1",
+ "gilrs",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-process",
+ "tauri-plugin-updater",
+ "ureq",
+ "windows-sys 0.59.0",
+ "zip 2.6.1",
+]
+
+[[package]]
 name = "tower"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4142,25 +4162,6 @@ name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
-
-[[package]]
-name = "ultratears-launcher"
-version = "0.2.2"
-dependencies = [
- "base64 0.22.1",
- "gilrs",
- "libc",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-process",
- "tauri-plugin-updater",
- "ureq",
- "windows-sys 0.59.0",
- "zip 2.6.1",
-]
 
 [[package]]
 name = "unicode-ident"

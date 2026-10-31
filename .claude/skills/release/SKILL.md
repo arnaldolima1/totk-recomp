@@ -1,6 +1,6 @@
 ---
 name: release
-description: Release a new UltraTears Launcher version with real release notes. Use when the user asks to release, publish, ship or "subir" a launcher version (patch, minor, major or X.Y.Z), or types /release.
+description: Release a new TotK Recomp Launcher version with real release notes. Use when the user asks to release, publish, ship or "subir" a launcher version (patch, minor, major or X.Y.Z), or types /release.
 ---
 
 # Release the launcher
@@ -12,7 +12,7 @@ show on the GitHub release and on the update card of every installed launcher, s
 ## Steps
 
 1. Check the tree: `git status --porcelain --untracked-files=no` must be empty (commit first, asking the user) and
-   the branch should be `develop` (release.py fast-forwards `main` to it).
+   the branch should be `main`.
 2. Next version: the argument (`patch` by default, or `minor`, `major`, `X.Y.Z`) applied to `version` in
    `launcher/src-tauri/tauri.conf.json`.
 3. What changed: `git describe --tags --match "launcher-v*" --abbrev=0`, then
@@ -36,8 +36,8 @@ show on the GitHub release and on the update card of every installed launcher, s
 5. Show the notes and the version to the user and wait for their go-ahead (a release is public and starts a build).
 6. Run `python launcher/release.py <version or patch|minor|major> --notes <scratch file>` from the repository root.
    It writes `launcher/release-notes/<version>.md` into the release commit.
-7. Watch the build: `gh run list -R arnaldolima1/ultratears -L 1`, then `gh run watch <id> -R arnaldolima1/ultratears
-   --exit-status` in the background. When it ends, check `gh release view launcher-v<version> -R arnaldolima1/ultratears`
+7. Watch the build: `gh run list -R arnaldolima1/totk-recomp -L 1`, then `gh run watch <id> -R arnaldolima1/totk-recomp
+   --exit-status` in the background. When it ends, check `gh release view launcher-v<version> -R arnaldolima1/totk-recomp`
    lists `latest.json` and the installers, and tell the user.
 
 `--replace` releases the current version again (deletes its release and tag first): only when the user asks for it.

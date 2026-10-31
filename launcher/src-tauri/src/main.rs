@@ -1,14 +1,18 @@
-// Launcher: settings (settings.cfg next to totk.exe), the install (`python -m installer` of a release folder, its JSON
-// events streamed to the window) and the game, started hidden over the launcher's own window so the hand-over looks
-// seamless. Two folders: the release (installer/, python/, tools/ ... as docs/installer.md "Release layout", or a
+// Launcher: settings (totk.ini next to totk.exe, ini.rs), the installer release (downloaded from GitHub, release.rs), the install (`python -m installer` of a release folder, its JSON
+// events streamed to the window) and the game, started under the launcher's transition screen, which hides once the
+// game's window shows. Two folders: the release (installer/, python/, tools/ ... as docs/installer.md "Release layout", or a
 // repository checkout in development) and the install folder the installer fills (totk.exe, totk-install.json).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod ini;
+mod release;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
@@ -25,6 +29,8 @@ const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 struct Procs {
     build: Mutex<Option<u32>>,
     game: Mutex<Option<u32>>,
+    downloading: AtomicBool,
+    cancel_download: AtomicBool,
 }
 
 #[derive(Serialize)]
@@ -42,7 +48,9 @@ struct Status {
     free_gb: Option<f64>,            // free space where the install folder is
     building: bool,
     running: bool,
+    downloading: bool,
     dev: bool,                       // the release is a repository checkout
+    repo: String,                    // the GitHub repository the releases come from
 }
 
 #[derive(Serialize, Clone)]
@@ -147,7 +155,8 @@ fn release_root(app: &AppHandle) -> Option<PathBuf> {
         .find(|d| is_release(d))
 }
 
-/// The install folder: TOTK_LAUNCHER_HOME, the one chosen in the launcher, or the launcher's own folder.
+/// The install folder: TOTK_LAUNCHER_HOME, the one chosen in the launcher, the launcher's own folder when the game is
+/// installed there (a portable copy), else Games\TotK Recomp in the user's home.
 fn home(app: &AppHandle) -> PathBuf {
     if let Ok(h) = std::env::var("TOTK_LAUNCHER_HOME") {
         return PathBuf::from(h);
@@ -155,7 +164,11 @@ fn home(app: &AppHandle) -> PathBuf {
     if let Some(saved) = read_config(app).get("home").and_then(|h| h.as_str()).map(PathBuf::from) {
         return saved;
     }
-    std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)).unwrap_or_default()
+    let own = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
+    if let Some(d) = own.filter(|d| d.join(GAME_EXE).is_file() || d.join(STATE_FILE).is_file()) {
+        return d;
+    }
+    app.path().home_dir().map(|h| h.join("Games").join("TotK Recomp")).unwrap_or_default()
 }
 
 #[tauri::command]
@@ -198,6 +211,8 @@ fn status(app: AppHandle, procs: State<Procs>) -> Status {
         update_name: field(&["inputs", "update", "name"]),
         free_gb: free_space(&h).map(|b| b as f64 / 1e9),
         building: procs.build.lock().unwrap().is_some(),
+        downloading: procs.downloading.load(Ordering::Relaxed),
+        repo: repo(&app),
         running: procs.game.lock().unwrap().is_some(),
         home: h.to_string_lossy().into_owned(),
     }
@@ -270,24 +285,148 @@ fn start_view() -> Option<String> {
     args.iter().position(|a| a == "--view").and_then(|i| args.get(i + 1).cloned())
 }
 
-/// settings.cfg: "NAME=value" lines the game reads before ultratears.cfg (src/host/boot.c).
+fn ini_path(app: &AppHandle) -> PathBuf {
+    home(app).join("totk.ini")
+}
+
+/// The keys set in totk.ini (lower-case, without the TOTK_ prefix); unset keys are at the game's defaults.
 #[tauri::command]
-fn read_settings(app: AppHandle) -> BTreeMap<String, String> {
-    std::fs::read_to_string(home(&app).join("settings.cfg"))
-        .unwrap_or_default()
-        .lines()
-        .filter(|l| !l.starts_with('#'))
-        .filter_map(|l| l.split_once('=').map(|(k, v)| (k.trim().to_string(), v.trim().to_string())))
-        .collect()
+fn read_ini(app: AppHandle) -> BTreeMap<String, String> {
+    std::fs::read_to_string(ini_path(&app)).map(|t| ini::read(&t)).unwrap_or_default()
+}
+
+/// Sets keys in totk.ini (an empty value puts a key back to its default) and keeps every other line. A folder without
+/// totk.ini yet starts from the release's totk.ini.example, as the installer does.
+#[tauri::command]
+fn write_ini(app: AppHandle, changes: BTreeMap<String, String>) -> Result<(), String> {
+    let path = ini_path(&app);
+    let mut text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(_) => release_root(&app).and_then(|r| std::fs::read_to_string(r.join("totk.ini.example")).ok()).unwrap_or_default(),
+    };
+    for (k, v) in &changes {
+        let k = k.trim().to_ascii_lowercase();
+        if k.is_empty() || !k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') || v.contains(['\n', '\r']) {
+            return Err(format!("chave inválida: {k}"));
+        }
+        text = ini::set(&text, &k, v.trim());
+    }
+    std::fs::create_dir_all(home(&app)).map_err(|e| e.to_string())?;
+    let tmp = path.with_extension("ini.tmp");
+    std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
+fn repo(app: &AppHandle) -> String {
+    read_config(app).get("repo").and_then(|r| r.as_str()).filter(|r| !r.is_empty()).unwrap_or(release::DEFAULT_REPO).to_string()
 }
 
 #[tauri::command]
-fn write_settings(app: AppHandle, settings: BTreeMap<String, String>) -> Result<(), String> {
-    let mut text = String::from("# Written by the UltraTears launcher: the player's settings (read before ultratears.cfg).\n");
-    for (k, v) in settings.iter().filter(|(_, v)| !v.is_empty()) {
-        text += &format!("{k}={v}\n");
+fn set_repo(app: AppHandle, repo: String) -> Result<(), String> {
+    write_config(&app, "repo", repo.trim())
+}
+
+/// The repository's installer releases, newest first (release.rs list).
+#[tauri::command]
+async fn releases(app: AppHandle) -> Result<Vec<release::Release>, String> {
+    let repo = repo(&app);
+    tauri::async_runtime::spawn_blocking(move || release::list(&repo)).await.map_err(|e| e.to_string())?
+}
+
+#[derive(Serialize, Clone)]
+struct DlProgress {
+    done: u64,
+    total: u64,
+    phase: &'static str,
+}
+
+/// Downloads and unpacks a release into the launcher's data folder and makes it the installer release: "dl-progress"
+/// while it runs, "dl-done" with null or the error when it ends. Older downloaded releases are removed after.
+#[tauri::command]
+fn download_release(app: AppHandle, procs: State<Procs>, rel: release::Release) -> Result<(), String> {
+    if procs.build.lock().unwrap().is_some() {
+        return Err("Espere a instalação terminar.".into());
     }
-    std::fs::write(home(&app).join("settings.cfg"), text).map_err(|e| e.to_string())
+    if procs.downloading.swap(true, Ordering::SeqCst) {
+        return Err("O download já está rodando.".into());
+    }
+    procs.cancel_download.store(false, Ordering::SeqCst);
+    let dir = match app.path().app_local_data_dir() {
+        Ok(d) => d.join("releases"),
+        Err(e) => {
+            procs.downloading.store(false, Ordering::SeqCst);
+            return Err(e.to_string());
+        }
+    };
+    thread::spawn(move || {
+        let procs = app.state::<Procs>();
+        let emit = |done, total, phase: &str| {
+            let phase = if phase == "unpack" { "unpack" } else { "download" };
+            let _ = app.emit("dl-progress", DlProgress { done, total, phase });
+        };
+        let result = release::download(&rel, &dir, &procs.cancel_download, emit).and_then(|root| {
+            write_config(&app, "release", &root.to_string_lossy())?;
+            release::prune(&dir, &root);
+            Ok(())
+        });
+        procs.downloading.store(false, Ordering::SeqCst);
+        let _ = app.emit("dl-done", result.err());
+    });
+    Ok(())
+}
+
+#[derive(Serialize, Default)]
+struct Found {
+    base: Option<String>,
+    update: Option<String>,
+    keys: Option<String>,
+}
+
+/// Game files under `dir` (three levels down) by name: the base game and the update by their title ids
+/// (0100F2C0115B6000, 0100F2C0115B6800) or names, the newest update by its [v...] number; prod.keys there or in the
+/// usual emulator key folders. Only paths: the installer identifies the files by hash and reads the keys itself.
+#[tauri::command]
+async fn find_game_files(app: AppHandle, dir: String) -> Found {
+    let appdata = app.path().config_dir().ok();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut files = Vec::new();
+        let mut stack = vec![(PathBuf::from(&dir), 0)];
+        while let Some((d, depth)) = stack.pop() {
+            let Ok(rd) = std::fs::read_dir(&d) else { continue };
+            for e in rd.filter_map(|e| e.ok()) {
+                let p = e.path();
+                if p.is_dir() {
+                    if depth < 3 { stack.push((p, depth + 1)); }
+                } else {
+                    files.push(p);
+                }
+            }
+        }
+        let name = |p: &PathBuf| p.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+        let game = |n: &str| n.ends_with(".nsp") || n.ends_with(".xci");
+        let is_update = |n: &str| n.contains("0100f2c0115b6800") || n.contains("update") || n.contains("[upd]");
+        let is_totk = |n: &str| n.contains("0100f2c0115b6") || n.contains("totk") || n.contains("tears of the kingdom");
+        let update_version = |n: &str| -> u64 {
+            n.split("[v").nth(1).and_then(|s| s.split(']').next()).and_then(|v| v.parse().ok()).unwrap_or(0)
+        };
+        let mut found = Found::default();
+        found.base = files.iter().filter(|p| { let n = name(p); game(&n) && is_totk(&n) && !is_update(&n) })
+            .max_by_key(|p| p.metadata().map(|m| m.len()).unwrap_or(0)).map(|p| p.to_string_lossy().into_owned());
+        found.update = files.iter().filter(|p| { let n = name(p); n.ends_with(".nsp") && is_totk(&n) && is_update(&n) })
+            .max_by_key(|p| update_version(&name(p))).map(|p| p.to_string_lossy().into_owned());
+        let key_dirs = appdata.iter().flat_map(|a| ["yuzu/keys", "suyu/keys", "eden/keys", "citron/keys", "sudachi/keys", "Ryujinx/system"]
+            .map(|k| a.join(k).join("prod.keys")));
+        found.keys = files.iter().find(|p| name(p) == "prod.keys").cloned().into_iter().chain(key_dirs)
+            .find(|p| p.is_file()).map(|p| p.to_string_lossy().into_owned());
+        found
+    })
+    .await
+    .unwrap_or_default()
+}
+
+#[tauri::command]
+fn cancel_download(procs: State<Procs>) {
+    procs.cancel_download.store(true, Ordering::SeqCst);
 }
 
 /// Splits a child's output on \n and \r (progress lines rewrite themselves with \r) and sends each line to the window.
@@ -367,27 +506,6 @@ fn start_build(app: AppHandle, procs: State<Procs>, inputs: Inputs) -> Result<()
     Ok(())
 }
 
-/// The heap overlay the resolution mod needs for `size` (tools/make_res_overlay.py, about a second).
-#[tauri::command]
-fn make_res_overlay(app: AppHandle, size: String) -> Result<(), String> {
-    if !size.split_once('x').map_or(false, |(w, h)| w.parse::<u32>().is_ok() && h.parse::<u32>().is_ok()) {
-        return Err(format!("resolução inválida: {size}"));
-    }
-    let h = home(&app);
-    let script = h.join("tools/make_res_overlay.py");
-    let Some(python) = python(&h).filter(|_| script.is_file()) else {
-        return Err("tools/make_res_overlay.py ou o Python do build não estão na pasta do jogo.".into());
-    };
-    let mut cmd = Command::new(python);
-    cmd.arg(script).arg(&size).current_dir(&h).env("PYTHONNOUSERSITE", "1");
-    let out = no_window(&mut cmd).output().map_err(|e| e.to_string())?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string() + &String::from_utf8_lossy(&out.stdout))
-    }
-}
-
 fn kill_tree(pid: u32) {
     #[cfg(windows)]
     let _ = no_window(Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"])).status();
@@ -449,23 +567,16 @@ fn has_visible_window(pid: u32, _home: &Path) -> bool {
     found.1
 }
 
-/// The game's start-up status (startup.txt in the game folder, written by host/window_sdl.c while it starts hidden):
-/// "starting", "shaders <done> <total>", "ready"; empty before the game writes it.
-#[tauri::command]
-fn startup_status(app: AppHandle) -> String {
-    std::fs::read_to_string(home(&app).join("startup.txt")).unwrap_or_default().trim().to_string()
-}
-
-/// macOS / Linux: no window enumeration here; the game says "ready" in startup.txt when its window shows.
+/// macOS / Linux: no window enumeration here; the game counts as shown once it has run for a few seconds.
 #[cfg(not(windows))]
-fn has_visible_window(_pid: u32, home: &Path) -> bool {
-    std::fs::read_to_string(home.join("startup.txt")).map_or(false, |s| s.starts_with("ready"))
+fn has_visible_window(_pid: u32, _home: &Path) -> bool {
+    true
 }
 
-/// Starts the game hidden over the rectangle (x, y, w, h in pixels); "game-visible" when its window shows its first
-/// frame, "game-exit" with the exit code when it ends.
+/// Starts totk.exe in the install folder (it reads totk.ini there); "game-visible" when its window shows, "game-exit"
+/// with the exit code when it ends.
 #[tauri::command]
-fn launch_game(app: AppHandle, procs: State<Procs>, rect: (i32, i32, i32, i32), fullscreen: bool, borderless: bool, lang: Option<String>) -> Result<(), String> {
+fn launch_game(app: AppHandle, procs: State<Procs>) -> Result<(), String> {
     let mut slot = procs.game.lock().unwrap();
     if slot.is_some() {
         return Err("O jogo já está aberto.".into());
@@ -475,20 +586,8 @@ fn launch_game(app: AppHandle, procs: State<Procs>, rect: (i32, i32, i32, i32), 
     if !exe.is_file() {
         return Err(format!("{GAME_EXE} não existe ainda: faça a instalação primeiro."));
     }
-    let _ = std::fs::remove_file(h.join("startup.txt"));   // (a previous run's)
     let mut cmd = Command::new(exe);
-    cmd.current_dir(&h)
-        .env("TOTK_START_HIDDEN", "1")
-        .env("TOTK_WINDOW", format!("{},{},{},{}", rect.0, rect.1, rect.2, rect.3));
-    if fullscreen {
-        cmd.env("TOTK_FULLSCREEN", "1");
-    }
-    if borderless {
-        cmd.env("TOTK_BORDERLESS", "1");
-    }
-    if let Some(l) = lang.filter(|l| l == "en" || l == "pt") {
-        cmd.env("TOTK_LANG", l);   // the game's own notices (overlay) in the launcher's language
-    }
+    cmd.current_dir(&h);
     #[cfg(unix)]
     cmd.process_group(0);
     let mut child = cmd.spawn().map_err(|e| e.to_string())?;
@@ -498,6 +597,8 @@ fn launch_game(app: AppHandle, procs: State<Procs>, rect: (i32, i32, i32, i32), 
     let watcher = app.clone();
     let game_home = h.clone();
     thread::spawn(move || {
+        #[cfg(not(windows))]
+        thread::sleep(Duration::from_secs(4));
         for _ in 0..(10 * 60 * 10) {   // up to 10 minutes for the first frame
             if has_visible_window(pid, &game_home) {
                 #[cfg(target_os = "macos")]   // one Dock icon: the game's now (it enters the Dock with its window)
@@ -612,8 +713,8 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            status, set_home, set_release, installer_text, start_view, make_res_overlay, custom_art, read_settings, write_settings,
-            start_build, cancel_build, launch_game, stop_game, log_tail, open_path, startup_status,
+            status, set_home, set_release, set_repo, installer_text, start_view, custom_art, read_ini, write_ini, releases,
+            download_release, cancel_download, find_game_files, start_build, cancel_build, launch_game, stop_game, log_tail, open_path,
         ])
         .run(tauri::generate_context!())
         .expect("launcher");

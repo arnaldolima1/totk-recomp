@@ -14,7 +14,7 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 const esc = (t) => String(t).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 // ---------------------------------------------------------------- launcher-only preferences (this PC)
-const prefs = Object.assign({ music: true, volume: 35, frameless: false, inputs: {} },
+const prefs = Object.assign({ music: true, volume: 35, closeOnPlay: false, inputs: {} },
   JSON.parse(localStorage.getItem('prefs') || '{}'));
 const savePrefs = () => localStorage.setItem('prefs', JSON.stringify(prefs));
 
@@ -104,20 +104,27 @@ $$('[data-set]').forEach((b) => (b.onclick = () => {
 let status = {};
 async function refresh() {
   status = await invoke('status');
-  $('#version').textContent = status.installed_release ? `v${status.installed_release}` : '';
+  $('#version').textContent = status.installed_release ? `v${status.installed_release.split('+')[0]}` : '';
   $('#home-path').value = status.home;
   $('#release-path').value = status.release || '';
   $('#release-version').textContent = status.release_version ? `· versão ${status.release_version}${status.dev ? ' (repositório)' : ''}` : '';
   const play = $('#play'), msg = $('#home-status');
-  play.disabled = status.building || status.running;
+  play.disabled = status.building || status.running || status.downloading;
   play.classList.toggle('install', !status.installed);
   play.querySelector('.play-label').textContent = status.installed ? 'Jogar' : 'Instalar';
   if (status.building) msg.innerHTML = 'Instalação em andamento…';
+  else if (status.downloading) msg.innerHTML = 'Baixando o instalador…';
   else if (status.running) msg.innerHTML = 'O jogo está aberto';
   else if (status.installed) msg.innerHTML = `Pronto para jogar · <b>Tears of the Kingdom ${esc(status.game_version || '')}</b>`;
-  else if (!status.release) msg.innerHTML = 'Escolha a pasta do instalador em <b>Instalação</b>';
+  else if (!status.release) msg.innerHTML = 'Baixe o instalador em <b>Instalação</b>';
   else msg.innerHTML = 'Jogo ainda não instalado · leva cerca de 30 min';
+  $('#ini-note').textContent = status.running
+    ? 'O jogo está aberto: as mudanças marcadas "ao abrir" valem na próxima vez; as outras o jogo lê na hora.'
+    : status.installed ? '' : 'O jogo ainda não está instalado: estas escolhas ficam no totk.ini da pasta de instalação.';
+  $('#set-repo').value = status.repo || '';
   renderInstallForm();
+  renderRelease();
+  renderUpdates();
 }
 
 // The game files: a first install needs all of them; a folder with totk-install.json resumes or updates with only
@@ -131,7 +138,7 @@ function renderInstallForm() {
   el.textContent = free == null ? '' : `· ${free.toFixed(0)} GB livres${need ? ` (precisa de ~${need} GB)` : ''}`;
   el.classList.toggle('low', free != null && free < need);
   for (const k of ['base', 'update', 'keys']) $(`#in-${k}`).value = prefs.inputs[k] || '';
-  $('#in-lang').value = prefs.inputs.lang || status.lang || 'en-US';
+  $('#in-lang').value = prefs.inputs.lang || status.lang || defaultGameLang();
   const known = $('#inputs-known');
   known.classList.toggle('hidden', !status.has_state);
   if (status.has_state) {
@@ -141,183 +148,233 @@ function renderInstallForm() {
   }
 }
 
-// ---------------------------------------------------------------- settings (settings.cfg)
-const KNOWN = ['TOTK_FPS_OVERLAY', 'TOTK_FULLSCREEN', 'TOTK_GYRO_AXES', 'TOTK_FPS60', 'TOTK_RENDER_RES', 'TOTK_RUMBLE', 'TOTK_GYRO',
-  'TOTK_GYRO_DEADZONE', 'TOTK_OPERATION_MODE'];
-const isKnown = (k) => KNOWN.includes(k) || k.startsWith('TOTK_KEY_') || MOUSE_KEYS.includes(k);
-function showResField() { $('#res-field').classList.toggle('on', $('#set-resmod').checked); }
-let settings = {};
+// ---------------------------------------------------------------- installer releases (main.rs releases / download_release)
+// TotK-Setup-<version>-windows.zip from the GitHub releases of status.repo, checked against its SHA-256 and unpacked
+// into the launcher's data folder. The newest stable release is picked unless a pre-release is newer than it.
+let releases = [], releasesError = null;
+const vkey = (v) => String(v || '').replace(/^v/i, '').split(/[+\- ]/)[0].split('.').map((n) => +n || 0);
+const newer = (a, b) => { const x = vkey(a), y = vkey(b); for (let i = 0; i < Math.max(x.length, y.length); i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
+async function loadReleases() {
+  try { releases = await invoke('releases'); releasesError = null; } catch (e) { releases = []; releasesError = String(e); }
+  const sel = $('#rel-list');
+  sel.innerHTML = releases.length
+    ? releases.map((r, i) => `<option value="${i}">${esc(r.tag)}${r.prerelease ? ' · pré-lançamento' : ''} · ${(r.size / 1e6).toFixed(0)} MB</option>`).join('')
+    : `<option value="">${releasesError ? 'Sem conexão com o GitHub' : 'Nenhuma versão publicada'}</option>`;
+  if (releases.length) sel.value = '0';
+  renderRelease();
+  renderUpdates();
+}
+function selectedRelease() { return releases[+$('#rel-list').value] || null; }
+function renderRelease() {
+  const r = selectedRelease(), btn = $('#rel-get');
+  const current = status.release_version && r && !newer(r.tag, status.release_version) && !newer(status.release_version, r.tag);
+  btn.disabled = !r || status.downloading || status.building || current;
+  btn.textContent = current ? 'Em uso' : status.release ? 'Trocar' : 'Baixar';
+  if (!status.downloading && !dlError) $('#dl-status').textContent = releasesError || '';
+}
+let dlError = null;
+async function downloadRelease(r) {
+  dlError = null;
+  $('#dl-bar').classList.remove('hidden', 'error', 'idle');
+  $('#dl-fill').style.width = '0%';
+  $('#dl-status').textContent = `Baixando ${r.asset}…`;
+  try { await invoke('download_release', { rel: r }); } catch (e) { $('#dl-bar').classList.add('hidden'); return showError('Não foi possível baixar', String(e)); }
+  refresh();
+}
+$('#rel-get').onclick = () => { const r = selectedRelease(); if (r) downloadRelease(r); };
+$('#rel-list').onchange = renderRelease;
+listen('dl-progress', ({ payload: p }) => {
+  if (p.phase === 'unpack') { $('#dl-status').textContent = 'Descompactando…'; $('#dl-fill').style.width = '100%'; return; }
+  const pct = p.total ? (p.done / p.total) * 100 : 0;
+  $('#dl-fill').style.width = `${pct}%`;
+  $('#dl-status').textContent = `Baixando · ${(p.done / 1e6).toFixed(0)} de ${(p.total / 1e6).toFixed(0)} MB`;
+});
+listen('dl-done', async ({ payload: err }) => {
+  $('#dl-bar').classList.add('idle');
+  if (err) {
+    dlError = err;
+    $('#dl-bar').classList.add('error');
+    $('#dl-status').textContent = '';
+    showError('Não foi possível baixar o instalador', err);
+  } else {
+    $('#dl-bar').classList.add('hidden');
+    $('#dl-status').textContent = 'Instalador pronto.';
+  }
+  await refresh();
+});
+
+// ---------------------------------------------------------------- settings (totk.ini, main.rs read_ini / write_ini)
+// Controls with data-ini="<key>" are bound to that totk.ini key: a select or range writes its value (the data-default
+// one clears the key, so the game's own default applies), a checkbox writes data-on or data-off (empty clears).
+let ini = {};
+const managed = () => new Set([...$$('[data-ini]').map((el) => el.dataset.ini), ...BINDS.map(([id]) => `bind_${id.toLowerCase()}`)]);
+function showValue(el) {
+  if (el.dataset.label) $(el.dataset.label).textContent = `${(+el.value).toLocaleString(currentLang() === 'pt' ? 'pt-BR' : 'en')}${el.dataset.unit || ''}`;
+}
+function iniToControls() {
+  for (const el of $$('[data-ini]')) {
+    const v = ini[el.dataset.ini];
+    if (el.type === 'checkbox') el.checked = el.dataset.on ? v === el.dataset.on : v !== el.dataset.off;
+    else {
+      const want = v ?? el.dataset.default ?? '';
+      if (el.tagName === 'SELECT' && want && ![...el.options].some((o) => o.value === want)) el.add(new Option(want, want));
+      el.value = want;
+      showValue(el);
+    }
+  }
+  const m = managed();
+  $('#set-extra').value = Object.entries(ini).filter(([k]) => !m.has(k)).map(([k, v]) => `${k} = ${v}`).join('\n');
+  loadBinds();
+  renderQuick();
+}
+function controlValue(el) {
+  if (el.type === 'checkbox') return el.checked ? el.dataset.on : el.dataset.off;
+  return el.value === (el.dataset.default ?? null) ? '' : el.value;
+}
 async function loadSettings() {
-  settings = await invoke('read_settings');
-  $('#set-fps').checked = settings.TOTK_FPS_OVERLAY === '1';
-  $('#set-fullscreen').checked = settings.TOTK_FULLSCREEN === '1';
-  // controls: rumble and gyro are on unless "0" (host/hid_feedback.c); the dead zone empty = the controller's default
-  $('#set-rumble').checked = settings.TOTK_RUMBLE !== '0';
-  $('#set-gyro-on').checked = settings.TOTK_GYRO !== '0';
-  $('#set-handheld').checked = settings.TOTK_OPERATION_MODE === 'handheld';
-  $('#set-gyro').value = settings.TOTK_GYRO_AXES || '';
-  $('#set-gyro-dz').value = settings.TOTK_GYRO_DEADZONE || 0;
-  $('#set-gyro-dz').dataset.auto = settings.TOTK_GYRO_DEADZONE ? '' : '1';
-  showGyro();
-  loadInput();
-  $('#set-fps60').checked = settings.TOTK_FPS60 === '1';
-  $('#mod-fps60').classList.toggle('on', $('#set-fps60').checked);
-  $('#set-resmod').checked = !!settings.TOTK_RENDER_RES;
-  if (settings.TOTK_RENDER_RES) $('#set-res').value = settings.TOTK_RENDER_RES;
-  showResField();
-  $('#set-extra').value = Object.entries(settings).filter(([k]) => !isKnown(k)).map(([k, v]) => `${k}=${v}`).join('\n');
-  $('#set-borderless').checked = prefs.frameless;
-  $('#set-music').checked = prefs.music;
-  $('#set-volume').value = prefs.volume;
+  try { ini = await invoke('read_ini'); } catch { ini = {}; }
+  iniToControls();
 }
 let savedTimer;
-async function saveSettings() {
-  const s = {
-    TOTK_FPS_OVERLAY: $('#set-fps').checked ? '1' : '',
-    TOTK_FULLSCREEN: $('#set-fullscreen').checked ? '1' : '',
-    TOTK_GYRO_AXES: $('#set-gyro').value.trim(),
-    TOTK_RUMBLE: $('#set-rumble').checked ? '' : '0',
-    TOTK_GYRO: $('#set-gyro-on').checked ? '' : '0',
-    TOTK_GYRO_DEADZONE: $('#set-gyro-dz').dataset.auto ? '' : String(+$('#set-gyro-dz').value),
-    TOTK_OPERATION_MODE: $('#set-handheld').checked ? 'handheld' : '',
-    TOTK_FPS60: $('#set-fps60').checked ? '1' : '',
-    TOTK_RENDER_RES: $('#set-resmod').checked ? $('#set-res').value : '',
-    ...inputSettings(),
-  };
-  for (const line of $('#set-extra').value.split('\n')) {
-    const m = line.trim().match(/^(TOTK_[A-Z0-9_]+)\s*=\s*(.*)$/);
-    if (m) s[m[1]] = m[2];
-  }
+async function saveIni(changes) {
   try {
-    await invoke('write_settings', { settings: s });
-    settings = s;
+    await invoke('write_ini', { changes });
+    for (const [k, v] of Object.entries(changes)) { if (v) ini[k] = v; else delete ini[k]; }
     $('#saved').classList.add('on');
     clearTimeout(savedTimer);
     savedTimer = setTimeout(() => $('#saved').classList.remove('on'), 1400);
+    renderQuick();
   } catch (e) { showError('Não foi possível salvar', String(e)); }
 }
-['#set-fps', '#set-fullscreen', '#set-fps60', '#set-rumble', '#set-handheld'].forEach((s) => ($(s).onchange = saveSettings));
-// Gyro: its options only matter with it on; the axes field follows the preset (or is typed: "custom")
-function showGyro() {
-  $('#set-control').classList.toggle('disabled-gyro', !$('#set-gyro-on').checked);
-  const dz = $('#set-gyro-dz');
-  $('#gyro-dz-val').textContent = dz.dataset.auto ? 'automática' : `${(+dz.value).toFixed(1)} °/s`;
-  const v = $('#set-gyro').value.trim(), preset = $('#set-gyro-preset');
-  preset.value = [...preset.options].some((o) => o.value === v && v !== 'custom') ? v : 'custom';
-  $('#set-gyro').classList.toggle('hidden', preset.value !== 'custom');
-}
-$('#set-gyro-on').onchange = () => { showGyro(); saveSettings(); };
-$('#set-gyro-dz').oninput = (e) => { e.target.dataset.auto = ''; showGyro(); };
-$('#set-gyro-dz').onchange = saveSettings;
-$('#gyro-dz-auto').onclick = () => { $('#set-gyro-dz').dataset.auto = '1'; $('#set-gyro-dz').value = 0; showGyro(); saveSettings(); };
-$('#set-gyro-preset').onchange = (e) => {
-  if (e.target.value !== 'custom') $('#set-gyro').value = e.target.value;
-  $('#set-gyro').classList.toggle('hidden', e.target.value !== 'custom');
-  if (e.target.value === 'custom') $('#set-gyro').focus(); else saveSettings();
+$$('[data-ini]').forEach((el) => {
+  if (el.type === 'range') el.oninput = () => showValue(el);
+  el.onchange = () => saveIni({ [el.dataset.ini]: controlValue(el) });
+});
+$('#set-extra').onchange = () => {
+  const m = managed(), changes = {}, seen = new Set();
+  for (const line of $('#set-extra').value.split('\n')) {
+    const t = line.trim().match(/^(?:totk_)?([a-z0-9_]+)\s*=\s*(.*)$/i);
+    if (!t) continue;
+    const k = t[1].toLowerCase();
+    if (m.has(k)) continue;
+    changes[k] = t[2].trim();
+    seen.add(k);
+  }
+  for (const k of Object.keys(ini)) if (!m.has(k) && !seen.has(k)) changes[k] = '';   // removed lines go back to the default
+  saveIni(changes);
 };
-['#set-gyro', '#set-extra'].forEach((s) => ($(s).onchange = saveSettings));
+// The game language (runtime/cfg.c LANG): the installer's list; the default follows the Windows language.
+const LANGS = [['en-US', 'English (US)'], ['en-GB', 'English (UK)'], ['ja', '日本語'], ['fr', 'Français'],
+  ['fr-CA', 'Français (Canada)'], ['de', 'Deutsch'], ['it', 'Italiano'], ['es', 'Español'],
+  ['es-419', 'Español (Latinoamérica)'], ['nl', 'Nederlands'], ['ru', 'Русский'], ['ko', '한국어'],
+  ['zh-CN', '简体中文'], ['zh-TW', '繁體中文']];
+function defaultGameLang() {
+  const n = navigator.language;
+  if (/^es-(?!ES)/.test(n)) return 'es-419';
+  if (n === 'fr-CA' || n === 'en-GB' || n === 'zh-TW') return n;
+  const base = n.split('-')[0];
+  return (LANGS.find(([v]) => v.split('-')[0] === base) || ['en-US'])[0];
+}
+$('#in-lang').innerHTML = LANGS.map(([v, n]) => `<option value="${v}">${n}</option>`).join('');
+$('#in-lang').onchange = (e) => { prefs.inputs.lang = e.target.value; savePrefs(); };
+$('#set-game-lang').innerHTML = `<option value="">Do Windows</option>` + LANGS.map(([v, n]) => `<option value="${v}">${n}</option>`).join('');
+$('#set-game-lang').dataset.default = '';
 
-// Keyboard and mouse (host/keyboard_input.c, host/mouse_camera.c: upstream PR #20). Bindings are SDL scancodes, two per
-// action, 512-514 the mouse buttons (src/host/keyboard_bindings.def; only those differing from it are saved).
-const MOUSE_KEYS = ['TOTK_CAMERA_MODE', 'TOTK_MOUSE_CAMERA_VERSION', 'TOTK_MOUSE_BACKEND', 'TOTK_MOUSE_LOOK_DEG_PER_COUNT',
-  'TOTK_MOUSE_AIM_MULTIPLIER', 'TOTK_MOUSE_SCOPE_MULTIPLIER', 'TOTK_MOUSE_SMOOTH_MS', 'TOTK_MOUSE_INVERT_Y', 'TOTK_MOUSE_SENSITIVITY'];
-const ACTIONS = [   // [id, group, name, what it does, default 1, default 2]
-  ['MOVE_UP', 'Movimento', 'Frente', 'Analógico esquerdo para cima', 26, 0],
-  ['MOVE_DOWN', 'Movimento', 'Trás', 'Analógico esquerdo para baixo', 22, 0],
-  ['MOVE_LEFT', 'Movimento', 'Esquerda', 'Analógico esquerdo para a esquerda', 4, 0],
-  ['MOVE_RIGHT', 'Movimento', 'Direita', 'Analógico esquerdo para a direita', 7, 0],
-  ['LOOK_UP', 'Câmera', 'Olhar para cima', 'Também move a luneta e seleções', 82, 0],
-  ['LOOK_DOWN', 'Câmera', 'Olhar para baixo', '', 81, 0],
-  ['LOOK_LEFT', 'Câmera', 'Olhar à esquerda', '', 80, 0],
-  ['LOOK_RIGHT', 'Câmera', 'Olhar à direita', '', 79, 0],
-  ['A', 'Ações', 'A · Interagir', 'Pegar, falar, confirmar', 8, 0],
-  ['B', 'Ações', 'B · Correr / cancelar', 'Correr (segurar), guardar a arma', 225, 41],
-  ['X', 'Ações', 'X · Pular', 'Parapente no ar', 44, 0],
-  ['Y', 'Ações', 'Y · Atacar', 'Ataque carregado (segurar)', 512, 9],
-  ['L', 'Ações', 'L · Habilidade', 'Roda de habilidades (segurar)', 6, 0],
-  ['R', 'Ações', 'R · Arremessar', 'Mira o arremesso, solta para jogar', 23, 0],
-  ['ZL', 'Ações', 'ZL · Focar / escudo', 'Travar no alvo, erguer o escudo', 514, 20],
-  ['ZR', 'Ações', 'ZR · Arco', 'Puxar (segurar), soltar dispara', 513, 21],
-  ['STICK_L', 'Ações', 'Agachar', 'Clique do analógico esquerdo', 224, 0],
-  ['STICK_R', 'Ações', 'Luneta', 'Clique do analógico direito', 226, 0],
-  ['PLUS', 'Menus', '+ · Inventário', 'Bolsa e pausa', 43, 0],
-  ['MINUS', 'Menus', '− · Purah Pad', 'Mapa e diário', 53, 16],
-  ['DPAD_UP', 'Menus rápidos', 'Materiais', 'Direcional para cima (segurar)', 25, 0],
-  ['DPAD_DOWN', 'Menus rápidos', 'Assobiar', 'Chama o cavalo', 10, 0],
-  ['DPAD_LEFT', 'Menus rápidos', 'Escudos', 'Direcional para a esquerda (segurar)', 29, 0],
-  ['DPAD_RIGHT', 'Menus rápidos', 'Armas / arcos', 'Direcional para a direita (segurar)', 27, 0],
+// Keyboard and mouse bindings (runtime/input_map.c): bind_<button> = pad:..., key:... entries. The launcher edits the
+// key part only and keeps the line's pad entries (pad:default when the line is new; the stick directions take keys only).
+// The defaults are input_map.c DEFAULT_KEYS.
+const BINDS = [   // [action, group, name, what it does, default keys]
+  ['LSTICK_UP', 'Movimento', 'Frente', 'Analógico esquerdo', ['w']],
+  ['LSTICK_DOWN', 'Movimento', 'Trás', '', ['s']],
+  ['LSTICK_LEFT', 'Movimento', 'Esquerda', '', ['a']],
+  ['LSTICK_RIGHT', 'Movimento', 'Direita', '', ['d']],
+  ['RSTICK_UP', 'Câmera', 'Olhar para cima', 'Analógico direito (o mouse também gira)', ['up']],
+  ['RSTICK_DOWN', 'Câmera', 'Olhar para baixo', '', ['down']],
+  ['RSTICK_LEFT', 'Câmera', 'Olhar à esquerda', '', ['left']],
+  ['RSTICK_RIGHT', 'Câmera', 'Olhar à direita', '', ['right']],
+  ['A', 'Ações', 'A · Interagir', 'Pegar, falar, confirmar', ['e']],
+  ['B', 'Ações', 'B · Correr / cancelar', 'Correr (segurar), guardar a arma', ['lshift']],
+  ['X', 'Ações', 'X · Pular', 'Parapente no ar', ['space']],
+  ['Y', 'Ações', 'Y · Atacar', 'Ataque carregado (segurar)', ['mouse_l']],
+  ['L', 'Ações', 'L · Habilidade', 'Roda de habilidades (segurar)', ['q']],
+  ['R', 'Ações', 'R · Arremessar', 'Mira o arremesso, solta para jogar', ['r']],
+  ['ZL', 'Ações', 'ZL · Focar / escudo', 'Travar no alvo, erguer o escudo', ['mouse_r', 'z']],
+  ['ZR', 'Ações', 'ZR · Arco', 'Puxar (segurar), soltar dispara', ['f', 'x']],
+  ['LCLICK', 'Ações', 'Agachar', 'Clique do analógico esquerdo', ['lctrl']],
+  ['RCLICK', 'Ações', 'Luneta', 'Clique do analógico direito', ['c']],
+  ['PLUS', 'Menus', '+ · Inventário', 'Bolsa e pausa', ['tab']],
+  ['MINUS', 'Menus', '− · Purah Pad', 'Mapa e diário', ['m']],
+  ['UP', 'Menus rápidos', 'Materiais', 'Direcional para cima (segurar)', ['2']],
+  ['DOWN', 'Menus rápidos', 'Assobiar', 'Chama o cavalo', ['4']],
+  ['LEFT', 'Menus rápidos', 'Escudos', 'Direcional para a esquerda (segurar)', ['1']],
+  ['RIGHT', 'Menus rápidos', 'Armas / arcos', 'Direcional para a direita (segurar)', ['3']],
 ];
-const RESERVED = new Set([58, 59, 60, 65, 68]);   // F1-F3 (overlays, 60 FPS), F8 (cursor), F11 (fullscreen)
-const SDL_CODE = (() => {   // KeyboardEvent.code -> SDL scancode (USB HID usage)
-  const m = { Enter: 40, Escape: 41, Backspace: 42, Tab: 43, Space: 44, Minus: 45, Equal: 46, BracketLeft: 47, BracketRight: 48,
-    Backslash: 49, Semicolon: 51, Quote: 52, Backquote: 53, Comma: 54, Period: 55, Slash: 56, CapsLock: 57, PrintScreen: 70,
-    ScrollLock: 71, Pause: 72, Insert: 73, Home: 74, PageUp: 75, Delete: 76, End: 77, PageDown: 78, ArrowRight: 79,
-    ArrowLeft: 80, ArrowDown: 81, ArrowUp: 82, NumLock: 83, NumpadDivide: 84, NumpadMultiply: 85, NumpadSubtract: 86,
-    NumpadAdd: 87, NumpadEnter: 88, Numpad0: 98, NumpadDecimal: 99, IntlBackslash: 100, ControlLeft: 224, ShiftLeft: 225,
-    AltLeft: 226, MetaLeft: 227, ControlRight: 228, ShiftRight: 229, AltRight: 230, MetaRight: 231 };
-  for (let i = 0; i < 26; i++) m['Key' + String.fromCharCode(65 + i)] = 4 + i;
-  for (let i = 1; i <= 9; i++) { m['Digit' + i] = 29 + i; m['Numpad' + i] = 88 + i; }
-  m.Digit0 = 39;
-  for (let i = 1; i <= 12; i++) m['F' + i] = 57 + i;
+const KEY_OF_CODE = (() => {   // KeyboardEvent.code -> input_map.c key_names
+  const m = { Space: 'space', Tab: 'tab', ShiftLeft: 'lshift', ShiftRight: 'rshift', ControlLeft: 'lctrl', ControlRight: 'rctrl',
+    AltLeft: 'lalt', CapsLock: 'capslock', Enter: 'enter', Backspace: 'backspace', Insert: 'insert', Delete: 'delete', Home: 'home',
+    End: 'end', PageUp: 'pageup', PageDown: 'pagedown', ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+    NumpadAdd: 'num_add', NumpadSubtract: 'num_sub', NumpadMultiply: 'num_mul', NumpadDivide: 'num_div', NumpadDecimal: 'num_decimal',
+    Minus: 'minus', Equal: 'equals', BracketLeft: 'lbracket', BracketRight: 'rbracket', Semicolon: 'semicolon', Quote: 'apostrophe',
+    Comma: 'comma', Period: 'period', Slash: 'slash', Backslash: 'backslash', Backquote: 'grave',
+    F2: 'f2', F3: 'f3', F4: 'f4', F5: 'f5', F6: 'f6', F7: 'f7', F9: 'f9', F12: 'f12' };
+  for (let i = 0; i < 26; i++) m['Key' + String.fromCharCode(65 + i)] = String.fromCharCode(97 + i);
+  for (let i = 0; i <= 9; i++) { m['Digit' + i] = String(i); m['Numpad' + i] = 'num' + i; }
   return m;
 })();
-const MAC = navigator.platform.startsWith('Mac');
-function keyName(code) {
-  if (!code) return '—';
-  if (code === 512) return 'Mouse esq.';
-  if (code === 513) return 'Mouse dir.';
-  if (code === 514) return 'Mouse meio';
-  const named = { 40: MAC ? 'Return' : 'Enter', 41: 'Esc', 42: 'Backspace', 43: 'Tab', 44: 'Espaço', 57: 'Caps Lock', 79: '→', 80: '←',
-    81: '↓', 82: '↑', 224: 'Ctrl esq.', 225: 'Shift esq.', 226: MAC ? 'Option esq.' : 'Alt esq.', 227: MAC ? 'Cmd esq.' : 'Win esq.',
-    228: 'Ctrl dir.', 229: 'Shift dir.', 230: MAC ? 'Option dir.' : 'Alt dir.', 231: MAC ? 'Cmd dir.' : 'Win dir.', 53: '`' };
-  if (named[code]) return named[code];
-  if (code >= 4 && code <= 29) return String.fromCharCode(61 + code);
-  if (code >= 30 && code <= 39) return String((code - 29) % 10);
-  if (code >= 58 && code <= 69) return 'F' + (code - 57);
-  const back = Object.entries(SDL_CODE).find(([, v]) => v === code);
-  return back ? back[0].replace(/^Numpad/, 'Num ') : `Tecla ${code}`;
+const MOUSE_KEYS = ['mouse_l', 'mouse_m', 'mouse_r', 'mouse_x1', 'mouse_x2'];   // MouseEvent.button 0-4
+function keyName(k) {
+  if (!k) return '—';
+  const named = { space: 'Espaço', tab: 'Tab', lshift: 'Shift esq.', rshift: 'Shift dir.', lctrl: 'Ctrl esq.', rctrl: 'Ctrl dir.',
+    lalt: 'Alt esq.', capslock: 'Caps Lock', enter: 'Enter', backspace: 'Backspace', up: '↑', down: '↓', left: '←', right: '→',
+    mouse_l: 'Mouse esq.', mouse_r: 'Mouse dir.', mouse_m: 'Mouse meio', mouse_x1: 'Mouse 4', mouse_x2: 'Mouse 5',
+    minus: '-', equals: '=', lbracket: '[', rbracket: ']', semicolon: ';', apostrophe: "'", comma: ',', period: '.', slash: '/',
+    backslash: '\\', grave: '`', num_add: 'Num +', num_sub: 'Num -', num_mul: 'Num *', num_div: 'Num /', num_decimal: 'Num ,' };
+  if (named[k]) return named[k];
+  if (/^num\d$/.test(k)) return `Num ${k[3]}`;
+  return k.toUpperCase();
 }
-let binds = {};   // id -> [code, code]
+let binds = {};   // action -> {keys: [k1, k2], pads: [raw pad entries]}
 let listening = null;   // {id, slot, el}
-function loadInput() {
-  $('#set-cam').value = settings.TOTK_CAMERA_MODE === 'mouse' ? 'mouse' : '';
-  $('#set-mouse-sens').value = settings.TOTK_MOUSE_LOOK_DEG_PER_COUNT || 0.04;
-  $('#set-mouse-aim').value = settings.TOTK_MOUSE_AIM_MULTIPLIER || 1;
-  $('#set-mouse-scope').value = settings.TOTK_MOUSE_SCOPE_MULTIPLIER || 1;
-  $('#set-mouse-smooth').value = ['5', '10'].includes(settings.TOTK_MOUSE_SMOOTH_MS) ? settings.TOTK_MOUSE_SMOOTH_MS : '0';
-  $('#set-mouse-invert').checked = settings.TOTK_MOUSE_INVERT_Y === '1';
+function loadBinds() {
   binds = {};
-  for (const [id, , , , d1, d2] of ACTIONS) {
-    const m = (settings['TOTK_KEY_' + id] || '').match(/^(\d+),(\d+)$/);
-    binds[id] = m ? [+m[1], +m[2]] : [d1, d2];
+  for (const [id, , , , def] of BINDS) {
+    const line = ini[`bind_${id.toLowerCase()}`];
+    const stick = id.includes('STICK_');
+    if (line === undefined) { binds[id] = { keys: [def[0] || '', def[1] || ''], pads: stick ? [] : ['pad:default'] }; continue; }
+    const parts = line.split(',').map((t) => t.trim()).filter(Boolean);
+    let keys = [];
+    const pads = parts.filter((t) => t.toLowerCase().startsWith('pad:'));
+    for (const t of parts) {
+      const m = t.match(/^key:(.+)$/i);
+      if (!m) continue;
+      if (m[1].toLowerCase() === 'default') keys.push(...def); else keys.push(m[1].toLowerCase());
+    }
+    keys = keys.slice(0, 2);
+    binds[id] = { keys: [keys[0] || '', keys[1] || ''], pads };
   }
-  showInput();
+  showBinds();
 }
-function inputSettings() {
-  const mouse = $('#set-cam').value === 'mouse', s = {};
-  s.TOTK_CAMERA_MODE = mouse ? 'mouse' : '';
-  s.TOTK_MOUSE_CAMERA_VERSION = mouse ? '2' : '';
-  const num = (sel, def) => (+$(sel).value === def ? '' : String(+$(sel).value));
-  s.TOTK_MOUSE_LOOK_DEG_PER_COUNT = num('#set-mouse-sens', 0.04);
-  s.TOTK_MOUSE_AIM_MULTIPLIER = num('#set-mouse-aim', 1);
-  s.TOTK_MOUSE_SCOPE_MULTIPLIER = num('#set-mouse-scope', 1);
-  s.TOTK_MOUSE_SMOOTH_MS = $('#set-mouse-smooth').value === '0' ? '' : $('#set-mouse-smooth').value;
-  s.TOTK_MOUSE_INVERT_Y = $('#set-mouse-invert').checked ? '1' : '';
-  for (const [id, , , , d1, d2] of ACTIONS) {
-    const [a, b] = binds[id];
-    s['TOTK_KEY_' + id] = a === d1 && b === d2 ? '' : `${a},${b}`;
-  }
-  return s;
+function bindLine(id) {
+  const def = BINDS.find((b) => b[0] === id)[4];
+  const { keys, pads } = binds[id];
+  const ks = keys.filter(Boolean);
+  const stick = id.includes('STICK_');
+  const sameKeys = ks.length === def.length && ks.every((k, i) => k === def[i]);
+  const defaultPads = stick ? pads.length === 0 : pads.length === 1 && pads[0].toLowerCase() === 'pad:default';
+  if (sameKeys && defaultPads) return '';   // the defaults: no line
+  const entries = [...pads, ...ks.map((k) => `key:${k}`)];
+  return entries.length ? entries.join(', ') : 'none';
 }
-function showInput() {
-  $('#set-control').classList.toggle('keys-camera', $('#set-cam').value !== 'mouse');
-  $('#mouse-sens-val').textContent = `${(+$('#set-mouse-sens').value).toFixed(3)} °/ponto`;
-  $('#mouse-aim-val').textContent = `${(+$('#set-mouse-aim').value).toFixed(2)}×`;
-  $('#mouse-scope-val').textContent = `${(+$('#set-mouse-scope').value).toFixed(2)}×`;
+function saveBinds(ids) {
+  const changes = {};
+  for (const id of ids) changes[`bind_${id.toLowerCase()}`] = bindLine(id);
+  saveIni(changes);
+}
+function showBinds() {
   const box = $('#bindings');
   box.textContent = '';
   let group = '';
-  for (const [id, g, name, what] of ACTIONS) {
+  for (const [id, g, name, what] of BINDS) {
     if (g !== group) { group = g; const h = document.createElement('h4'); h.textContent = g; box.append(h); }
     const row = document.createElement('div');
     row.className = 'bind-row';
@@ -326,20 +383,20 @@ function showInput() {
     label.textContent = name;
     if (what) { const sm = document.createElement('small'); sm.textContent = what; label.append(sm); }
     row.append(label);
-    binds[id].forEach((code, slot) => {
+    binds[id].keys.forEach((key, slot) => {
       const el = document.createElement('div');
-      el.className = 'bind-slot' + (code ? '' : ' empty');
+      el.className = 'bind-slot' + (key ? '' : ' empty');
       el.tabIndex = 0;
-      el.textContent = keyName(code);
+      el.textContent = keyName(key);
       const x = document.createElement('button');
       x.className = 'clear';
       x.title = 'Apagar';
       x.textContent = '×';
       x.onmousedown = (e) => e.stopPropagation();
-      x.onclick = (e) => { e.stopPropagation(); stopListening(); binds[id][slot] = 0; showInput(); saveSettings(); };
+      x.onclick = (e) => { e.stopPropagation(); stopListening(); binds[id].keys[slot] = ''; showBinds(); saveBinds([id]); };
       el.append(x);
       el.onmousedown = (e) => {
-        if (listening && listening.el === el) { e.preventDefault(); assign([512, 514, 513][e.button]); return; }
+        if (listening && listening.el === el) { e.preventDefault(); assign(MOUSE_KEYS[e.button]); return; }
         stopListening();
         listening = { id, slot, el };
         el.classList.add('listening');
@@ -356,57 +413,68 @@ function stopListening() {
   if (!listening) return;
   listening.el.classList.remove('listening');
   listening = null;
-  showInput();
+  showBinds();
 }
-function assign(code) {
-  if (!listening || code === undefined) return;
+function assign(key) {
+  if (!listening || !key) return;
   const { id, slot } = listening;
-  for (const k in binds) binds[k] = binds[k].map((c) => (c === code ? 0 : c));   // one action per key (as the game does)
-  binds[id][slot] = code;
+  const changed = [id];
+  for (const k in binds) {   // one action per key (as the game's Controls tab does)
+    if (k !== id && binds[k].keys.includes(key)) { binds[k].keys = binds[k].keys.map((c) => (c === key ? '' : c)); changed.push(k); }
+  }
+  binds[id].keys[slot] = key;
+  if (binds[id].keys[1 - slot] === key) binds[id].keys[1 - slot] = '';
   listening = null;
-  showInput();
-  saveSettings();
+  showBinds();
+  saveBinds(changed);
 }
 addEventListener('keydown', (e) => {
   if (!listening) return;
   e.preventDefault();
   e.stopPropagation();
-  const code = SDL_CODE[e.code];
-  if (code && !RESERVED.has(code)) assign(code);
+  if (e.code === 'Escape') return stopListening();
+  assign(KEY_OF_CODE[e.code]);   // F1, F8, F10, F11 and Esc have no name: the game keeps them
 }, true);
 addEventListener('mousedown', (e) => { if (listening && !listening.el.contains(e.target)) stopListening(); });
 $('#keys-reset').onclick = () => {
   stopListening();
-  for (const [id, , , , d1, d2] of ACTIONS) binds[id] = [d1, d2];
-  showInput();
-  saveSettings();
+  for (const [id, , , , def] of BINDS) binds[id].keys = [def[0] || '', def[1] || ''];
+  showBinds();
+  saveBinds(BINDS.map(([id]) => id));
 };
-$('#set-cam').onchange = () => { showInput(); saveSettings(); };
-['#set-mouse-sens', '#set-mouse-aim', '#set-mouse-scope'].forEach((sel) => { $(sel).oninput = showInput; $(sel).onchange = saveSettings; });
-['#set-mouse-smooth', '#set-mouse-invert'].forEach((sel) => ($(sel).onchange = saveSettings));
-// The resolution mod: the heap overlay for the chosen size is made first (tools/make_res_overlay.py), then saved.
-async function applyRes() {
-  showResField();
-  const status = $('#res-status');
-  if ($('#set-resmod').checked) {
-    status.textContent = 'Preparando a memória do jogo para essa resolução…';
-    try {
-      await invoke('make_res_overlay', { size: $('#set-res').value });
-      status.textContent = 'Pronto: vale na próxima vez que o jogo abrir.';
-    } catch (e) {
-      $('#set-resmod').checked = false;
-      showResField();
-      status.textContent = '';
-      showError('Não foi possível preparar a resolução', String(e));
-    }
-  } else status.textContent = '';
-  await saveSettings();
+
+// ---------------------------------------------------------------- quick settings (Ajustes rápidos)
+const PRESETS = {
+  perf: { output_res: '', render_scale: '67', upscaler: '' },
+  balanced: { output_res: '', render_scale: '', upscaler: '' },
+  quality: { output_res: '2560x1440', render_scale: '100', upscaler: '' },
+  ultra: { output_res: '3840x2160', render_scale: '100', upscaler: '' },
+};
+function renderQuick() {
+  const fps = ini.fps_limit || '60';
+  $$('#fps-seg button').forEach((b) => b.classList.toggle('on', b.dataset.fps === fps));
+  $('#mod-fps-num').textContent = fps === 'display' ? 'Hz' : fps;
+  $('#q-handheld').checked = ini.operation_mode === 'handheld';
+  for (const b of $$('[data-preset]')) {
+    const p = PRESETS[b.dataset.preset];
+    b.classList.toggle('on', Object.entries(p).every(([k, v]) => (ini[k] || '') === v));
+  }
 }
-$('#set-resmod').onchange = applyRes;
-$('#set-res').onchange = applyRes;
-$('#set-borderless').onchange = (e) => { prefs.frameless = e.target.checked; savePrefs(); };
+$$('#fps-seg button').forEach((b) => (b.onclick = async () => {
+  await saveIni({ fps_limit: b.dataset.fps === '60' ? '' : b.dataset.fps });
+  iniToControls();
+}));
+$('#q-handheld').onchange = async (e) => { await saveIni({ operation_mode: e.target.checked ? 'handheld' : '' }); iniToControls(); };
+$$('[data-preset]').forEach((b) => (b.onclick = async () => { await saveIni(PRESETS[b.dataset.preset]); iniToControls(); }));
+
+// ---------------------------------------------------------------- launcher settings
 $('#set-music').onchange = (e) => { prefs.music = e.target.checked; savePrefs(); applyMusic(); };
 $('#set-volume').oninput = (e) => { prefs.volume = +e.target.value; savePrefs(); if (musicOn()) bgm.volume = prefs.volume / 100; };
+$('#set-close').onchange = (e) => { prefs.closeOnPlay = e.target.checked; savePrefs(); };
+$('#repo-save').onclick = async () => {
+  try { await invoke('set_repo', { repo: $('#set-repo').value }); await refresh(); await loadReleases(); }
+  catch (e) { showError('Não foi possível salvar', String(e)); }
+};
 $$('[data-url]').forEach((b) => (b.onclick = () => invoke('open_path', { path: b.dataset.url })));
 $$('[data-open]').forEach((b) => (b.onclick = () => invoke('open_path', { path: b.dataset.open }).catch((e) => showError('Não foi possível abrir', String(e)))));
 
@@ -499,7 +567,7 @@ function setBuilding(on) {
   build.running = on;
   $('#build').disabled = on;
   $('#cancel').disabled = !on;
-  $('.bar').classList.toggle('idle', !on);
+  $('.progress-block .bar').classList.toggle('idle', !on);
   refresh();
 }
 
@@ -526,7 +594,7 @@ function onEvent(e) {
       if (e.state === 'started') {
         build.step = i; build.sub = 0; build.state[i] = 'run';
         $('#build-phase').textContent = STEP_INFO[e.step] ? STEP_INFO[e.step].slice(0, 2).join(' · ') : message(`step.${e.step}`);
-        $('#build-activity').textContent = ' ';
+        $('#build-activity').textContent = ' ';
         logLine(message(`step.${e.step}`), 'step');
       } else {
         build.state[i] = 'done';
@@ -553,7 +621,7 @@ function onEvent(e) {
       build.error = message(e.id, e.params);
       if (i >= 0) build.state[i] = 'fail';
       else if (build.step >= 0 && build.state[build.step] === 'run') build.state[build.step] = 'fail';
-      $('.bar').classList.add('error');
+      $('.progress-block .bar').classList.add('error');
       $('#build-phase').textContent = 'Erro';
       logLine(build.error, 'err');
       break;
@@ -576,7 +644,11 @@ async function install() {
   await refresh();
   if (status.building) return;
   showView('install');
-  if (!status.release) return showError('Falta escolher', 'A pasta do instalador (o release descompactado, com installer/).');
+  if (!status.release) {
+    const r = releases.find((x) => !x.prerelease) || releases[0];
+    if (!r) return showError('Falta o instalador', releasesError || 'Nenhuma versão do instalador foi encontrada no GitHub.');
+    return downloadRelease(r);   // the install starts from the button once the download is done
+  }
   const inputs = { ...prefs.inputs, lang: $('#in-lang').value };
   if (!status.has_state) {
     const missing = [['base', 'o jogo base (NSP ou XCI)'], ['update', 'a atualização 1.2.1 ou 1.4.3 (NSP)'], ['keys', 'o prod.keys']]
@@ -585,9 +657,9 @@ async function install() {
   }
   useSteps(Object.keys(STEP_INFO));
   Object.assign(build, { step: -1, sub: 0, start: Date.now(), error: null, log: null });
-  $('.bar').classList.remove('error');
+  $('.progress-block .bar').classList.remove('error');
   $('#build-phase').textContent = 'Iniciando…';
-  $('#build-activity').textContent = ' ';
+  $('#build-activity').textContent = ' ';
   logEl.textContent = '';
   renderBuild();
   try {
@@ -612,12 +684,18 @@ $$('[data-pick]').forEach((b) => (b.onclick = async () => {
   savePrefs();
   renderInstallForm();
 }));
-const LANGS = [['en-US', 'English (US)'], ['en-GB', 'English (UK)'], ['ja', '日本語'], ['fr', 'Français'],
-  ['fr-CA', 'Français (Canada)'], ['de', 'Deutsch'], ['it', 'Italiano'], ['es', 'Español'],
-  ['es-419', 'Español (Latinoamérica)'], ['nl', 'Nederlands'], ['ru', 'Русский'], ['ko', '한국어'],
-  ['zh-CN', '简体中文'], ['zh-TW', '繁體中文']];
-$('#in-lang').innerHTML = LANGS.map(([v, n]) => `<option value="${v}">${n}</option>`).join('');
-$('#in-lang').onchange = (e) => { prefs.inputs.lang = e.target.value; savePrefs(); };
+$('#find-files').onclick = async () => {
+  const dir = await openDialog({ directory: true, title: 'Pasta com o jogo base, a atualização e o prod.keys' });
+  if (!dir) return;
+  const f = await invoke('find_game_files', { dir });
+  const got = ['base', 'update', 'keys'].filter((k) => f[k]);
+  for (const k of got) prefs.inputs[k] = f[k];
+  savePrefs();
+  renderInstallForm();
+  const names = { base: 'o jogo base', update: 'a atualização', keys: 'o prod.keys' };
+  const miss = ['base', 'update', 'keys'].filter((k) => !f[k]).map((k) => names[k]);
+  if (miss.length) showError('Arquivos encontrados em parte', `Não encontrei ${miss.join(', ')} nessa pasta. Escolha ${miss.length > 1 ? 'eles' : 'ele'} com o botão Escolher.`);
+};
 
 $('#pick-home').onclick = async () => {
   const dir = await openDialog({ directory: true, title: 'Pasta de instalação (vazia, ou com uma instalação anterior)' });
@@ -642,22 +720,27 @@ listen('build-done', async (e) => {
   } else {
     if (build.step >= 0 && build.state[build.step] === 'run') build.state[build.step] = 'fail';
     $('#build-phase').textContent = code === 3 ? 'Cancelado' : 'Erro';
-    $('.bar').classList.add('error');
+    $('.progress-block .bar').classList.add('error');
   }
   renderBuild();
   setBuilding(false);
+  await loadSettings();   // (the installer wrote totk.ini)
   if (code !== 0 && code !== 3) {
     showError('A instalação parou', build.error || [...logEl.childNodes].slice(-14).map((n) => n.textContent).join(''), build.log);
   }
 });
 
 // ---------------------------------------------------------------- updates
-// The launcher's own (tauri-plugin-updater: the GitHub release's latest.json, signed). Checked once at start; it
-// shows a card on Início.
+// The launcher's own (tauri-plugin-updater: the GitHub release's latest.json, signed) and the game's: a newer installer
+// release than the one that built the install folder. Both show a card on Início.
 let launcherUpdate = null;
 async function checkUpdates() {
   try { launcherUpdate = await checkLauncherUpdate(); } catch { launcherUpdate = null; }   // (offline, or no release yet)
   renderUpdates();
+}
+function gameUpdate() {
+  const r = releases.find((x) => !x.prerelease);
+  return status.installed && r && status.installed_release && newer(r.tag, status.installed_release) ? r : null;
 }
 function renderUpdates() {
   const box = $('#updates');
@@ -685,9 +768,20 @@ function renderUpdates() {
     }
     box.append(c);
   };
+  const notes = (body) => (body || '').split('\n').filter((l) => /^\s*[-*]\s+/.test(l)).map((l) => l.replace(/^\s*[-*]\s*/, '').replace(/\*\*|`/g, '').trim()).filter(Boolean);
+  const g = gameUpdate();
+  if (g) {
+    card(`TotK Recomp ${g.tag}`, `Nova versão do jogo · instalada: ${status.installed_release.split('+')[0]}`, notes(g.notes), 'Atualizar jogo', async () => {
+      showView('install');
+      const i = releases.indexOf(g);
+      $('#rel-list').value = String(i);
+      const current = status.release_version && !newer(g.tag, status.release_version) && !newer(status.release_version, g.tag);
+      if (!current) await downloadRelease(g);
+      else install();
+    });
+  }
   if (launcherUpdate) {
-    const notes = (launcherUpdate.body || '').split('\n').map((l) => l.replace(/^[-*]\s*/, '').trim()).filter(Boolean);
-    card(`Launcher ${launcherUpdate.version}`, 'Nova versão do launcher', notes, 'Atualizar launcher', async (btn) => {
+    card(`Launcher ${launcherUpdate.version}`, 'Nova versão do launcher', notes(launcherUpdate.body), 'Atualizar launcher', async (btn) => {
       btn.disabled = true;
       let got = 0, size = 0;
       try {
@@ -702,21 +796,17 @@ function renderUpdates() {
 }
 
 // ---------------------------------------------------------------- play: transition, hand-over, return
+// totk.exe opens its own window (size and fullscreen from totk.ini); the transition covers the wait and the launcher
+// hides when the game's window shows ("game-visible"), or closes when Fechar o launcher ao jogar is on.
 async function play() {
-  if (!status.installed) { showView('install'); return; }
-  const fullscreen = $('#set-fullscreen').checked;
+  if (!status.installed) { install(); return; }
   document.body.classList.add('in-game');
   $('#t-msg').textContent = 'Uma nova jornada começa no céu';
   $('#transition').classList.add('on');
   fadeMusic(0, 1400);
-  if (fullscreen) await win.setFullscreen(true);
-  await new Promise((r) => setTimeout(r, 1000));   // the transition fades in first
-  const pos = await win.outerPosition(), size = await win.outerSize();
+  await new Promise((r) => setTimeout(r, 900));   // the transition fades in first
   try {
-    await invoke('launch_game', {
-      rect: [pos.x, pos.y, size.width, size.height], fullscreen, borderless: prefs.frameless, lang: currentLang(),
-    });
-    watchStartup();
+    await invoke('launch_game');
     refresh();
   } catch (e) {
     backFromGame();
@@ -725,42 +815,18 @@ async function play() {
 }
 async function backFromGame() {
   document.body.classList.remove('in-game');
-  if (await win.isFullscreen()) await win.setFullscreen(false);
   await win.show();
   await win.unminimize();
   await win.setFocus();
   setTimeout(() => $('#transition').classList.remove('on'), 150);
   applyMusic();
   refresh();
+  loadSettings();   // (the game's menu and F11 write totk.ini too)
 }
 $('#play').onclick = play;
-
-// The game's start-up under the transition (startup.txt via main.rs startup_status): what it is doing while its window
-// stays hidden - preparing, then compiling the shaders it made ahead (n / total) - until it shows ("ready").
-let startupTimer;
-function watchStartup() {
-  const box = $('#t-status'), text = $('#t-status-text'), bar = $('#t-bar');
-  const t0 = Date.now();
-  clearInterval(startupTimer);
-  box.classList.remove('on', 'busy');
-  startupTimer = setInterval(async () => {
-    let s = '';
-    try { s = await invoke('startup_status'); } catch { /* not yet */ }
-    const m = s.match(/^shaders (\d+) (\d+)/);
-    if (s.startsWith('ready') || !document.body.classList.contains('in-game')) { clearInterval(startupTimer); box.classList.remove('on'); return; }
-    if (m && +m[2]) {
-      box.classList.add('on'); box.classList.remove('busy');
-      const n = Math.min(+m[1], +m[2]);
-      text.textContent = `Compilando shaders · ${n.toLocaleString('pt-BR')} / ${(+m[2]).toLocaleString('pt-BR')}`;
-      bar.style.width = `${(n / +m[2]) * 100}%`;
-    } else if (Date.now() - t0 > 1500) {   // (the tagline alone first)
-      box.classList.add('on', 'busy');
-      text.textContent = 'Preparando o jogo';
-    }
-  }, 250);
-}
 listen('game-visible', async () => {
-  await new Promise((r) => setTimeout(r, 250));   // the game's first frame is up behind us
+  await new Promise((r) => setTimeout(r, 250));   // the game's first frame is up
+  if (prefs.closeOnPlay) return win.close();
   await win.hide();
 });
 listen('game-exit', async (e) => {
@@ -847,7 +913,6 @@ listen('pad', ({ payload }) => {
 });
 addEventListener('mousemove', () => padFocus(null));
 
-// ---------------------------------------------------------------- start
 // ---------------------------------------------------------------- opening
 // index.html #intro: plays once at start (prefs.intro, Configurações > Launcher); a click or a key skips it.
 function playIntro() {
@@ -865,6 +930,8 @@ function playIntro() {
   addEventListener('keydown', end);
   setTimeout(end, 3600);
 }
+
+// ---------------------------------------------------------------- start
 // Language (i18n.js): the saved choice, else the system's
 setLang(prefs.lang || (navigator.language.toLowerCase().startsWith('pt') ? 'pt' : 'en'));
 $('#set-lang').value = prefs.lang || (navigator.language.toLowerCase().startsWith('pt') ? 'pt' : 'en');
@@ -872,6 +939,9 @@ $('#set-lang').onchange = (e) => { prefs.lang = e.target.value; savePrefs(); set
 playIntro();
 $('#set-intro').checked = prefs.intro !== false;
 $('#set-intro').onchange = (e) => { prefs.intro = e.target.checked; savePrefs(); };
+$('#set-music').checked = prefs.music;
+$('#set-volume').value = prefs.volume;
+$('#set-close').checked = prefs.closeOnPlay;
 
 (async function init() {
   await loadArt();
@@ -887,5 +957,6 @@ $('#set-intro').onchange = (e) => { prefs.intro = e.target.checked; savePrefs();
   if (view && $(`#view-${view}`)) showView(view);
   const lv = await getVersion();
   $('#about-versions').textContent = `Launcher ${lv}` + (status.installed_release ? ` · jogo: ${status.installed_release}` : '');
+  loadReleases();
   checkUpdates();
 })();
