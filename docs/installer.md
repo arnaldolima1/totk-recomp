@@ -113,7 +113,8 @@ totk.ini.example, VERSION  the default ini; the release string (the repository's
 
 `tools/make_release_linux.py` builds the same setup for Linux and packs it as `TotK-Setup-x86_64.AppImage` (the static
 type-2 runtime: no libfuse2 needed on the host). The player makes it executable and starts it; on a Steam Deck, from
-Desktop Mode. The setup builds the game into the folder they pick, as on Windows, and the game is `totk` there with
+Desktop Mode. Building the release also needs `make` and `pkg-config`. The bundled Tcl/Tk 9.0.4 is rebuilt with
+Xft against the sniper sysroot so Russian text uses system TrueType fonts. The setup builds the game into the folder they pick, as on Windows, and the game is `totk` there with
 `libSDL3.so.0` beside it. The folder inside the AppImage:
 
 ```
