@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "achievements.h"
 #include "fs.h"
 #include "host.h"
 #include "platform/platform.h"
@@ -527,6 +528,7 @@ void fs_save_flush(void) { save_wait_commit(); }
 static uint32_t commit_run(void) {
     plat_mutex_lock(&tx_lock);
     uint32_t r = save_commit_locked();
+    if (!r) ach_save_committed(newest_save());   // under tx_lock: no swap moves the save while it is read
     plat_dec32(&save_writers);
     plat_mutex_unlock(&tx_lock);
     plat_mutex_lock(&pend_lock);
@@ -587,6 +589,7 @@ static void storage_init(void *param) {
     make_dirs(p);
     plat_xchg32(&storage_ready, 1);
     rt_log("host save storage: %s", save_root);
+    ach_save_committed(newest_save());   // the progress the newest save already holds
     return;
 }
 

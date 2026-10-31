@@ -52,6 +52,17 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_SHADER_TOAST_DESC] = "A small notice in the bottom right corner while shaders and pipelines are being "
                                   "compiled, which is when the game can stutter for a moment.",
     [UI_MENU_TOAST_SHADERS] = "Compiling shaders (%u)",
+    [UI_MENU_ACH_POPUP] = "Achievement notices",
+    [UI_MENU_ACH_POPUP_DESC] = "A notice at the top of the screen when an achievement unlocks. Achievements are checked "
+                               "each time the game saves, so the notice comes with the next save after the feat.",
+    [UI_MENU_TAB_ACHIEVEMENTS] = "Achievements", [UI_MENU_ACH_PROGRESS] = "%d of %d unlocked",
+    [UI_MENU_ACH_NONE] = "No achievements are installed. Run the setup again, or save them in the achievements editor.",
+    [UI_MENU_ACH_SECRET] = "Secret achievement", [UI_MENU_ACH_SECRET_DESC] = "Keep playing to find out.",
+    [UI_MENU_ACH_UNLOCKED_ON] = "Unlocked %s", [UI_MENU_ACH_COMMON] = "Common", [UI_MENU_ACH_RARE] = "Rare",
+    [UI_MENU_ACH_EPIC] = "Epic", [UI_MENU_ACH_LEGENDARY] = "Legendary", [UI_MENU_ACH_PLATINUM] = "Platinum",
+    [UI_MENU_ACH_NOTICE] = "Achievement unlocked", [UI_MENU_ACH_NOTICE_PLATINUM] = "Platinum trophy!",
+    [UI_MENU_ACH_NOTICE_MANY] = "%d achievements unlocked",
+    [UI_MENU_ACH_NOTICE_MANY_SUB] = "See them in the menu, on the Achievements tab",
     [UI_MENU_PERF_OVERLAY] = "Performance overlay",
     [UI_MENU_PERF_OVERLAY_DESC] = "Frame rate in the top right corner. Full adds frame times with a graph, CPU, GPU and "
                                   "memory load, temperatures and the render thread's waits. F10 cycles the modes.",
@@ -329,6 +340,17 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_SHADER_TOAST_DESC] = "Небольшое уведомление в правом нижнем углу, пока компилируются шейдеры и конвейеры: "
                                   "в это время игра может ненадолго подтормаживать.",
     [UI_MENU_TOAST_SHADERS] = "Компиляция шейдеров (%u)",
+    [UI_MENU_ACH_POPUP] = "Уведомления о достижениях",
+    [UI_MENU_ACH_POPUP_DESC] = "Уведомление вверху экрана, когда открывается достижение. Достижения проверяются при "
+                               "каждом сохранении игры, поэтому уведомление приходит со следующим сохранением.",
+    [UI_MENU_TAB_ACHIEVEMENTS] = "Достижения", [UI_MENU_ACH_PROGRESS] = "Открыто %d из %d",
+    [UI_MENU_ACH_NONE] = "Достижения не установлены. Запустите установку снова или сохраните их в редакторе достижений.",
+    [UI_MENU_ACH_SECRET] = "Секретное достижение", [UI_MENU_ACH_SECRET_DESC] = "Продолжайте играть, чтобы узнать.",
+    [UI_MENU_ACH_UNLOCKED_ON] = "Получено %s", [UI_MENU_ACH_COMMON] = "Обычное", [UI_MENU_ACH_RARE] = "Редкое",
+    [UI_MENU_ACH_EPIC] = "Эпическое", [UI_MENU_ACH_LEGENDARY] = "Легендарное", [UI_MENU_ACH_PLATINUM] = "Платиновое",
+    [UI_MENU_ACH_NOTICE] = "Достижение получено", [UI_MENU_ACH_NOTICE_PLATINUM] = "Платиновый трофей!",
+    [UI_MENU_ACH_NOTICE_MANY] = "Получено достижений: %d",
+    [UI_MENU_ACH_NOTICE_MANY_SUB] = "Смотрите в меню, на вкладке «Достижения»",
     [UI_MENU_PERF_OVERLAY] = "Индикатор производительности",
     [UI_MENU_PERF_OVERLAY_DESC] = "Частота кадров в правом верхнем углу. «Полный» добавляет время кадров с графиком, "
                                   "загрузку ЦП, GPU и памяти, температуры и ожидания потока отрисовки. F10 переключает "
@@ -614,6 +636,17 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_SHADER_TOAST_DESC] = "Um aviso pequeno no canto inferior direito enquanto shaders e pipelines são "
                                   "compilados, que é quando o jogo pode engasgar por um instante.",
     [UI_MENU_TOAST_SHADERS] = "Compilando shaders (%u)",
+    [UI_MENU_ACH_POPUP] = "Avisos de conquista",
+    [UI_MENU_ACH_POPUP_DESC] = "Um aviso no alto da tela quando uma conquista é desbloqueada. As conquistas são "
+                               "verificadas a cada salvamento do jogo, então o aviso chega com o próximo salvamento.",
+    [UI_MENU_TAB_ACHIEVEMENTS] = "Conquistas", [UI_MENU_ACH_PROGRESS] = "%d de %d desbloqueadas",
+    [UI_MENU_ACH_NONE] = "Nenhuma conquista instalada. Rode a instalação de novo ou salve-as no Editor de Conquistas.",
+    [UI_MENU_ACH_SECRET] = "Conquista secreta", [UI_MENU_ACH_SECRET_DESC] = "Continue jogando para descobrir.",
+    [UI_MENU_ACH_UNLOCKED_ON] = "Desbloqueada em %s", [UI_MENU_ACH_COMMON] = "Comum", [UI_MENU_ACH_RARE] = "Rara",
+    [UI_MENU_ACH_EPIC] = "Épica", [UI_MENU_ACH_LEGENDARY] = "Lendária", [UI_MENU_ACH_PLATINUM] = "Platina",
+    [UI_MENU_ACH_NOTICE] = "Conquista desbloqueada", [UI_MENU_ACH_NOTICE_PLATINUM] = "Troféu de platina!",
+    [UI_MENU_ACH_NOTICE_MANY] = "%d conquistas desbloqueadas",
+    [UI_MENU_ACH_NOTICE_MANY_SUB] = "Veja no menu, na aba Conquistas",
     [UI_MENU_PERF_OVERLAY] = "Indicador de desempenho",
     [UI_MENU_PERF_OVERLAY_DESC] = "Taxa de quadros no canto superior direito. Completo acrescenta os tempos de quadro com "
                                   "um gráfico, o uso de CPU, GPU e memória, as temperaturas e as esperas da thread de "

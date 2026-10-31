@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "imgui.h"
 #include "imgui_internal.h"   // SetFocusID, NavCursorVisible
@@ -34,6 +35,7 @@ static int g_font_bad;
 #include "ui/option_rows.h"
 
 extern "C" {
+#include "achievements.h"
 #include "cfg.h"
 #include "input.h"
 #include "input_map.h"
@@ -316,6 +318,38 @@ extern "C" int menu_font_check(void) {
     return ok;
 }
 
+// The achievement icons (achievements.c, 64x64 RGBA each) ride in the font atlas as custom rectangles, so they reach the
+// GPU with the glyphs and draw with the atlas texture: no texture of their own. g_ach_uv: each icon's place, made with
+// the atlas.
+enum { kAchMax = 512 };
+static ImVec2 g_ach_uv0[kAchMax], g_ach_uv1[kAchMax];
+static bool g_ach_icon[kAchMax];
+
+static void ach_icons_add(ImFontAtlas *fa, int *rect) {
+    int n = ach_count();
+    for (int i = 0; i < kAchMax; i++) {
+        AchView v;
+        rect[i] = i < n && ach_get(i, &v) && v.icon ? fa->AddCustomRectRegular(ACH_ICON, ACH_ICON) : -1;
+    }
+}
+
+static void ach_icons_fill(ImFontAtlas *fa, const int *rect) {
+    unsigned char *px;
+    int tw, th;
+    fa->GetTexDataAsRGBA32(&px, &tw, &th);
+    for (int i = 0; i < kAchMax; i++) {
+        AchView v;
+        g_ach_icon[i] = false;
+        if (rect[i] < 0 || !ach_get(i, &v) || !v.icon) continue;
+        const ImFontAtlasCustomRect *r = fa->GetCustomRectByIndex(rect[i]);
+        if (!r || !r->IsPacked()) continue;
+        for (int y = 0; y < ACH_ICON; y++)
+            memcpy(px + ((size_t)(r->Y + y) * tw + r->X) * 4, v.icon + (size_t)y * ACH_ICON * 4, ACH_ICON * 4);
+        fa->CalcCustomRectUV(r, &g_ach_uv0[i], &g_ach_uv1[i]);
+        g_ach_icon[i] = true;
+    }
+}
+
 static int fonts_up(float scale) {
     enum { N = sizeof kCjk / sizeof *kCjk };
     ImFontAtlas *fa = ImGui::GetIO().Fonts;
@@ -346,6 +380,10 @@ static int fonts_up(float scale) {
         mc.FontDataOwnedByAtlas = false;
         fa->AddFontFromMemoryTTF(data[i], (int)size, 26.0f * scale, &mc, ranges[i].Data);
     }
+    static int ach_rect[kAchMax];
+    ach_icons_add(fa, ach_rect);
+    fa->Build();
+    ach_icons_fill(fa, ach_rect);
     vk_queue_lock();   // the upload submits on the queue and waits for it
     int ok = ImGui_ImplVulkan_CreateFontsTexture();
     vk_queue_unlock();
@@ -368,7 +406,7 @@ extern "C" void menu_vk_release(void) {
 // TOTK_MENU_TEST_SET=<frame>:<key>=<value>[,<key>=<value>...][;<frame>:...]: cfg_set of each key (TOTK_ prefix
 // optional) at that presented frame; changes live settings with no input, menu open or not. totk.ini is written only by
 // the pseudo-key SAVE=1 (cfg_save, as a row change does; a failed write shows the menu's save note).
-enum { TAB_SCREEN, TAB_GAME, TAB_SOUND, TAB_CONTROLS, TAB_MENU, TAB_ADVANCED, TAB_COUNT };
+enum { TAB_SCREEN, TAB_GAME, TAB_SOUND, TAB_CONTROLS, TAB_MENU, TAB_ADVANCED, TAB_ACHIEVEMENTS, TAB_COUNT };
 enum { TEST_PAGE_FRAMES = 30, TEST_SETS = 16 };
 struct TestSet { uint64_t frame; char key[64], value[64]; };
 static struct {
@@ -641,6 +679,7 @@ static void tab_screen(float scale) {
     row_gpu();
     static const UiTextId perf[] = {UI_MENU_PERF_OFF, UI_MENU_PERF_FPS, UI_MENU_PERF_FULL};
     opt_toggle("TOTK_SHADER_TOAST", UI_MENU_SHADER_TOAST, UI_MENU_SHADER_TOAST_DESC);
+    opt_toggle("TOTK_ACH_POPUP", UI_MENU_ACH_POPUP, UI_MENU_ACH_POPUP_DESC);
     opt_choice("TOTK_PERF_OVERLAY", UI_MENU_PERF_OVERLAY, perf, 3, UI_MENU_PERF_OVERLAY_DESC);
     opt_group(UI_MENU_GRAPHICS);
     row_output_res();
@@ -879,8 +918,141 @@ static void tab_advanced(float scale) {
     }
 }
 
+// ---- the Achievements tab: the unlocked count over a bar, then a card per achievement (its icon, greyed while locked;
+// its name and description; its rarity; the progress or the unlock date). The cards are nav items, so the D-pad walks
+// the list and scrolls it.
+static float g_page_bottom;     // the height the bottom row takes under the page (layout_menu)
+static bool g_ach_focus;        // the first card takes the cursor at the next layout (the tab was just chosen)
+
+static ImVec4 ach_rarity_col(int r) {
+    static const ImVec4 c[ACH_RARITIES] = {{0.78f, 0.62f, 0.40f, 1}, {0.47f, 0.80f, 0.84f, 1}, {0.72f, 0.54f, 0.95f, 1},
+                                           {0.95f, 0.79f, 0.38f, 1}, {0.93f, 0.95f, 0.98f, 1}};
+    return c[r >= 0 && r < ACH_RARITIES ? r : 0];
+}
+
+static UiTextId ach_rarity_name(int r) {
+    static const UiTextId n[ACH_RARITIES] = {UI_MENU_ACH_COMMON, UI_MENU_ACH_RARE, UI_MENU_ACH_EPIC,
+                                             UI_MENU_ACH_LEGENDARY, UI_MENU_ACH_PLATINUM};
+    return n[r >= 0 && r < ACH_RARITIES ? r : 0];
+}
+
+// An achievement's icon at p, size s across; lit: in colour, else dimmed. Without an icon: a ring with a question mark.
+static void ach_icon(ImDrawList *dl, int i, const AchView &v, ImVec2 p, float s, bool lit, float alpha) {
+    if (i >= 0 && i < kAchMax && g_ach_icon[i] && !(v.hidden && !v.unlocked)) {
+        ImU32 tint = lit ? IM_COL32(255, 255, 255, (int)(255 * alpha)) : IM_COL32(95, 100, 98, (int)(170 * alpha));
+        dl->AddImage(ImGui::GetIO().Fonts->TexID, p, ImVec2(p.x + s, p.y + s), g_ach_uv0[i], g_ach_uv1[i], tint);
+        return;
+    }
+    ImVec2 c(p.x + s / 2, p.y + s / 2);
+    dl->AddCircleFilled(c, s * 0.46f, ui_col(kUiPanel, 0.9f * alpha));
+    dl->AddCircle(c, s * 0.46f, ui_col(kUiMuted, 0.6f * alpha), 32, s * 0.05f);
+    ImFont *font = ImGui::GetFont();
+    float fs = s * 0.5f;
+    ImVec2 ts = font->CalcTextSizeA(fs, FLT_MAX, 0, "?");
+    dl->AddText(font, fs, ImVec2(c.x - ts.x / 2, c.y - ts.y / 2), ui_col(kUiMuted, alpha), "?");
+}
+
+static void ach_date(int64_t when, char *out, size_t cap) {
+    time_t t = (time_t)when;
+    struct tm tmv;
+#ifdef _WIN32
+    localtime_s(&tmv, &t);
+#else
+    localtime_r(&t, &tmv);
+#endif
+    strftime(out, cap, "%d/%m/%Y", &tmv);
+}
+
+static void tab_achievements(float scale) {
+    ImFont *font = ImGui::GetFont();
+    float fs = ImGui::GetFontSize(), small = fs * 0.78f;
+    int n = ach_count(), done = ach_unlocked_count();
+    ImVec2 avail = ImGui::GetContentRegionAvail();
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    if (!n) {
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + avail.x * 0.7f);
+        ImGui::PushStyleColor(ImGuiCol_Text, kUiMuted);
+        ImGui::TextUnformatted(menu_text(UI_MENU_ACH_NONE));
+        ImGui::PopStyleColor();
+        ImGui::PopTextWrapPos();
+        ImGui::Dummy(ImVec2(1, fmaxf(0, avail.y - g_page_bottom - ImGui::GetTextLineHeightWithSpacing() * 3)));
+        return;
+    }
+    // the header: "n of m unlocked" and a bar
+    char head[96];
+    snprintf(head, sizeof head, menu_text(UI_MENU_ACH_PROGRESS), done, n);
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    dl->AddText(font, fs, p, ui_col(kUiCream), head);
+    float bw = avail.x * 0.42f, bh = 6 * scale, bx = p.x + avail.x - bw, by = p.y + fs * 0.5f - bh / 2;
+    dl->AddRectFilled(ImVec2(bx, by), ImVec2(bx + bw, by + bh), ui_col(kUiMuted, 0.25f), bh);
+    dl->AddRectFilled(ImVec2(bx, by), ImVec2(bx + bw * done / (float)n, by + bh), ui_col(kUiZonai, 0.9f), bh);
+    ImGui::Dummy(ImVec2(avail.x, fs * 1.6f));
+
+    float list_h = ImGui::GetContentRegionAvail().y - g_page_bottom;
+    ImGui::BeginChild("##ach", ImVec2(avail.x, fmaxf(list_h, fs * 4)), ImGuiChildFlags_NavFlattened);
+    float card_h = 84 * scale, icon = 64 * scale, pad = 10 * scale, w = ImGui::GetContentRegionAvail().x;
+    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0, 0, 0, 0));
+    for (int i = 0; i < n; i++) {
+        AchView v;
+        if (!ach_get(i, &v)) continue;
+        ImGui::PushID(i);
+        ImVec2 q = ImGui::GetCursorScreenPos();
+        if (g_ach_focus && i == 0) {
+            ImGui::SetKeyboardFocusHere();
+            g_ach_focus = false;
+        }
+        ImGui::Selectable("##card", false, 0, ImVec2(w, card_h));
+        bool hot = ImGui::IsItemHovered() || ImGui::IsItemFocused();
+        ImGui::PopID();
+        ImDrawList *cl = ImGui::GetWindowDrawList();
+        ImVec4 rc = ach_rarity_col(v.rarity);
+        ImVec2 q1(q.x + w, q.y + card_h);
+        cl->AddRectFilled(q, q1, ui_col(v.unlocked ? rc : kUiMuted, hot ? 0.13f : v.unlocked ? 0.07f : 0.04f), 10 * scale);
+        cl->AddRect(q, q1, ui_col(v.unlocked ? rc : kUiMuted, hot ? 0.75f : v.unlocked ? 0.35f : 0.18f), 10 * scale, 0,
+                    (hot ? 1.6f : 1.0f) * scale);
+        ach_icon(cl, i, v, ImVec2(q.x + pad, q.y + (card_h - icon) / 2), icon, v.unlocked != 0, 1.0f);
+        bool secret = v.hidden && !v.unlocked;
+        float tx = q.x + pad * 2 + icon, right = q1.x - pad * 1.5f;
+        const char *name = secret ? menu_text(UI_MENU_ACH_SECRET) : v.name;
+        const char *desc = secret ? menu_text(UI_MENU_ACH_SECRET_DESC) : v.desc;
+        // the rarity and the progress or date, right-aligned on two lines
+        char right1[64], right2[64];
+        snprintf(right1, sizeof right1, "%s", menu_text(ach_rarity_name(v.rarity)));
+        if (v.unlocked) {
+            char d[32];
+            ach_date(v.when, d, sizeof d);
+            snprintf(right2, sizeof right2, menu_text(UI_MENU_ACH_UNLOCKED_ON), d);
+        } else if (v.target > 1) {
+            snprintf(right2, sizeof right2, "%.0f / %.0f", floor(fmin(v.cur, v.target)), v.target);
+        } else {
+            right2[0] = 0;
+        }
+        float r1 = font->CalcTextSizeA(small, FLT_MAX, 0, right1).x, r2 = font->CalcTextSizeA(small, FLT_MAX, 0, right2).x;
+        float text_w = right - fmaxf(r1, r2) - pad * 2 - tx;
+        cl->AddText(font, small, ImVec2(right - r1, q.y + pad), ui_col(rc, v.unlocked ? 1.0f : 0.55f), right1);
+        cl->AddText(font, small, ImVec2(right - r2, q.y + pad + small * 1.3f), ui_col(kUiMuted), right2);
+        cl->PushClipRect(ImVec2(tx, q.y), ImVec2(tx + text_w, q1.y), true);
+        cl->AddText(font, fs, ImVec2(tx, q.y + pad), ui_col(v.unlocked ? kUiCream : kUiMuted), name);
+        cl->AddText(font, small, ImVec2(tx, q.y + pad + fs * 1.2f), ui_col(kUiMuted, 0.9f), desc, nullptr, text_w);
+        cl->PopClipRect();
+        if (!v.unlocked && v.target > 1) {   // the progress bar along the card's bottom
+            float bx0 = tx, bx1 = right, byy = q1.y - pad - 4 * scale;
+            cl->AddRectFilled(ImVec2(bx0, byy), ImVec2(bx1, byy + 4 * scale), ui_col(kUiMuted, 0.2f), 2 * scale);
+            float k = (float)fmin(1.0, v.cur / v.target);
+            cl->AddRectFilled(ImVec2(bx0, byy), ImVec2(bx0 + (bx1 - bx0) * k, byy + 4 * scale), ui_col(rc, 0.85f), 2 * scale);
+        }
+        ImGui::Dummy(ImVec2(1, 4 * scale));
+    }
+    ImGui::PopStyleColor(4);
+    ImGui::EndChild();
+}
+
 static const UiTextId kTabNames[TAB_COUNT] = {UI_MENU_TAB_SCREEN, UI_MENU_TAB_GAME, UI_MENU_TAB_SOUND,
-                                              UI_MENU_TAB_CONTROLS, UI_MENU_TAB_MENU, UI_MENU_TAB_ADVANCED};
+                                              UI_MENU_TAB_CONTROLS, UI_MENU_TAB_MENU, UI_MENU_TAB_ADVANCED,
+                                              UI_MENU_TAB_ACHIEVEMENTS};
 static int g_tab;               // the tab shown
 static int g_tab_request = -1;  // select this tab at the next layout; -1 none
 static int g_focus_page = -1;   // this tab's first row takes the cursor once it is shown; -1 none
@@ -935,6 +1107,19 @@ static void tab_icon(ImDrawList *dl, int tab, ImVec2 c, float r, ImU32 col, floa
         dl->AddEllipse(c, ImVec2(r * 0.4f, r * 0.9f), col, 0, 20, th);
         dl->AddLine(ImVec2(c.x - r * 0.9f, c.y), ImVec2(c.x + r * 0.9f, c.y), col, th);
         break;
+    case TAB_ACHIEVEMENTS: {   // a trophy: the cup, its handles, the stem and the base
+        ImVec2 cup[] = {{c.x - r * 0.62f, c.y - r * 0.82f}, {c.x + r * 0.62f, c.y - r * 0.82f}, {c.x + r * 0.5f, c.y - r * 0.1f},
+                        {c.x, c.y + r * 0.22f}, {c.x - r * 0.5f, c.y - r * 0.1f}};
+        dl->AddPolyline(cup, 5, col, ImDrawFlags_Closed, th);
+        dl->PathArcTo(ImVec2(c.x - r * 0.62f, c.y - r * 0.5f), r * 0.3f, 1.5707963f, 4.712389f, 10);
+        dl->PathStroke(col, 0, th);
+        dl->PathArcTo(ImVec2(c.x + r * 0.62f, c.y - r * 0.5f), r * 0.3f, -1.5707963f, 1.5707963f, 10);
+        dl->PathStroke(col, 0, th);
+        dl->AddLine(ImVec2(c.x, c.y + r * 0.22f), ImVec2(c.x, c.y + r * 0.62f), col, th);
+        dl->AddLine(ImVec2(c.x - r * 0.45f, c.y + r * 0.82f), ImVec2(c.x + r * 0.45f, c.y + r * 0.82f), col, th);
+        dl->AddLine(ImVec2(c.x - r * 0.25f, c.y + r * 0.62f), ImVec2(c.x + r * 0.25f, c.y + r * 0.62f), col, th);
+        break;
+    }
     case TAB_ADVANCED:   // a gear
         dl->AddCircle(c, r * 0.42f, col, 16, th);
         for (int i = 0; i < 8; i++) {
@@ -1078,12 +1263,14 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
     float fade = ease_out((float)((now - g_tab_at - 0.03) / 0.28));
     float bottom = ImGui::GetFrameHeight() + st.ItemSpacing.y * 2 + 8 * scale;
     if (g_focus_page == g_tab) {
-        opt_focus_first();
+        if (g_tab == TAB_ACHIEVEMENTS) g_ach_focus = true;   // its cards are not option rows
+        else opt_focus_first();
         g_focus_page = -1;
     }
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, st.Alpha * fade);
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (1 - fade) * 12 * scale);
     opt_reserve_bottom(bottom + (1 - fade) * 12 * scale);
+    g_page_bottom = bottom + (1 - fade) * 12 * scale;
     switch (g_tab) {
     case TAB_SCREEN: tab_screen(scale); break;
     case TAB_GAME: tab_game(scale); break;
@@ -1091,6 +1278,7 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
     case TAB_CONTROLS: tab_controls(scale); break;
     case TAB_MENU: tab_menu(scale); break;
     case TAB_ADVANCED: tab_advanced(scale); break;
+    case TAB_ACHIEVEMENTS: tab_achievements(scale); break;
     }
     ImGui::PopStyleVar();
 
@@ -1407,6 +1595,64 @@ static void toast_draw(const MenuTarget *t, float scale) {
     dl->AddText(font, fs, ImVec2(p.x + pad + icon + 10 * scale, p.y + (h - fs) * 0.5f), ui_col(kUiCream, a), text);
 }
 
+// ---- the achievement notice (TOTK_ACH_POPUP): a panel sliding down at the top of the screen for each unlock
+// (achievements.c queues them after a save), with the icon, "Achievement unlocked" in the rarity's colour and the name.
+// The platinum one stays longer and glows gold; a batch of more than three (an old save on the first run) is one panel.
+static int g_note = -1, g_note_count;   // the achievement shown (index), how many its batch held
+static double g_note_at;                // ImGui-independent clock (seconds) it appeared
+static const double kNoteSecs = 5.0, kNotePlatSecs = 8.0;
+
+static double note_clock(void) { return plat_now_ns() / 1e9; }
+
+static bool note_tick(void) {
+    double now = note_clock();
+    if (g_note >= 0) {
+        AchView v;
+        double len = ach_get(g_note, &v) && v.rarity == ACH_PLATINUM && g_note_count == 1 ? kNotePlatSecs : kNoteSecs;
+        if (now - g_note_at < len) return true;
+        g_note = -1;
+    }
+    int count = 0, next = ach_take_notice(&count);
+    if (next < 0) return false;
+    if (!cfg_bool("TOTK_ACH_POPUP")) return false;   // turned off: the unlock is recorded, the notice dropped
+    g_note = next, g_note_count = count, g_note_at = now;
+    return true;
+}
+
+static void note_draw(const MenuTarget *t, float scale) {
+    AchView v;
+    if (g_note < 0 || !ach_get(g_note, &v)) return;
+    bool plat = v.rarity == ACH_PLATINUM && g_note_count == 1;
+    double age = note_clock() - g_note_at, len = plat ? kNotePlatSecs : kNoteSecs;
+    float in = ease_out((float)(age / 0.35)), out = (float)fmin(1.0, fmax(0.0, (len - age) / 0.4)), a = fminf(in, out);
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    ImFont *font = ImGui::GetFont();
+    float fs = ImGui::GetFontSize(), small = fs * 0.78f, icon = 64 * scale, pad = 14 * scale;
+    ImVec4 rc = ach_rarity_col(v.rarity);
+    char title[96];
+    if (g_note_count > 1) snprintf(title, sizeof title, menu_text(UI_MENU_ACH_NOTICE_MANY), g_note_count);
+    else snprintf(title, sizeof title, "%s", menu_text(plat ? UI_MENU_ACH_NOTICE_PLATINUM : UI_MENU_ACH_NOTICE));
+    const char *name = g_note_count > 1 ? menu_text(UI_MENU_ACH_NOTICE_MANY_SUB) : v.name;
+    float tw = fmaxf(font->CalcTextSizeA(small, FLT_MAX, 0, title).x, font->CalcTextSizeA(fs, FLT_MAX, 0, name).x);
+    float w = fminf((float)t->width * 0.9f, pad * 3 + icon + tw), h = pad * 2 + icon;
+    ImVec2 p(((float)t->width - w) / 2, 28 * scale - (1 - in) * (h + 40 * scale)), q(p.x + w, p.y + h);
+    if (plat) {   // a slow gold glow around the panel
+        float g = (0.55f + 0.45f * sinf((float)age * 3.2f)) * a;
+        for (int k = 3; k >= 1; k--)
+            dl->AddRect(ImVec2(p.x - k * 4 * scale, p.y - k * 4 * scale), ImVec2(q.x + k * 4 * scale, q.y + k * 4 * scale),
+                        ui_col(kUiGold, 0.10f * g * (4 - k)), 18 * scale, 0, 4 * scale);
+    }
+    dl->AddRectFilled(p, q, ui_col(kUiPanel, 0.94f * a), 16 * scale);
+    dl->AddRect(p, q, ui_col(plat ? kUiGold : rc, 0.85f * a), 16 * scale, 0, 1.6f * scale);
+    // the icon: the achievement's, or for a batch its rarest one
+    ach_icon(dl, g_note, v, ImVec2(p.x + pad, p.y + pad), icon, true, a);
+    float tx = p.x + pad * 2 + icon;
+    dl->PushClipRect(ImVec2(tx, p.y), ImVec2(q.x - pad, q.y), true);
+    dl->AddText(font, small, ImVec2(tx, p.y + pad + icon * 0.12f), ui_col(plat ? kUiGoldHi : rc, a), title);
+    dl->AddText(font, fs, ImVec2(tx, p.y + pad + icon * 0.12f + small * 1.35f), ui_col(kUiCream, a), name);
+    dl->PopClipRect();
+}
+
 extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const char **shot) {
     *shot = NULL;
     if (!g_test.parsed) test_parse();
@@ -1417,6 +1663,7 @@ extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const cha
     uint64_t toast_now = plat_now_ns();
     bool toast = toast_tick(toast_now, toast_last ? (float)((toast_now - toast_last) / 1e9) : 0);
     toast_last = toast_now;
+    toast = note_tick() || toast;   // an achievement notice needs the overlay's frame as the shader notice does
     bool open = g_open.load(std::memory_order_relaxed);
     if (!open) {
         if (g_save_pending) g_save_pending = opt_save_tick(1);   // closed: the last change goes to totk.ini now
@@ -1477,6 +1724,7 @@ extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const cha
     if (open) layout_menu(t->width, t->height, scale);
     perf_draw(t, scale);
     toast_draw(t, scale);
+    note_draw(t, scale);
     ImGui::Render();
     if (open) g_save_pending = opt_save_tick(0);
     g_cost_ns += plat_now_ns() - t0;

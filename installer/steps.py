@@ -641,7 +641,8 @@ class Prepare(Step):
         layout = ctx.layout
         xlate_id = layout.xlate.with_suffix('.id')
         tools = [layout.tools / n for n in ('prepare_shaders.py', 'shader_census.py', 'make_romfs_patches.py',
-                                            'pack_shader_cache.py', 'ultrawide_layout.py', 'ps_prompts.py')]
+                                            'pack_shader_cache.py', 'ultrawide_layout.py', 'ps_prompts.py',
+                                            'achievements.py')]
         return fingerprint('prepare-1', ctx.keys['compile'], layout.xlate, xlate_id, shader_list_text(layout), *tools)
 
     def current(self, ctx, record):
@@ -700,6 +701,13 @@ class Prepare(Step):
         if code:
             remove(dest / 'romfs-patches-ps')
             rep.warning('warn.ps_prompts_failed', code=code, log=str(log))
+        # Achievements (tools/achievements.py): the default set when the folder has none (the player's own set, made
+        # in the editor, stays), compiled against this game version. Optional: without it the game has no
+        # achievements, so the setup warns and goes on.
+        code, log = run_tool(ctx, 'prepare-achievements', layout.tools / 'achievements.py', ['defaults', dest])
+        if code:
+            rep.warning('warn.achievements_failed', code=code, log=str(log))
+        editor_shortcuts(ctx)
 
         shader_list = layout.shader_list
         if not shader_list:
@@ -728,6 +736,35 @@ class Prepare(Step):
         if code:
             raise InstallError('prepare.pack_failed', code=code, log=str(log))
         return {'xlate_sha256': file_sha256(xlate)}
+
+
+def editor_shortcuts(ctx):
+    """Shortcuts to the achievements editor (tools/achievements_editor.py, run by the release's pythonw) in the install
+    folder and in the Start menu, written on every install so they point at the newest release folder. Windows only;
+    a shortcut that cannot be made is logged and skipped."""
+    if os.name != 'nt':
+        return
+    layout, dest = ctx.layout, ctx.dest
+    pythonw = layout.python.with_name('pythonw.exe')
+    editor = layout.tools / 'achievements_editor.py'
+    if not pythonw.is_file() or not editor.is_file():
+        return
+    start = Path(os.environ.get('APPDATA', '')) / 'Microsoft' / 'Windows' / 'Start Menu' / 'Programs' / 'TotK Recomp'
+    links = [dest / 'Editor de Conquistas.lnk', start / 'Editor de Conquistas.lnk']
+    script = ('$s = New-Object -ComObject WScript.Shell; foreach ($p in $env:TOTK_LINKS.Split("|")) { '
+              '$l = $s.CreateShortcut($p); $l.TargetPath = $env:TOTK_PYW; $l.Arguments = $env:TOTK_ARGS; '
+              '$l.WorkingDirectory = $env:TOTK_DEST; $l.IconLocation = $env:TOTK_ICON; '
+              '$l.Description = "Editor de Conquistas do TotK Recomp"; $l.Save() }')
+    try:
+        start.mkdir(parents=True, exist_ok=True)
+        env = dict(os.environ, TOTK_LINKS='|'.join(map(str, links)), TOTK_PYW=str(pythonw),
+                   TOTK_ARGS=f'"{editor}" --dest "{dest}"', TOTK_DEST=str(dest),
+                   TOTK_ICON=f'{dest / ("totk" + EXE)},0')
+        subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', script], env=env, check=True,
+                       capture_output=True, timeout=60, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        ctx.reporter.log('achievements editor shortcuts: ' + ', '.join(map(str, links)))
+    except (OSError, subprocess.SubprocessError) as e:
+        ctx.reporter.log(f'achievements editor shortcuts not made: {e}')
 
 
 # ---- 6. clean up
