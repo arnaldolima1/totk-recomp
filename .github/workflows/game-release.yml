@@ -65,9 +65,10 @@ jobs:
 
       - run: python tools/build_xlate.py
 
-      # --stub-layout: libtotkrt.a without the game's generated C (make_release.py stub_layout)
+      # --stub-layout: libtotkrt.a without the game's generated C (make_release.py stub_layout); --no-gpu: the runner has
+      # no Vulkan device, so the bundle check's installer run stops at its Vulkan check
       - run: >-
-          python tools/make_release.py --stub-layout
+          python tools/make_release.py --stub-layout --no-gpu
           --out "build/release/TotK-Setup-$env:VERSION-windows"
           --zip "build/release/TotK-Setup-$env:VERSION-windows.zip"
 

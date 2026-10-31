@@ -462,8 +462,10 @@ def check_folder(out):
     print(f'check_content: {sum(1 for p in out.rglob("*") if p.is_file())} files, no hit')
 
 
-def check_bundle(out):
-    """The folder's own python runs the installer without game files and the window's selftest."""
+def check_bundle(out, no_gpu=False):
+    """The folder's own python runs the installer without game files and the window's selftest. no_gpu: the machine has
+    no Vulkan device (a CI runner), so the installer's host check stops at the Vulkan check before it asks for the game
+    files; the run must stop there instead."""
     chk = MAIN_ROOT / 'build' / 'release-check' / 'bundle'
     shutil.rmtree(chk, ignore_errors=True)
     env = clean_env(out / 'python')
@@ -474,9 +476,11 @@ def check_bundle(out):
     errors = [e['id'] for e in events if e['type'] == 'error']
     started = any(e['type'] == 'start' and e.get('release') == (out / 'VERSION').read_text().strip() for e in events)
     steps = [e['phase'] for e in events if e['type'] == 'progress']
-    if errors != ['check.inputs_needed'] or not started or 'inputs' not in steps:
+    expected = ['check.vulkan_no_device'] if no_gpu else ['check.inputs_needed']
+    if errors != expected or not started or (not no_gpu and 'inputs' not in steps):
         sys.exit(f'bundle check: exit {r.returncode}, errors {errors}, release read {started}\n{r.stdout[-2000:]}\n{r.stderr[-2000:]}')
-    print(f'bundle check: the installer ran the host check from the folder and stopped at the game files (exit {r.returncode})')
+    print(f'bundle check: the installer ran the host check from the folder and stopped at '
+          f'{"the Vulkan check (no GPU)" if no_gpu else "the game files"} (exit {r.returncode})')
     r = subprocess.run([py, '-m', 'installer.gui', '--selftest'], cwd=out, env=env, capture_output=True, text=True, timeout=300)
     if r.returncode:
         sys.exit(f'bundle check: window selftest exit {r.returncode}\n{r.stdout[-2000:]}\n{r.stderr[-2000:]}')
@@ -537,6 +541,8 @@ def main():
     ap.add_argument('--prove', action='store_true', help='only run the compile-and-probe check on an existing folder')
     ap.add_argument('--stub-layout', action='store_true',
                     help='build libtotkrt.a against a stand-in layout.h instead of the generated C (no game files)')
+    ap.add_argument('--no-gpu', action='store_true',
+                    help='no Vulkan device here (CI): the bundle check expects the installer to stop at its Vulkan check')
     args = ap.parse_args()
     out = args.out.resolve()
     if args.prove:
@@ -554,7 +560,7 @@ def main():
     build_launcher(out, llvm)
     collect_licenses(out)
     check_folder(out)
-    check_bundle(out)
+    check_bundle(out, args.no_gpu)
     sizes(out)
     if args.zip:
         write_zip(out, args.zip.resolve())
