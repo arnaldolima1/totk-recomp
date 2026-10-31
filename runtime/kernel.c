@@ -306,6 +306,9 @@ static void ap_init(void);
 static int cores_enabled(void) {
     if (g_cores_on < 0) {
         g_cores_on = !cfg_bool("TOTK_FREE_CORES");   // "0" keeps the gate, like unset
+        if (!g_cores_on)
+            rt_log("kernel: virtual core gate off (TOTK_FREE_CORES): guest threads run without the limit of one per "
+                   "core that the game's per-core data needs; for experiments only, the game can fail");
         diag_init();
         ap_init();
     }
