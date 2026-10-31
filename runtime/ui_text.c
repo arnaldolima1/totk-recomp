@@ -662,7 +662,7 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_PIPE_WAIT] = "Tratamento de desenhos em espera",
     [UI_MENU_PIPE_WAIT_DESC] = "Padrão mantém o agendamento atual, com um worker reservado para desenhos em espera; Antigo (draw) usa o agendamento anterior.",
     [UI_MENU_PIPE_WAIT_DEFAULT] = "Padrão", [UI_MENU_PIPE_WAIT_DRAW] = "Antigo (draw)",
-    [UI_MENU_PIPE_SKIP] = "Desenhos pulados enquanto um pipeline é montado",
+    [UI_MENU_PIPE_SKIP] = "Desenhos pulados ao montar pipeline",
     [UI_MENU_PIPE_SKIP_DESC] = "Quais desenhos são descartados em vez de esperar pelo seu pipeline.",
     [UI_MENU_PIPE_SKIP_STRICT] = "Estrito", [UI_MENU_PIPE_SKIP_ANY] = "Qualquer",
     [UI_MENU_PIPE_SKIP_FULLSCREEN] = "Passes de tela cheia",
