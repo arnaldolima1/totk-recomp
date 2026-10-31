@@ -313,7 +313,13 @@ static Tex *create_tex(const tex_t *t, const TexKey *k, int defer_init) {
     if ((d->flags & NVN_TEXTURE_FLAGS_IMAGE) && (ff & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) && samples == 1)
         usage |= VK_IMAGE_USAGE_STORAGE_BIT;
     VkImageCreateFlags flags = ds ? 0 : VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;   // format-reinterpreting views
-    if (type == VK_IMAGE_TYPE_2D && layers >= 6 && w == h && samples == 1) flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+    // Cube compatible only for cube targets: the replay makes cube views of nothing else (vk_exec_draw.c get_view checks
+    // the image's own view type). The flag on every square array of 6+ layers changed how AMD's Windows driver lays such
+    // an image out, and terrain material arrays sampled through it came out in rainbow blocks that moved with the mip
+    // level (Savage Wind Recomp issue #59, BotW on an RX 580 and a 7800 XT).
+    if (type == VK_IMAGE_TYPE_2D && layers >= 6 && w == h && samples == 1 &&
+        (d->target == NVN_TEXTURE_TARGET_CUBEMAP || d->target == NVN_TEXTURE_TARGET_CUBEMAP_ARRAY))
+        flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
     // NVN renders into a 3D texture slice by slice (a view's min layer is the depth plane, nvn_mtl.m), e.g. the
     // grading LUT of the menu background blur. Vulkan needs a 2D view of the slice for that.
     if (type == VK_IMAGE_TYPE_3D && (usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)) flags |= VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT;
@@ -473,6 +479,36 @@ static void destroy_tex(Tex *e) {
 #define RELEASED_MAX 2048
 static void sweep_released(void) {
     while (nreleased > RELEASED_MAX && rel_head) destroy_tex(rel_head);
+}
+
+// TOTK_TEX_VRAM_PRESSURE (percent of the device-local budget, default 90; 0 = off): above it, each submit drops up to
+// PRESSURE_STEP of the oldest released entries, so a 4 GiB card does not keep RELEASED_MAX released images (each ASTC
+// one decoded to RGBA8) while the heap spills into system memory. A few per submit, for the reason above. Only entries
+// that come back intact are dropped: mirrored ones the GPU never wrote, re-uploaded from their storage. A render target
+// lives only in its image; dropping it brought the texture back empty (black flashes in a Depths boss fight, ~170
+// "left uninitialised" aliases a minute).
+#define PRESSURE_STEP 32
+static int vram_pressure = -1;
+static uint64_t n_pressure_drops;
+
+static void sweep_pressure(void) {   // tex_lock held
+    if (vram_pressure < 0) {
+        const char *s = cfg_get("TOTK_TEX_VRAM_PRESSURE");
+        vram_pressure = s && *s ? atoi(s) : 90;
+        if (vram_pressure < 0 || vram_pressure > 100) vram_pressure = 90;
+        rt_log("vk: released textures under VRAM pressure: %s%d%%", vram_pressure ? "dropped above " : "off", vram_pressure);
+    }
+    if (!vram_pressure || !rel_head || submit_epoch & 7) return;   // the budget query every 8 submits
+    uint64_t used, budget;
+    int exact;
+    if (!vk_mem_vram(&used, &budget, &exact) || used <= budget / 100 * (uint64_t)vram_pressure) return;
+    int dropped = 0;
+    for (Tex *e = rel_head, *next; e && dropped < PRESSURE_STEP; e = next) {
+        next = e->rel_next;
+        if (!e->pub.mirrored || e->pub.gpu_owned || e->gpu_dirty) continue;
+        destroy_tex(e);
+        dropped++, n_pressure_drops++;
+    }
 }
 
 // ---------------------------------------------------------------- uploads
@@ -841,9 +877,22 @@ const VkTexImage *vk_texture_get(const tex_t *t) {
 }
 
 // Small render targets the CPU reads without NVN's invalidate (vk_texture_write_back_small); small_pending: one may be
-// dirty.
-enum { WB_SMALL = 64 << 10 };
+// dirty. wb_limit is the largest target (bytes) that goes back when the CPU waits for a fence: TOTK_WB_FENCE_LIMIT,
+// read once. wb_trace: TOTK_TRACE=gfx, read together with it.
+enum { WB_SMALL_DEFAULT = 64 << 10 };
 static int small_pending;
+static uint64_t wb_limit = WB_SMALL_DEFAULT;
+static int wb_trace;
+static int wb_cfg_read;
+
+static void wb_cfg_init(void) {
+    if (wb_cfg_read) return;
+    int v = cfg_int("TOTK_WB_FENCE_LIMIT");
+    wb_limit = v < 0 ? 0 : (uint64_t)v;
+    wb_trace = (rt_trace & RT_TRACE_GFX) != 0;
+    wb_cfg_read = 1;
+    if (wb_limit != WB_SMALL_DEFAULT) rt_log("vk: fence write-back limit %llu bytes", (unsigned long long)wb_limit);
+}
 
 void vk_texture_gpu_written(const tex_t *t) {
     if (!t || !t->mem) return;
@@ -860,7 +909,8 @@ void vk_texture_gpu_written(const tex_t *t) {
             storage_rewritten(e, 0, &e->gpu_gen);   // CPU writes up to here are older than this render
             e->gpu_seq = ++gpu_writes;
             e->gpu_fence = vk_exec_recording_fence();
-            if (e->t.L.size <= WB_SMALL) __atomic_store_n(&small_pending, 1, __ATOMIC_RELEASE);
+            wb_cfg_init();
+            if (e->t.L.size <= wb_limit) __atomic_store_n(&small_pending, 1, __ATOMIC_RELEASE);
             own_add(e);
         }
     }
@@ -1032,6 +1082,7 @@ uint32_t vk_texture_epoch(void) { return __atomic_load_n(&submit_epoch, __ATOMIC
 void vk_texture_new_submit(void) {
     lock();
     if (!++submit_epoch) submit_epoch = 1;
+    sweep_pressure();
     static uint64_t log_at;
     uint64_t f = __atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED) / 60;
     if ((rt_trace & RT_TRACE_PERF) && f != log_at && tex_alias > 0) {
@@ -1050,6 +1101,9 @@ void vk_texture_new_submit(void) {
                (unsigned long long)f * 60, (unsigned long long)ck, (unsigned long long)n_checks, (unsigned long long)calls,
                (unsigned long long)untr);
         n_checks = 0;
+        rt_log("perf: frame %llu: released textures kept %d, dropped under VRAM pressure %llu", (unsigned long long)f * 60,
+               nreleased, (unsigned long long)n_pressure_drops);
+        n_pressure_drops = 0;
     }
     unlock();
 }
@@ -1367,24 +1421,54 @@ void vk_texture_write_back(uint64_t addr, uint64_t size) {
 // TotK's grass system renders a 128x128 RGBA8 map of cut and trampled grass into a CPU-cached pool every frame and its
 // CPU code reads the pool bytes without nvnMemoryPoolInvalidateMappedRange (cut reactions: blades, insects, the cut
 // itself). On the Switch the bytes are there once the frame's fence has passed. So when the
-// CPU waits for a fence, mirrored targets up to WB_SMALL bytes rendered by work up to that fence go back to their
+// CPU waits for a fence, mirrored targets up to wb_limit bytes rendered by work up to that fence go back to their
 // storage, unless the CPU rewrote it since. Larger targets still go back on an invalidate, memcpy or ReadTexels.
 int vk_texture_small_dirty(void) { return __atomic_load_n(&small_pending, __ATOMIC_ACQUIRE); }
 
+// TOTK_TRACE=gfx: a dirty target the fence write-back leaves alone because it is over the limit (what a CPU read
+// after the wait would miss), or sends back although it is over the default limit (what a raised limit changed). One
+// line per target address and outcome; the table is small and a full one stops logging.
+static void wb_note(const Tex *e, int skipped) {
+    static uint64_t seen[2][64];
+    static int n_seen[2];
+    for (int i = 0; i < n_seen[skipped]; i++)
+        if (seen[skipped][i] == e->pub.addr) return;
+    if (n_seen[skipped] == 64) return;
+    seen[skipped][n_seen[skipped]++] = e->pub.addr;
+    const pool_t *p = e->t.pool;
+    unsigned fl = p ? p->flags : 0;
+    rt_log("vk: fence write-back %s %#llx %ux%u fmt %#x size %llu pool %s (limit %llu)",
+           skipped ? "skipped-for-size" : "over-default", (unsigned long long)e->pub.addr, e->t.d.width, e->t.d.height,
+           e->t.d.format, (unsigned long long)e->t.L.size,
+           !p ? "none" : (fl & NVN_MEMORY_POOL_FLAGS_CPU_CACHED) ? "cpu-cached" : (fl & NVN_MEMORY_POOL_FLAGS_CPU_UNCACHED) ? "cpu-uncached" : "other",
+           (unsigned long long)wb_limit);
+}
+
 void vk_texture_write_back_small(uint64_t fence) {
     lock();
+    wb_cfg_init();
     __atomic_store_n(&small_pending, 0, __ATOMIC_RELAXED);
     AcquireSRWLockShared(&owned_lock);
     int n = 0, later = 0;
-    for (int i = 0; i < nowned; i++) n += owned[i]->gpu_dirty && owned[i]->t.L.size <= WB_SMALL;
+    for (int i = 0; i < nowned; i++) n += owned[i]->gpu_dirty && owned[i]->t.L.size <= wb_limit;
     Tex **hit = n ? malloc(sizeof *hit * (size_t)n) : NULL;
     if (n && !hit) rt_fatal("vk: out of memory for a texture write-back");
     n = 0;
     for (int i = 0; i < nowned; i++) {
         Tex *e = owned[i];
-        if (!e->gpu_dirty || e->t.L.size > WB_SMALL) continue;
+        if (!e->gpu_dirty) continue;
+        if (e->t.L.size > wb_limit) {
+            if (wb_trace && e->gpu_fence <= fence) {
+                wb_note(e, 1);
+                perf_count(PERF_CNT_WB_SKIP);
+            }
+            continue;
+        }
         if (e->gpu_fence > fence) later = 1;
-        else hit[n++] = e;
+        else {
+            if (wb_trace && e->t.L.size > WB_SMALL_DEFAULT) wb_note(e, 0);
+            hit[n++] = e;
+        }
     }
     ReleaseSRWLockShared(&owned_lock);
     if (later) __atomic_store_n(&small_pending, 1, __ATOMIC_RELEASE);
