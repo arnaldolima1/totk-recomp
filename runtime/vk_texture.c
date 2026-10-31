@@ -55,6 +55,7 @@ typedef struct Tex {
     uint64_t wr_fence;            // any entry: newest submission recorded to write its image (render, copy, clear,
                                   // storage binding); ReadTexels waits for it instead of draining the replay queue
     uint8_t listed;               // in owned[]
+    uint8_t *snap;                // a texture that fills no page: its storage bytes when the GPU write was recorded
     uint32_t wt_n;                // WriteTexels into the storage since the last upload
     struct Tex *rel_prev, *rel_next;   // while released: the list of released entries, oldest first
 } Tex;
@@ -507,6 +508,7 @@ static void destroy_tex(Tex *e) {
     if (e->released) nreleased--, rel_unlink(e);
     vk_exec_image_gone(e->pub.image);
     vk_defer_image(e->pub.image, e->alloc);
+    free(e->snap);
     free(e);
 }
 
@@ -727,12 +729,33 @@ static void upload(Tex *e) {
     perf_end(PERF_TEX, p0);
 }
 
+// Whether e's storage fills no 4 KiB page of its own, so the write tracking can only see writes to pages it shares.
+static int fills_no_page(const Tex *e) {
+    return ((e->pub.addr + e->t.L.size) & ~0xfffull) <= ((e->pub.addr + 0xfff) & ~0xfffull);
+}
+
+// A texture that fills no page keeps a copy of its storage bytes from when a GPU write to it was recorded
+// (vk_texture_gpu_written), up to SNAP_MAX bytes; wb_exact (TOTK_WB_EXACT, default on) enables it.
+enum { SNAP_MAX = 4096 };
+static int wb_exact = -1;
+static volatile int32_t n_kept;
+
 // vk_mem_changed over the pages wholly inside e's storage (all of its pages when it fills none): a neighbour that shares
-// the first or last page does not count as a write to e.
+// the first or last page does not count as a write to e. A texture that fills no page shares all of its pages, so
+// there a page write counts only when e's own bytes differ from the copy taken at the GPU write. TotK's Purah Pad
+// camera renders the ID, screen rect and depth of what is under the reticle into 4x4 targets of 512 bytes, two
+// slots used in turn, and the CPU reads them a frame later. One slot's rect target shares its page with data the CPU
+// writes every frame: without the copy its renders were never written back, the game read a zero rect every other
+// frame and the target's name label blinked. TOTK_WB_EXACT=0 restores the page-only decision.
 static int storage_rewritten(const Tex *e, uint32_t since, uint32_t *now) {
     uint64_t lo = (e->pub.addr + 0xfff) & ~0xfffull, hi = (e->pub.addr + e->t.L.size) & ~0xfffull;
     if (hi <= lo) lo = e->pub.addr, hi = e->pub.addr + e->t.L.size;
-    return vk_mem_changed(lo, hi - lo, since, now);
+    int ch = vk_mem_changed(lo, hi - lo, since, now);
+    if (ch != 1 || !since || !e->snap || memcmp(e->snap, (const void *)(uintptr_t)e->pub.addr, e->t.L.size)) return ch;
+    log_limited(&n_kept, "write-back of %#llx kept: fmt %#x %ux%u, %llu bytes; a neighbour wrote its page",
+                (unsigned long long)e->pub.addr, e->t.d.format, e->t.d.width, e->t.d.height,
+                (unsigned long long)e->t.L.size);
+    return 0;
 }
 
 // A mirrored texture is uploaded on first use and again when its storage pages carry a newer write generation.
@@ -947,6 +970,10 @@ void vk_texture_gpu_written(const tex_t *t) {
         if (e->pub.mirrored) {
             e->gpu_dirty = 1;
             storage_rewritten(e, 0, &e->gpu_gen);   // CPU writes up to here are older than this render
+            if (wb_exact < 0) wb_exact = cfg_bool("TOTK_WB_EXACT");
+            if (wb_exact && !e->snap && e->t.L.size <= SNAP_MAX && fills_no_page(e) && !(e->snap = malloc(SNAP_MAX)))
+                rt_fatal("vk: out of memory for a texture's storage copy");
+            if (e->snap) memcpy(e->snap, (const void *)(uintptr_t)e->pub.addr, e->t.L.size);
             e->gpu_seq = ++gpu_writes;
             e->gpu_fence = vk_exec_recording_fence();
             wb_cfg_init();

@@ -7,8 +7,10 @@
 #include <pdh.h>
 #include <pdhmsg.h>
 #include <psapi.h>
+#include <restartmanager.h>
 #include <shellapi.h>
 #include <timeapi.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
@@ -582,9 +584,37 @@ static LONG CALLBACK crash_veh(EXCEPTION_POINTERS *ep) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
+// abort() and an invalid parameter to a C runtime function raise no exception: the C runtime ends the process with
+// 0xc0000409 after calling the SIGABRT or invalid-parameter handler. The report names the host frames in this
+// executable; the innermost is the caller of abort (assert) or of the C runtime function. Skipped frames: this function
+// and the handler that called it.
+__attribute__((noinline)) static void crash_from_runtime(const char *what, uint32_t code) {
+    PlatCrash c = {what, code, 0, 0, -1, 0};
+    void *f[62];
+    USHORT n = RtlCaptureStackBackTrace(2, 62, f, NULL);
+    MODULEINFO mi;
+    if (GetModuleInformation(GetCurrentProcess(), GetModuleHandleW(NULL), &mi, sizeof mi)) {
+        uintptr_t base = (uintptr_t)mi.lpBaseOfDll;
+        for (USHORT i = 0; i < n && c.nframes < (int)(sizeof c.frames / sizeof *c.frames); i++)
+            if ((uintptr_t)f[i] - base < mi.SizeOfImage) c.frames[c.nframes++] = (uintptr_t)f[i];
+        if (c.nframes) c.rip = c.frames[0], c.offset = c.rip - base;
+    }
+    crash_fn(&c);
+}
+
+static void abort_signal(int sig) { crash_from_runtime("abort", (uint32_t)sig); }
+
+static void invalid_parameter(const wchar_t *expr, const wchar_t *func, const wchar_t *file, unsigned line,
+                              uintptr_t reserved) {
+    (void)expr, (void)func, (void)file, (void)line, (void)reserved;   // NULL and 0 in the release C runtime
+    crash_from_runtime("invalid parameter to a C runtime function", 0xc0000417u);   // STATUS_INVALID_CRUNTIME_PARAMETER
+}
+
 void plat_crash_hook(void (*fn)(const PlatCrash *c)) {
     crash_fn = fn;
     AddVectoredExceptionHandler(0, crash_veh);
+    signal(SIGABRT, abort_signal);
+    _set_invalid_parameter_handler(invalid_parameter);
 }
 
 // A fresh process gets a fresh layout: Windows places DLLs, heaps and thread stacks at random addresses. The parent
@@ -843,6 +873,94 @@ void plat_fs_sync_dir(const char *path) {
     if (h != INVALID_HANDLE_VALUE) {
         FlushFileBuffers(h);
         CloseHandle(h);
+    }
+}
+
+// Restart Manager (rstrtmgr.dll, loaded on first use) names the processes that hold a file open.
+typedef DWORD(WINAPI *RmStartSession_t)(DWORD *, DWORD, WCHAR *);
+typedef DWORD(WINAPI *RmRegisterResources_t)(DWORD, UINT, LPCWSTR *, UINT, RM_UNIQUE_PROCESS *, UINT, LPCWSTR *);
+typedef DWORD(WINAPI *RmGetList_t)(DWORD, UINT *, UINT *, RM_PROCESS_INFO *, LPDWORD);
+typedef DWORD(WINAPI *RmEndSession_t)(DWORD);
+static struct {
+    INIT_ONCE once;
+    RmStartSession_t start;
+    RmRegisterResources_t add;
+    RmGetList_t list;
+    RmEndSession_t end;
+} rm = {INIT_ONCE_STATIC_INIT};
+
+static BOOL CALLBACK rm_load(INIT_ONCE *o, void *p, void **c) {
+    (void)o, (void)p, (void)c;
+    HMODULE l = plat_lib_open("rstrtmgr.dll");
+    if (!l) return TRUE;
+    rm.add = (RmRegisterResources_t)(void *)GetProcAddress(l, "RmRegisterResources");
+    rm.list = (RmGetList_t)(void *)GetProcAddress(l, "RmGetList");
+    rm.end = (RmEndSession_t)(void *)GetProcAddress(l, "RmEndSession");
+    RmStartSession_t start = (RmStartSession_t)(void *)GetProcAddress(l, "RmStartSession");
+    if (rm.add && rm.list && rm.end) rm.start = start;   // start set: all of them are there
+    return TRUE;
+}
+
+// The files under dir (links not followed), at most BUSY_FILES of them, each a malloc'd path.
+#define BUSY_FILES 256
+typedef struct { LPCWSTR p[BUSY_FILES]; UINT n; } BusyFiles;
+
+static void busy_files(const wchar_t *dir, BusyFiles *f) {
+    wchar_t pat[WPATH + 4];
+    swprintf(pat, WPATH + 4, L"%ls\\*", dir);
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW(pat, &fd);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do {
+        DWORD a = fd.dwFileAttributes;
+        if (!wcscmp(fd.cFileName, L".") || !wcscmp(fd.cFileName, L"..") || (a & FILE_ATTRIBUTE_REPARSE_POINT)) continue;
+        size_t n = wcslen(dir) + wcslen(fd.cFileName) + 2;
+        wchar_t *p = n <= WPATH ? malloc(n * sizeof *p) : NULL;
+        if (!p) continue;
+        swprintf(p, n, L"%ls\\%ls", dir, fd.cFileName);
+        if (a & FILE_ATTRIBUTE_DIRECTORY) busy_files(p, f), free(p);
+        else f->p[f->n++] = p;
+    } while (f->n < BUSY_FILES && FindNextFileW(h, &fd));
+    FindClose(h);
+}
+
+void plat_fs_busy_reason(const char *dir, char *out, size_t cap) {
+    if (!cap) return;
+    *out = 0;
+    wchar_t w[WPATH];
+    if (!widen(dir, w, WPATH)) return;
+    for (wchar_t *q = w; *q; q++)
+        if (*q == L'/') *q = L'\\';
+    // a rename needs DELETE access to the directory: a folder made by an elevated run can refuse it
+    HANDLE h = CreateFileW(w, DELETE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+                           FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if (h == INVALID_HANDLE_VALUE) {
+        if (GetLastError() == ERROR_ACCESS_DENIED) snprintf(out, cap, "no permission to rename it");
+        return;
+    }
+    CloseHandle(h);
+    InitOnceExecuteOnce(&rm.once, rm_load, NULL, NULL);
+    DWORD session;
+    WCHAR key[CCH_RM_SESSION_KEY + 1] = {0};
+    if (!rm.start || rm.start(&session, 0, key) != ERROR_SUCCESS) return;
+    BusyFiles f = {.n = 0};
+    busy_files(w, &f);
+    RM_PROCESS_INFO info[8];
+    UINT need = 0, n = 8;
+    DWORD reasons = 0, e = f.n ? rm.add(session, f.n, f.p, 0, NULL, 0, NULL) : ERROR_SUCCESS;
+    if (f.n && e == ERROR_SUCCESS) e = rm.list(session, &need, &n, info, &reasons);
+    else n = 0;
+    rm.end(session);
+    for (UINT i = 0; i < f.n; i++) free((void *)f.p[i]);
+    if (e == ERROR_MORE_DATA) snprintf(out, cap, "%u programs hold files in it", need);   // info is not filled then
+    if (e != ERROR_SUCCESS) return;
+    size_t at = 0;
+    for (UINT i = 0; i < n && at < cap; i++) {   // the program's display name ("Windows Explorer") and process id
+        char name[CCH_RM_MAX_APP_NAME + 1];
+        if (!WideCharToMultiByte(CP_UTF8, 0, info[i].strAppName, -1, name, sizeof name, NULL, NULL)) strcpy(name, "?");
+        int k = snprintf(out + at, cap - at, "%s%s %lu", i ? ", " : "", name, info[i].Process.dwProcessId);
+        if (k < 0) break;
+        at += (size_t)k;
     }
 }
 

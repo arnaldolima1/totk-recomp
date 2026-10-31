@@ -203,13 +203,17 @@ _Noreturn void plat_reexec(void);
 
 // A crash in this executable's own code (an access violation, an illegal instruction, a division by zero, a stack
 // overflow) goes to fn, which reports it and must end the process. Faults in other modules (drivers) are left to the
-// OS. The write-fault hook above runs first.
+// OS. The write-fault hook above runs first. On Windows abort() (a failed assert, std::terminate) and an invalid
+// parameter to a C runtime function go there too, with the host frames in this executable: the C runtime ends the
+// process for both with 0xc0000409 and no exception.
 typedef struct {
     const char *what;          // "access violation", "illegal instruction", ...
     uint32_t code;             // the Windows exception code or the signal number
     uintptr_t rip, offset;     // the faulting instruction, and its offset in the executable
     int access;                // the data access that faulted: 0 read, 1 write, 8 execute; -1 when not an access
     uint64_t addr;             // its address when access >= 0
+    int nframes;               // abort and invalid parameter: return addresses in this executable, innermost first
+    uintptr_t frames[16];      // (rip is frames[0]); 0 for a fault, whose rip is exact
 } PlatCrash;
 void plat_crash_hook(void (*fn)(const PlatCrash *c));
 int plat_mem_read(uint64_t addr, void *out, size_t n);    // copies n bytes, 0 instead of faulting on unmapped memory
@@ -303,6 +307,10 @@ int plat_fs_rename(const char *from, const char *to, int durable);
 int plat_fs_link(const char *existing, const char *path); // a hard link
 int plat_fs_links(const char *path);                      // the file's hard link count, 0 when unknown
 void plat_fs_sync_dir(const char *path);                  // a directory's entries to the disk, as far as the FS allows
+// Why dir could not be renamed, for the log: into out "no permission to rename it" when this process may not delete
+// it, else the programs holding a file under it ("explorer.exe 1234, ..."), else an empty string. Windows refuses to
+// rename a directory with any file open under it; elsewhere out is always empty.
+void plat_fs_busy_reason(const char *dir, char *out, size_t cap);
 // cb(name, kind, size, ctx) for each entry of dir but "." and ".."; cb returns 0 to stop. The listing's error.
 int plat_fs_list(const char *dir, int (*cb)(const char *name, int kind, uint64_t size, void *ctx), void *ctx);
 // An existing file for reading and, with write, writing; *err (may be NULL) gets the reason on failure.

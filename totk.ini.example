@@ -26,7 +26,8 @@
 # async_preempt = 1
 # Replay NVN submissions on their own thread, at most one frame behind the game (1 = on). Adds up to a frame of latency.
 # replay_async = 0
-# 1 lifts the virtual core gate: guest threads run without the console's limit of one thread per core.
+# 1 lifts the virtual core gate: guest threads run without the console's limit of one thread per core. For experiments
+# only: the game keeps per-core data without locks and can crash.
 # free_cores = 0
 # Windows timer resolution of 1 ms for steadier frame pacing (0 = the Windows default).
 # timer_1ms = 1
@@ -88,7 +89,7 @@
 # Vulkan.
 # Vulkan validation layer: checks every call and slows the game down a lot. Needs the layer installed (Vulkan SDK).
 # vk_validation = 0
-# A thread of its own makes the Vulkan calls of each frame, 0 or 1. Default: on, except on AMD GPUs.
+# A thread of its own makes the Vulkan calls of each frame, 0 or 1. Default: on.
 # vk_recorder = 1
 # Dynamic vertex input, 0 or 1. Default: on, except on Intel's older integrated GPU drivers (Vulkan 1.3.215 and older).
 # vk_dyn_vertex = 1
@@ -144,6 +145,18 @@
 # window is no longer stretched as it used to be; stretch fills the window. Changes while the game runs take effect at
 # once.
 # aspect = fit
+# Field of view, in percent of the game's own: 70 to 140, 100 (the default) leaves the camera as it is. Higher shows
+# more of the world around Link. Game version 1.4.3 only. Changes while the game runs take effect at once.
+# fov = 100
+# Colour adjustment of the picture, HUD included, before it is scaled to the window: brightness (-30 to 30, added in %),
+# contrast and saturation (70 to 150 and 50 to 200 %), gamma (0.8 to 1.2, below 1 brightens dark tones). At 0, 100,
+# 100 and 1 nothing runs. color_preset is the menu's profile (default, vivid, clarity, custom), which sets the four.
+# Changes while the game runs take effect at once.
+# color_preset = default
+# color_brightness = 0
+# color_contrast = 100
+# color_saturation = 100
+# color_gamma = 1
 
 [language]
 # Language: a Windows locale such as de-DE, or a Switch code (en-US, ja, zh-Hant, ...). Default: the Windows locale.

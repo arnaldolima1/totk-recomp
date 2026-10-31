@@ -127,14 +127,10 @@ void rec_drain(void) {
 void rec_begin(VkCommandBuffer cb) {
     static int mode = -1;
     if (mode < 0) {
-        // Default off on AMD GPUs: with the recorder their drivers lost the device within the first frames or at menu
-        // opens, 1 boot in 3 on an RX 9070 XT, and TOTK_VK_RECORDER=0 ended it for three users (issue #5); under RADV
-        // the kernel saw an illegal opcode at the end of a command buffer (issue #40). Letting the recorder end its own
-        // parts (rec_end_cb) fixed the white scene on an RX 6700 XT; the default stays off until more AMD cards run it.
-        const char *set = cfg_get("TOTK_VK_RECORDER");
-        mode = rt_knob("VK_RECORDER", vk_caps.amd ? "0" : "1");
-        if (!mode && vk_caps.amd && !(set && *set))
-            rt_log("vk_rec: no recorder thread on AMD GPUs (TOTK_VK_RECORDER=1 turns it on)");
+        // Default on for every GPU. AMD drivers once lost the device with the recorder (issues #5 and #40); after
+        // vk_mem_note_recording kept objects alive until their submission completed and the recorder began ending
+        // its own parts (rec_end_cb), RDNA 1 and 2 cards ran with it on and off without a loss or a white scene.
+        mode = rt_knob("VK_RECORDER", "1");
         if (mode) {
             plat_event_init(&wake_ev, 0, 0);
             rec_prio = plat_thread_priority_get();

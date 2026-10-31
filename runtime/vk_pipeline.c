@@ -2568,7 +2568,8 @@ static struct {
     PlatThread *th[LB_MAX_THREADS];
     uint8_t clamp, poly, minus_w, samples;             // library state (GKey fields)
     double t0, ms[3];                                  // ms: build time per kind (vertex, fragment, compute)
-    uint64_t built[3], have[3], fail[3], warmed[3], noshader, done, cs_draw;   // warmed: driver cache only
+    // warmed: driver cache only; nolib: vertex and fragment variants skipped with the graphics pipeline library off
+    uint64_t built[3], have[3], fail[3], warmed[3], noshader, nolib, done, cs_draw;
     double warm_ms[3];
     volatile int32_t kept;                                // libraries entered in libs[] so far
     int32_t keep_n;
@@ -2734,14 +2735,21 @@ static void lb_library(const GfxShader *sh, int vertex, int keep) {
     lb_count(stat, !pipe ? 2 : have || got != pipe ? 1 : 0, ms);
 }
 
+// A vertex or fragment variant with the graphics pipeline library off: no stage library to build ahead.
+static void lb_skip_lib(void) {
+    plat_mutex_lock(&LB.stat);
+    LB.nolib++;
+    plat_mutex_unlock(&LB.stat);
+}
+
 static void lb_report(const char *how) {
     float mem_used, mem_total, mem_proc;
     plat_mem_info(&mem_used, &mem_total, &mem_proc);
     plat_mutex_lock_shared(&LB.stat);
     rt_log("vk_pipeline: stage library prebuild %s: %llu of %zu variants in %.0f ms; kept: vertex %llu built (avg %.1f ms), "
            "%llu there; fragment %llu built (avg %.1f ms), %llu there; compute %llu built (avg %.1f ms), %llu there; driver "
-           "cache only: vertex %llu (avg %.1f ms), fragment %llu (avg %.1f ms), compute %llu (avg %.1f ms); %llu failed, %llu not in the shader cache; "
-           "process working set %.0f MB", how, (unsigned long long)LB.done, LB.n,
+           "cache only: vertex %llu (avg %.1f ms), fragment %llu (avg %.1f ms), compute %llu (avg %.1f ms); %llu failed, %llu not in the shader cache, "
+           "%llu vertex/fragment skipped (graphics pipeline library off); process working set %.0f MB", how, (unsigned long long)LB.done, LB.n,
            now_ms() - LB.t0, (unsigned long long)LB.built[0], LB.built[0] ? LB.ms[0] / LB.built[0] : 0.0,
            (unsigned long long)LB.have[0], (unsigned long long)LB.built[1], LB.built[1] ? LB.ms[1] / LB.built[1] : 0.0,
            (unsigned long long)LB.have[1], (unsigned long long)LB.built[2], LB.built[2] ? LB.ms[2] / LB.built[2] : 0.0,
@@ -2749,7 +2757,7 @@ static void lb_report(const char *how) {
            (unsigned long long)LB.warmed[1], LB.warmed[1] ? LB.warm_ms[1] / LB.warmed[1] : 0.0,
            (unsigned long long)LB.warmed[2], LB.warmed[2] ? LB.warm_ms[2] / LB.warmed[2] : 0.0,
            (unsigned long long)(LB.fail[0] + LB.fail[1] + LB.fail[2]),
-           (unsigned long long)LB.noshader, (double)mem_proc);
+           (unsigned long long)LB.noshader, (unsigned long long)LB.nolib, (double)mem_proc);
     plat_mutex_unlock_shared(&LB.stat);
 }
 
@@ -2769,8 +2777,9 @@ static void lb_worker(void *arg) {
             plat_mutex_unlock(&LB.stat);
         } else if (gfx_shader_stage(sh) == GFX_STAGE_CS) {
             lb_compute(sh);
-        } else if (P.gpl && (gfx_shader_stage(sh) == GFX_STAGE_VS || gfx_shader_stage(sh) == GFX_STAGE_FS)) {
-            lb_library(sh, gfx_shader_stage(sh) == GFX_STAGE_VS, 1);
+        } else if (gfx_shader_stage(sh) == GFX_STAGE_VS || gfx_shader_stage(sh) == GFX_STAGE_FS) {
+            if (P.gpl) lb_library(sh, gfx_shader_stage(sh) == GFX_STAGE_VS, 1);
+            else lb_skip_lib();
         }
         plat_mutex_lock(&LB.stat);
         LB.done++;
@@ -2861,8 +2870,9 @@ static void lb_warm_worker(void *arg) {
             VkPipeline pipe = l ? compute_create(sh, l) : VK_NULL_HANDLE;
             if (pipe) vkDestroyPipeline(P.device, pipe, NULL);
             lb_count(2, pipe ? 3 : 2, now_ms() - t0);
-        } else if (P.gpl && (st == GFX_STAGE_VS || st == GFX_STAGE_FS)) {
-            lb_library(sh, st == GFX_STAGE_VS, 0);
+        } else if (st == GFX_STAGE_VS || st == GFX_STAGE_FS) {
+            if (P.gpl) lb_library(sh, st == GFX_STAGE_VS, 0);
+            else lb_skip_lib();
         }
         if (owned) gfx_shader_release_private(sh);
         plat_mutex_lock(&LB.stat);
@@ -2894,7 +2904,12 @@ static void lb_warm_prepared(const char *dir) {
     if (!k) lb_warm_worker(NULL);
     for (int i = 0; i < k; i++) plat_thread_join(t[i]);
     lb_report("preparation done");
-    printf("prepare-shaders: %zu variants built into the driver cache on %d threads in %.0f ms\n", n, k, now_ms() - LB.t0);
+    // with gpl off only compute variants are built: say so, rather than count the skipped ones as built
+    if (LB.nolib)
+        printf("prepare-shaders: %zu variants on %d threads in %.0f ms, %llu vertex/fragment variants skipped (graphics "
+               "pipeline library off, they build at their first draw)\n", n, k, now_ms() - LB.t0, (unsigned long long)LB.nolib);
+    else
+        printf("prepare-shaders: %zu variants built into the driver cache on %d threads in %.0f ms\n", n, k, now_ms() - LB.t0);
     free(LB.e), LB.e = NULL, LB.n = 0, LB.next = 0, LB.done = 0;
 }
 

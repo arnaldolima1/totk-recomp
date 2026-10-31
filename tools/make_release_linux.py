@@ -61,6 +61,10 @@ PINS = {
     'python-linux': ('https://github.com/astral-sh/python-build-standalone/releases/download/20261026/'
                      'cpython-3.14.10%2B20261026-x86_64-unknown-linux-gnu-install_only.tar.gz',
                      '1b38024924eb7f4cf0cab45d7b871d1f1991354190fccd2625ac7529a43786e2'),
+    'tcl-linux-src': ('https://github.com/tcltk/tcl/archive/refs/tags/core-9-0-4.tar.gz',
+                      '8c01bac92a9a8ce271b63d3aa28f09cde2c6762d6719ca671cdc8aee25391234'),
+    'tk-linux-src': ('https://github.com/tcltk/tk/archive/refs/tags/core-9-0-4.tar.gz',
+                     'ab9bd89fcff2e1248b7a9c097035f817fa0725285028c95686fdb92db65bc148'),
     'ninja-linux': ('https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-linux.zip',
                     '5749cbc4e668273514150a80e387a957f933c6ed3f5f11e03fb30955e2bbead6'),
     'zstd-src': ('https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz',
@@ -68,12 +72,12 @@ PINS = {
     'vulkan-headers-src': ('https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.363.tar.gz',
                            'cbaf687d3c59b9666fe080e7f8396b6b4f4d344a768ee6b337c59852f4526b68'),
     'vma-header': build_game.VMA_FETCH,
-    # appimagetool and the runtime are published only under the moving "continuous" tag: pinned by hash, so a new
-    # upload stops the build until the pins are updated on purpose
-    'appimagetool': ('https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage',
-                     'ac7fd56feade6002c2f57db39587113275d351fce911a5fbb29ea84cd0666cab'),
-    'appimage-runtime': ('https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64',
-                         '617aa77314d57c8b8e4fae9c3f0b35af7b30d5529cb69e98f64f92510ed98a46'),
+    # appimagetool and the type-2 runtime from release tags, not "continuous", whose uploads change under the same
+    # URL and would stop the build at the hash check
+    'appimagetool': ('https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage',
+                     'ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0'),
+    'appimage-runtime': ('https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64',
+                         '2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d'),
 }
 mr.PINS.update(PINS)   # one cache (toolchain/release-dl) and one fetch for both releases
 
@@ -81,10 +85,11 @@ mr.PINS.update(PINS)   # one cache (toolchain/release-dl) and one fetch for both
 LLVM_MEMBERS = [f'bin/clang-{LLVM_MAJOR}', 'bin/clang', 'bin/clang++', 'bin/lld', 'bin/ld.lld', 'bin/llvm-ar',
                 'bin/llvm-ranlib', 'bin/llvm-objcopy', 'bin/llvm-strip', f'lib/clang/{LLVM_MAJOR}/include']
 # The parts of the sniper SDK a C/C++ compile and link for x86_64 can read.
-SNIPER_MEMBERS = ['usr/include', 'usr/lib/x86_64-linux-gnu', 'usr/lib/gcc/x86_64-linux-gnu',
+SNIPER_MEMBERS = ['usr/include', 'usr/share/pkgconfig', 'usr/lib/x86_64-linux-gnu', 'usr/lib/gcc/x86_64-linux-gnu',
                   'lib/x86_64-linux-gnu', 'lib64', 'usr/share/doc/libsdl3-0', 'usr/share/doc/libopus0',
                   'usr/share/doc/libvpx6', 'usr/share/doc/libc6', 'usr/share/doc/gcc-10-base',
-                  'usr/share/doc/libvulkan1']
+                  'usr/share/doc/libvulkan1',
+                  'usr/share/doc/libxft2', 'usr/share/doc/libxrender1']
 # glibc's link libraries and their scripts (lib<name>.so, .a, _nonshared.a), and the GCC runtime pieces clang links.
 GLIBC_LIBS = ['c', 'm', 'mvec', 'dl', 'pthread', 'rt', 'util']
 GCC_LIBS = {'libgcc.a', 'libgcc_eh.a', 'libgcc_s.so', 'libstdc++.a', 'libsupc++.a'}
@@ -139,8 +144,11 @@ def full_sysroot():
     """The sniper SDK's x86_64 compile and link files in toolchain/release-work/sniper, absolute symlinks made relative
     (the SDK points some at /lib and /usr/lib, which outside its container are the host's)."""
     root = WORK / 'sniper'
-    if (root / '.relinked').is_file():
+    if (root / '.relinked').is_file() and (root / 'usr/share/doc/libxft2/copyright').is_file():
         return root
+    # Older cached SDK extractions omitted the font libraries' architecture-independent pkg-config files and the
+    # libXft and libXrender copyright files.
+    (root / '.unpacked').unlink(missing_ok=True)
     tar_extract('sniper-sdk', root, SNIPER_MEMBERS)
     for p in root.rglob('*'):
         if p.is_symlink() and os.readlink(p).startswith('/'):
@@ -309,7 +317,50 @@ def build_sysroot(out, sysroot, files):
 
 # ---- python/ ---------------------------------------------------------------------------------------------------------
 
-def build_python(out):
+def build_tk_xft(out, llvm, sysroot):
+    """Replace standalone Python's no-Xft Tcl/Tk with the same version using system TrueType fonts (#227)."""
+    prefix = WORK / 'tcltk-xft'
+    env = dict(os.environ, CC=sysroot_cc(llvm, sysroot),
+               PKG_CONFIG_SYSROOT_DIR=str(sysroot),
+               PKG_CONFIG_LIBDIR=os.pathsep.join(str(sysroot / p) for p in
+                   ('usr/lib/x86_64-linux-gnu/pkgconfig', 'usr/share/pkgconfig')),
+               PKG_CONFIG_PATH='')
+    sources = {}
+    for name in ('tcl', 'tk'):
+        src = mr.unpack(f'{name}-linux-src') / f'{name}-core-9-0-4'
+        sources[name] = src
+        build = src / 'unix'
+        options = [f'--prefix={prefix}', '--enable-shared', '--disable-zipfs', '--disable-rpath']
+        if name == 'tk':
+            options += [f'--with-tcl={prefix / "lib"}', '--enable-xft', '--disable-libcups', '--disable-xss']
+        run([build / 'configure', *options], cwd=build, env=env)
+        run(['make', f'-j{os.cpu_count() or 4}'], cwd=build, env=env)
+        run(['make', 'install'], cwd=build, env=env)
+    lib = prefix / 'lib'
+    # A successful GUI selftest alone did not catch missing glyphs. Reject a no-Xft build before packaging it.
+    symbols = subprocess.run(['nm', '-D', str(lib / 'libtcl9tk9.0.so')],
+                             capture_output=True, text=True, check=True).stdout
+    if not re.search(r'\bU Xft', symbols):
+        sys.exit('Tcl/Tk build has no Xft font rendering')
+    dst = out / 'python' / 'lib'
+    for name in ('libtcl9.0.so', 'libtcl9tk9.0.so'):
+        shutil.copy2(lib / name, dst / name)
+    # libXft is not on every desktop (the old Tk did not need it) and without it _tkinter fails to import, so the
+    # window would not open at all. python's RPATH ($ORIGIN/../lib) finds these beside the Tk library.
+    sys_lib = sysroot / 'usr' / 'lib' / 'x86_64-linux-gnu'
+    for pattern in ('libXft.so.2*', 'libXrender.so.1*'):
+        for f in sys_lib.glob(pattern):
+            shutil.copy2(f, dst / f.name, follow_symlinks=False)
+    for name in ('tcl9.0', 'tk9.0'):
+        shutil.rmtree(dst / name)
+        shutil.copytree(lib / name, dst / name, symlinks=True)
+    licenses = out / 'licenses'
+    licenses.mkdir(exist_ok=True)
+    for name, src in sources.items():
+        shutil.copy2(src / 'license.terms', licenses / f'{name}-license.terms')
+
+
+def build_python(out, llvm, sysroot):
     src = mr.unpack('python-linux') / 'python'
     py = out / 'python'
     shutil.copytree(src, py, symlinks=True,
@@ -319,6 +370,7 @@ def build_python(out):
     run([exe, '-m', 'pip', 'install', '--no-compile', '--only-binary', ':all:', '-r',
          ROOT / 'tools' / 'requirements-installer.txt'], env=env, stdout=subprocess.DEVNULL)
     run([exe, '-m', 'pip', 'uninstall', '-y', 'pip'], stdout=subprocess.DEVNULL)   # the setup installs nothing
+    build_tk_xft(out, llvm, sysroot)
     strip(py, out / 'llvm' / 'bin' / 'llvm-strip')
     site = next(py.glob('lib/python3.*/site-packages'))
     # The release folder, tools/ and recomp/ on sys.path, as the Windows python's ._pth does: `python -m installer` and
@@ -346,6 +398,8 @@ def collect_licenses(out, sysroot):
         (doc / 'libc6' / 'copyright', 'glibc-copyright.txt'),
         (doc / 'gcc-10-base' / 'copyright', 'libstdc++-copyright.txt'),
         (doc / 'libvulkan1' / 'copyright', 'vulkan-loader-copyright.txt'),
+        (doc / 'libxft2' / 'copyright', 'libXft-copyright.txt'),
+        (doc / 'libxrender1' / 'copyright', 'libXrender-copyright.txt'),
         (WORK / 'vulkan-headers' / 'LICENSE.md', 'vulkan-headers-LICENSE.txt'),
         (WORK / 'zstd' / 'LICENSE', 'zstd-LICENSE.txt'),
         (out / 'python' / 'lib' / f'python{sys_version(out)}' / 'LICENSE.txt', 'python-LICENSE.txt'),
@@ -370,6 +424,8 @@ APPRUN = '''#!/bin/sh
 # The AppImage entry: the setup window, run by the bundled Python from the read-only mount (no bytecode written there).
 HERE="$(dirname "$(readlink -f "$0")")"
 export PYTHONDONTWRITEBYTECODE=1
+export TCL_LIBRARY="$HERE/python/lib/tcl9.0"
+export TK_LIBRARY="$HERE/python/lib/tk9.0"
 exec "$HERE/python/bin/python3" -m installer.gui "$@"
 '''
 
@@ -452,6 +508,12 @@ def check_bundle(out):
                  f'{r.stderr[-2000:]}')
     print(f'bundle check: the installer ran the host check from the folder and stopped at the game files '
           f'(exit {r.returncode})')
+    run([py, '-c', 'import tkinter as tk; from tkinter import font; '
+         'root = tk.Tk(); root.withdraw(); '
+         'fonts = [font.nametofont("TkDefaultFont"), font.Font(family="DejaVu Sans"), '
+         'font.Font(family="DejaVu Sans Mono")]; '
+         'missing = [(f.actual("family"), c) for f in fonts for c in "УстановкаЁёЙй" if f.measure(c) <= 0]; '
+         'root.destroy(); assert not missing, f"Cyrillic glyphs missing: {missing}"'], cwd='/', env=env)
     r = subprocess.run([str(py), '-m', 'installer.gui', '--selftest', '--root', str(out)], cwd='/', env=env,
                        capture_output=True, text=True, timeout=300)
     if r.returncode:
@@ -511,7 +573,7 @@ def main():
     build_bin(out, llvm, sysroot)
     rtlib = runtime_lib(out, llvm, sysroot)
     build_sysroot(out, sysroot, used_sysroot_files(out, llvm, sysroot, rtlib))
-    build_python(out)
+    build_python(out, llvm, sysroot)
     mr.build_sources(out)
     collect_licenses(out, sysroot)
     build_entry(out)

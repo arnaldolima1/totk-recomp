@@ -53,6 +53,9 @@ int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const char **shot);
 // Records the frame menu_overlay_frame laid out into cb, which is inside dynamic rendering on the image.
 void menu_overlay_draw(VkCommandBuffer cb);
 void menu_vk_release(void);               // before the device goes away (gfx_window_release_vk)
+// The check the font atlas runs on a system font, on the embedded font and damaged copies of it: 1 when it takes the
+// whole font and refuses a cut-off one, one without a character map and one with an unknown tag (--probe-window).
+int menu_font_check(void);
 
 // ---- what the menu asks of the platform side (gfx_window_win.c, gfx_window_sdl.c)
 void gfx_window_apply_settings(void);     // TOTK_FULLSCREEN or TOTK_WINDOW_SIZE changed: the window follows

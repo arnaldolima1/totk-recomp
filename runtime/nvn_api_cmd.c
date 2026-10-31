@@ -82,7 +82,12 @@ static void cmd_reserve(cmd_t *o, size_t need) {
     if (!cap) cap = 64 << 10;
     while (used + need + OP_RESERVE > cap) cap *= 2;
     uint8_t *b = realloc(o->seg, cap);
-    if (!b) rt_fatal("nvn: command recording buffer of %zu bytes", cap);
+    // A block this size fails only without commit (the fatal report states it) or when seg is no block of ours: a
+    // command buffer object the game overwrote or copied shows a wrong magic or more used than its old size.
+    if (!b)
+        rt_fatal("nvn: command recording buffer of %zu bytes (command buffer %p, magic %#x, buffer %p of %zu bytes, %zu "
+                 "used, %zu asked)", cap, (void *)o, o->magic, (void *)o->seg, o->seg ? (size_t)(o->end - o->seg) : 0,
+                 used, need);
     o->seg = b;
     o->cur = b + used;
     o->end = b + cap;
@@ -312,6 +317,12 @@ static void release_copies(uintptr_t lo, uintptr_t hi) {
 // at ~0 / 0 so NVN 55 inline code never finds room and calls the API (nvn_obj.h cmd_t)
 NVN_API(nvnCommandBufferInitialize) {
     cmd_t *o = cmd_of(c);
+    // Initialize over an object that was never finalized drops its recording buffer (seg lives in host memory). Logged
+    // only: the old bytes may be a copy whose buffer another object owns, so freeing it here is not safe.
+    static uint32_t reinits;
+    if (o->magic == CMD_MAGIC && o->seg && __atomic_fetch_add(&reinits, 1, __ATOMIC_RELAXED) < 8)
+        rt_log("nvn: Initialize over the command buffer %p, which was not finalized; its %zu-byte recording buffer %p "
+               "is dropped", (void *)o, (size_t)(o->end - o->seg), (void *)o->seg);
     memset(o, 0, sizeof *o);
     o->magic = CMD_MAGIC;
     o->dev = arg_p(c, 1);

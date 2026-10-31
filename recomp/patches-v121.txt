@@ -32,6 +32,12 @@ site realtime main 8f2398 1e2c1001 bd400120   # fmov s1, #0.5 -> ldr s0, [x9] (g
 site realtime main 8f23a8 5e21d800 d503201f   # scvtf s0, s0 -> nop
 site realtime main 8f23ac 1e210800 d503201f   # fmul s0, s0, s1 -> nop
 
+# Equipment-switch cooldown (issue #18, found by JieML1100 on 1.4.3): the player update (main+0x852d24) steps the
+# countdown at player state +0x109c through the timer step (main+0xec98cc) only while it is above FLT_EPSILON, but the
+# equipment gate (main+0xcae6f8) blocks weapon, shield and bow changes while it is above 0. A measured ratio can leave
+# a remainder in (0, FLT_EPSILON] that is never stepped again; stepping while above 0 takes it below 0.
+site realtime main 852d28 1e270101 1e2703e1   # fmov s1, w8 (FLT_EPSILON) -> fmov s1, wzr
+
 # Hair and cloth (upstream 290ec9f, 8f8022f): the actor animation update builds a second clock {seconds = factor / 30,
 # ratio = factor} per rendered frame. Three inlined places: at the fmul, seconds = measured seconds * factor; at the
 # store of the factor into the ratio slot, measured ratio * factor. The call of the shared update (main+0x89822c)

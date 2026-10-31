@@ -34,7 +34,7 @@ The player runs a newer installer on the same folder. It reads `totk-install.jso
 `profile/` and `totk.ini` after checking their hashes, rebuilds `totk.exe` and re-prepares the shaders. A newer
 release that changes nothing game-derived skips the rebuild.
 
-Given another update file than the recorded one (1.2.1, then 1.4.3), the installer extracts and builds again from it and
+Given an update file other than the recorded one (1.2.1, then 1.4.3), the installer extracts and builds again from it and
 keeps `profile/`. Saves carry over both ways: 1.4.3 converts a 1.2.1 save on load, and 1.2.1 loads the saves 1.4.3 wrote.
 
 ## Setup steps
@@ -122,7 +122,8 @@ the `launcher-v*` releases carry.
 
 `tools/make_release_linux.py` builds the same setup for Linux and packs it as `TotK-Setup-x86_64.AppImage` (the static
 type-2 runtime: no libfuse2 needed on the host). The player makes it executable and starts it; on a Steam Deck, from
-Desktop Mode. The setup builds the game into the folder they pick, as on Windows, and the game is `totk` there with
+Desktop Mode. Building the release also needs `make` and `pkg-config`. The bundled Tcl/Tk 9.0.4 is rebuilt with
+Xft against the sniper sysroot so Russian text uses system TrueType fonts. The setup builds the game into the folder they pick, as on Windows, and the game is `totk` there with
 `libSDL3.so.0` beside it. The folder inside the AppImage:
 
 ```
