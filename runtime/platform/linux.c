@@ -723,6 +723,9 @@ int plat_file_replace(const char *from, const char *to) {
 }
 
 int plat_file_write_atomic(const char *path, const void *data, size_t n) {
+    // A rename replaces a read-only file here (only the folder's permission counts) but not on Windows: a file the
+    // player made read-only stays as it is on both.
+    if (access(path, W_OK) && errno != ENOENT) return 0;
     char tmp[PATH_MAX + 48];
     int len = snprintf(tmp, sizeof tmp, "%s.%u.%u.tmp", path, plat_process_id(), plat_thread_id());
     if (len < 0 || len >= (int)sizeof tmp) return 0;
