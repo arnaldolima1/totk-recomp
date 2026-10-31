@@ -66,8 +66,9 @@ class App:
             self.icon = tk.PhotoImage(file=str(png))
             root.iconphoto(True, self.icon)
         root.protocol('WM_DELETE_WINDOW', self.on_close)
+        self.ui_font = 'Segoe UI' if os.name == 'nt' else 'DejaVu Sans'
         style = ttk.Style(root)
-        style.configure('Title.TLabel', font=('Segoe UI', 15, 'bold'))
+        style.configure('Title.TLabel', font=(self.ui_font, 15, 'bold'))
         style.configure('Notice.TLabel', background='#fff3cd', foreground='#664d03', padding=8)
         style.configure('Err.TLabel', foreground='#c01c28')
         style.configure('Version.TLabel', foreground='#808080')
@@ -219,7 +220,7 @@ class App:
         self.cancel_button.pack(side='right')
         self.log_toggle = self.button(bar, 'ui.show_log', self.toggle_log)
         self.log_toggle.pack(side='left')
-        self.run_header = ttk.Label(f, font=('Segoe UI', 11, 'bold'))
+        self.run_header = ttk.Label(f, font=(self.ui_font, 11, 'bold'))
         self.run_header.pack(anchor='w')
         self.step_rows = {}
         self.steps_box = ttk.Frame(f)
@@ -233,7 +234,7 @@ class App:
         self.warn_label = ttk.Label(f, wraplength=620, justify='left', foreground='#9a6700')
         self.warn_label.pack(anchor='w')
         self.log_frame = ttk.Frame(f)
-        self.log = tk.Text(self.log_frame, height=10, wrap='word', state='disabled', font=('Consolas', 9))
+        self.log = tk.Text(self.log_frame, height=10, wrap='word', state='disabled', font=('Consolas' if os.name == 'nt' else 'DejaVu Sans Mono', 9))
         scroll = ttk.Scrollbar(self.log_frame, command=self.log.yview)
         self.log.configure(yscrollcommand=scroll.set)
         scroll.pack(side='right', fill='y')
@@ -378,7 +379,7 @@ class App:
             glyph.configure(text=GLYPH[state], foreground=COLOR[state])
             name.configure(text=self.cat('step.' + s) + (f'  ({self.cat("ui.state_" + state)})'
                                                           if state in (SKIPPED, FAILED) else ''),
-                           font=('Segoe UI', 10, 'bold') if state == RUNNING else ('Segoe UI', 10))
+                           font=(self.ui_font, 10, 'bold') if state == RUNNING else ('Segoe UI', 10))
         mode = m.mode or 'install'
         self.run_header.configure(text=self.cat('ui.running_' + mode if mode in ('install', 'resume', 'update')
                                                 else 'ui.running_install'))

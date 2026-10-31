@@ -122,6 +122,8 @@ def fetch(name):
     url, want = PINS[name]
     DL.mkdir(parents=True, exist_ok=True)
     path = DL / Path(url.split('?')[0]).name.replace('%7E', '~')
+    if name in ('tcl-linux-src', 'tk-linux-src'):
+        path = DL / f'{name}-9.0.4.tar.gz'   # upstream archives have identical basenames
     if name == 'libvpx-src':
         path = DL / 'libvpx-1.17.0.tar.gz'
     if not path.is_file():
