@@ -225,9 +225,10 @@ for p in files:
         MALS[m[1]] = (int(m[2]), p)
 MALS = sorted(p for _, p in MALS.values())
 LAYOUT_MSG = 'LayoutMsg/DoCommand_00.msbt'
-# The resource size table, likewise the newest version in the RomFS.
-RESTBL = max((p for p in files if re.fullmatch(r'System/Resource/ResourceSizeTable\.Product\.\d+\.[\w.]*rsizetable\.zs', p)),
-             key=lambda p: int(re.search(r'\.Product\.(\d+)\.', p)[1]), default=None)
+# The resource size table (System/Resource/ResourceSizeTable.Product.<n>...rsizetable.zs, matched as loosely as
+# MacNativeGames make_button_icons.py does), likewise the newest version in the RomFS.
+RESTBL = max((p for p in files if p.startswith('System/Resource/ResourceSizeTable.') and p.endswith('.rsizetable.zs')),
+             key=lambda p: int((re.search(r'\.(\d+)\.', p) or [0, 0])[1]), default=None)
 by_position = args.prompts == 'xbox'   # the face buttons' prompts swapped to the labels (pad_layout = nintendo)
 if args.prompts:
     assert FONTS, 'no Font/Font*.Nin_NX_NVN.bfarc.zs in the RomFS'

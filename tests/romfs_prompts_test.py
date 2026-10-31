@@ -43,7 +43,9 @@ FACE = {'A': 0xE040, 'B': 0xE041, 'X': 0xE042, 'Y': 0xE043}
 DRAWN = {0xE044: 820, 0xE045: 820, 0xE046: 760, 0xE047: 760, 0xE04B: 640, 0xE04C: 640, 0xE049: 640,
          **{cp: 640 for cp in range(0xE060, 0xE066)}}
 
-VERSIONS = {'v121': dict(common='110', size=72, newest=121), 'v143': dict(common='140', size=108, newest=143)}
+# restbl: the resource size table's name after its version, in both forms the tool takes.
+VERSIONS = {'v121': dict(common='110', size=72, newest=121, restbl='Nin_NX_NVN.rsizetable.zs'),
+            'v143': dict(common='140', size=108, newest=143, restbl='rsizetable.zs')}
 DEFAULT_FONT, REGIONAL_FONT = 'Font/Font.Nin_NX_NVN.bfarc.zs', 'Font/Font_KRko.Nin_NX_NVN.bfarc.zs'
 PANES = {'T_A_00': 'A', 'T_B_00': 'B', 'T_X_00': 'X', 'T_Y_00': 'Y', 'T_Name_00': 'A'}
 MESSAGES = {**PANES, 'Greeting': 'Hello'}
@@ -308,8 +310,8 @@ class Romfs:
         self.common = f'UI/LayoutArchive/Common.Product.{v["common"]}.Nin_NX_NVN.blarc.zs'
         self.mals = [f'Mals/EUen.Product.{v["newest"]}.sarc.zs', f'Mals/USen.Product.{v["newest"]}.sarc.zs']
         self.old_mals = 'Mals/USen.Product.110.sarc.zs'
-        self.restbl = f'System/Resource/ResourceSizeTable.Product.{v["newest"]}.Nin_NX_NVN.rsizetable.zs'
-        self.old_restbl = 'System/Resource/ResourceSizeTable.Product.100.Nin_NX_NVN.rsizetable.zs'
+        self.restbl = f'System/Resource/ResourceSizeTable.Product.{v["newest"]}.{v["restbl"]}'
+        self.old_restbl = f'System/Resource/ResourceSizeTable.Product.100.{v["restbl"]}'   # an older version's: left alone
         size = v['size']
         images = {f'Nt_KeyTex{b}_00': (R8_UNORM, size, rnd.randbytes(IMAGE)) for b in 'ABXY'}
         images.update({'Nt_KeyTexL_00^z': (l_format, size, rnd.randbytes(IMAGE)),
