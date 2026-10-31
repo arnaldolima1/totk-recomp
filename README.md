@@ -28,7 +28,7 @@ Report problems as issues, following [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - Linux and the Steam Deck
 - Mods made for emulators: unpack a mod into a `mods` folder
-- Ultrawide on 1.2.1 (1.4.3 has it for 2560x1080, 3440x1440, 3840x1600 and 5120x2160; other shapes get the wide camera with a 16:9 HUD)
+- Ultrawide on 1.2.1 (1.4.3 has it for 2560x1080, 3440x1440, 3840x1600, 5120x2160, 3840x1080 and 5120x1440; other shapes get the wide camera with a 16:9 HUD)
 - VRR
 
 ## Installing

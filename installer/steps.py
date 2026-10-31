@@ -582,7 +582,8 @@ class Compile(Step):
 TRANSLATED = re.compile(r'gfx_shader: prepare: (\d+) of (\d+) pairs')
 
 
-WIDE_SIZES = ('2560x1080', '3440x1440', '3840x1600', '5120x2160')   # runtime/ui/menu.cpp row_output_res
+# 21:9 and 32:9 monitor sizes, as runtime/ui/menu.cpp row_output_res lists them
+WIDE_SIZES = ('2560x1080', '3440x1440', '3840x1600', '5120x2160', '3840x1080', '5120x1440')
 
 
 class Prepare(Step):
