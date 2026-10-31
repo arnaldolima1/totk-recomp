@@ -9,8 +9,8 @@ axis (scale x = 16/9 over the aspect when wider, scale y = the aspect over 16/9 
 cover the whole screen are stretched back, and the HUD's parts move out to the screen's corners (wider) or its top and
 bottom edges (narrower). The pane list and the distances are the ones the community TOTK-Ultrawide mod for emulators
 found for 1.0.0 .. 1.2.1 (GPL; only those values are taken, no code; THIRD_PARTY_NOTICES.md). This is an independent
-implementation, checked against 1.4.3's Common.Product.140: every pane is found by name and every pane field and
-animation key holds the value the edit expects before it is written.
+implementation, checked against 1.2.1's Common.Product.110 and 1.4.3's Common.Product.140: every pane is found by name
+and every pane field and animation key holds the value the edit expects before it is written.
 """
 import struct
 
