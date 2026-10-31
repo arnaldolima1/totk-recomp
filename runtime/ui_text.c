@@ -53,7 +53,8 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_OUTPUT_RES] = "Game resolution",
     [UI_MENU_OUTPUT_RES_DESC] = "The size the game draws its picture and interface in. Above 1920 x 1080 the game needs "
                                 "more video memory and GPU time. A wider size (21:9) widens the camera's view and moves "
-                                "the HUD to the screen's corners.",
+                                "the HUD to the screen's corners; a taller one (16:10, Steam Deck) moves it to the top "
+                                "and bottom edges.",
     [UI_MENU_RENDER_SCALE] = "3D render scale",
     [UI_MENU_RENDER_SCALE_DESC] = "Size of the 3D scene relative to the game resolution; the game's FSR scales it to "
                                   "that size. Above 100 % smooths jagged edges (supersampling) at a high GPU cost.",
@@ -72,7 +73,8 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_FPS_LIMIT] = "Frame rate limit",
     [UI_MENU_FPS_LIMIT_DESC] = "The most frames per second the game draws. Above 60 is experimental and needs Game speed "
                                "follows the clock.",
-    [UI_MENU_FPS_30] = "30 FPS", [UI_MENU_FPS_60] = "60 FPS", [UI_MENU_FPS_90] = "90 FPS", [UI_MENU_FPS_120] = "120 FPS", [UI_MENU_FPS_144] = "144 FPS",
+    [UI_MENU_FPS_30] = "30 FPS", [UI_MENU_FPS_40] = "40 FPS", [UI_MENU_FPS_45] = "45 FPS",
+    [UI_MENU_FPS_60] = "60 FPS", [UI_MENU_FPS_90] = "90 FPS", [UI_MENU_FPS_120] = "120 FPS", [UI_MENU_FPS_144] = "144 FPS",
     // the monitor's refresh rate; printf format with the rate in Hz when it is known
     [UI_MENU_FPS_DISPLAY] = "Monitor rate", [UI_MENU_FPS_DISPLAY_HZ] = "Monitor rate (%.0f Hz)",
     [UI_MENU_REALTIME] = "Game speed follows the clock",
@@ -87,9 +89,10 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_OPERATION_MODE_DESC] = "Whether the game thinks it runs docked or handheld.",
     [UI_MENU_MODE_DOCKED] = "Docked", [UI_MENU_MODE_HANDHELD] = "Handheld",
     [UI_MENU_ASSUME_FOCUS] = "Keep running out of focus",
-    [UI_MENU_ASSUME_FOCUS_DESC] = "The game pauses when its window loses focus, as it does on the Switch when Home is "
-                                  "pressed. On, it keeps running while you are in another window, and the keyboard "
-                                  "stays quiet until the window is in front again.",
+    [UI_MENU_ASSUME_FOCUS_DESC] = "On (the default), the game keeps running while you are in another window, and the "
+                                  "keyboard stays quiet until the window is in front again. Off, it pauses when its "
+                                  "window loses focus, as on the Switch when Home is pressed; a load interrupted that "
+                                  "way can stop for good.",
 
     [UI_MENU_VOLUME] = "Volume", [UI_MENU_VOLUME_DESC] = "Master volume of the game.",
 
@@ -119,7 +122,7 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_PROMPTS_MISSING] = "prompt files missing: run the setup again",
     [UI_MENU_PROMPTS_FAILED] = "prompt files damaged: run the setup again",
     [UI_MENU_PROMPTS_RESTART] = "prompts change after restart",
-    [UI_MENU_PROMPTS_OFF_WIDE] = "off with a wide game resolution",
+    [UI_MENU_PROMPTS_OFF_SHAPE] = "off at a game resolution not 16:9",
     [UI_MENU_PROMPTS_OFF_MODS] = "off: a RomFS mod replaces their files",
     [UI_MENU_PROMPTS_OFF_PATCHES] = "off while TOTK_ROMFS_PATCHES is set",
     [UI_MENU_RESTART] = "Restart now",
@@ -311,7 +314,8 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_OUTPUT_RES] = "Разрешение игры",
     [UI_MENU_OUTPUT_RES_DESC] = "Размер, в котором игра рисует картинку и интерфейс. Выше 1920 × 1080 игре нужно больше "
                                 "видеопамяти и времени GPU. Более широкий размер (21:9) расширяет обзор камеры и "
-                                "переносит интерфейс в углы экрана.",
+                                "переносит интерфейс в углы экрана, более высокий (16:10, Steam Deck) переносит его к "
+                                "верхнему и нижнему краям.",
     [UI_MENU_RENDER_SCALE] = "Масштаб 3D-отрисовки",
     [UI_MENU_RENDER_SCALE_DESC] = "Размер 3D-сцены относительно разрешения игры; FSR игры доводит её до этого размера. "
                                   "Выше 100 % сглаживает лесенки на краях (суперсэмплинг) ценой большой нагрузки на GPU.",
@@ -330,7 +334,8 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_FPS_LIMIT] = "Ограничение частоты кадров",
     [UI_MENU_FPS_LIMIT_DESC] = "Наибольшее число кадров в секунду. Выше 60 — экспериментальный режим, нужна «Скорость "
                                "игры по часам».",
-    [UI_MENU_FPS_30] = "30 FPS", [UI_MENU_FPS_60] = "60 FPS", [UI_MENU_FPS_90] = "90 FPS", [UI_MENU_FPS_120] = "120 FPS", [UI_MENU_FPS_144] = "144 FPS",
+    [UI_MENU_FPS_30] = "30 FPS", [UI_MENU_FPS_40] = "40 FPS", [UI_MENU_FPS_45] = "45 FPS",
+    [UI_MENU_FPS_60] = "60 FPS", [UI_MENU_FPS_90] = "90 FPS", [UI_MENU_FPS_120] = "120 FPS", [UI_MENU_FPS_144] = "144 FPS",
     [UI_MENU_FPS_DISPLAY] = "Как у монитора", [UI_MENU_FPS_DISPLAY_HZ] = "Как у монитора (%.0f Гц)",
     [UI_MENU_REALTIME] = "Скорость игры по часам",
     [UI_MENU_REALTIME_DESC] = "Игра идёт по реальному времени, медленный кадр её не замедляет.",
@@ -344,9 +349,10 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_OPERATION_MODE_DESC] = "Игра считает, что консоль в док-станции или в портативном режиме.",
     [UI_MENU_MODE_DOCKED] = "В док-станции", [UI_MENU_MODE_HANDHELD] = "Портативный",
     [UI_MENU_ASSUME_FOCUS] = "Работать без фокуса",
-    [UI_MENU_ASSUME_FOCUS_DESC] = "Игра встаёт на паузу, когда окно теряет фокус, как на Switch при нажатии Home. "
-                                  "Включено: игра идёт, пока вы в другом окне, а клавиатура не действует, пока "
-                                  "окно не вернётся на передний план.",
+    [UI_MENU_ASSUME_FOCUS_DESC] = "Включено (по умолчанию): игра идёт, пока вы в другом окне, а клавиатура не "
+                                  "действует, пока окно не вернётся на передний план. Выключено: игра встаёт на паузу, "
+                                  "когда окно теряет фокус, как на Switch при нажатии Home; прерванная так загрузка "
+                                  "может остановиться насовсем.",
 
     [UI_MENU_VOLUME] = "Громкость", [UI_MENU_VOLUME_DESC] = "Общая громкость игры.",
 
@@ -376,7 +382,7 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_PROMPTS_MISSING] = "нет файлов подсказок: запустите установку снова",
     [UI_MENU_PROMPTS_FAILED] = "файлы подсказок повреждены: запустите установку снова",
     [UI_MENU_PROMPTS_RESTART] = "подсказки сменятся после перезапуска",
-    [UI_MENU_PROMPTS_OFF_WIDE] = "выкл. при широком разрешении игры",
+    [UI_MENU_PROMPTS_OFF_SHAPE] = "выкл. при разрешении игры не 16:9",
     [UI_MENU_PROMPTS_OFF_MODS] = "выкл.: мод RomFS заменяет их файлы",
     [UI_MENU_PROMPTS_OFF_PATCHES] = "выкл., пока задан TOTK_ROMFS_PATCHES",
     [UI_MENU_RESTART] = "Перезапустить сейчас",

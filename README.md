@@ -19,6 +19,7 @@ Report problems as issues, following [CONTRIBUTING.md](CONTRIBUTING.md).
 - Game updates 1.2.1 and 1.4.3, with saves that carry over between them
 - 60 fps by default; up to 144 fps or the monitor's refresh rate (experimental)
 - Custom resolutions (1080p, 2k...), supersampling and AMD FSR 1 upscaling
+- 16:10 (Steam Deck, handhelds), 21:9 and 32:9 (ultrawide) game resolutions on 1.4.3, with the camera and the interface in that shape
 - In-game settings menu (F1) and performance overlay (F10)
 - Keyboard, mouse and gamepad with remapping, rumble and gyro
 - Xbox button prompts: LB, RB, LT, RT, Menu and View, and A, B, X and Y as labelled on the button to press, with either button layout
@@ -28,7 +29,7 @@ Report problems as issues, following [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - Linux and the Steam Deck
 - Mods made for emulators: unpack a mod into a `mods` folder
-- Ultrawide on 1.2.1 (1.4.3 has it for 2560x1080, 3440x1440, 3840x1600, 5120x2160, 3840x1080 and 5120x1440; other shapes get the wide camera with a 16:9 HUD)
+- 16:10 and ultrawide on 1.2.1
 - VRR
 
 ## Installing

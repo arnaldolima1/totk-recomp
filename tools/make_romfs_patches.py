@@ -11,10 +11,11 @@ captured at once (upstream checked weapon, shield, material and ability wheel at
 The game-over flow fix of the same upstream script is 1.0.0 only (1.2.1 and 1.4.3 run DmF_SY_GameOver.110) and is
 left out.
 
---aspect <w>x<h> (a game resolution wider than 16:9, such as 3440x1440) also lays the UI out for that shape
-(tools/ultrawide_layout.py): menus stay 16:9 in the middle, full-screen backgrounds cover the width and the HUD moves
-to the screen's corners. totk.exe loads that overlay from romfs-patches-<w>x<h> when the game resolution is that size
-(runtime/romfs.c overlay_init); the camera's side of it is the patch set aspect (recomp/patches-v143.txt).
+--aspect <w>x<h> (a game resolution of another shape than 16:9, such as 3440x1440 or 1280x800) also lays the UI out
+for that shape (tools/ultrawide_layout.py): menus keep their 16:9 proportions in the middle, full-screen backgrounds
+cover the screen and the HUD moves to the screen's corners (wider) or its top and bottom edges (narrower). totk.exe
+loads that overlay from romfs-patches-<w>x<h> when the game resolution is that size (runtime/romfs.c overlay_init);
+the camera's side of it is the patch set aspect (recomp/patches-v143.txt).
 
 --prompts xbox | xbox-label: the same overlay with Xbox button icons in the game's prompts, for prompts = xbox
 (runtime/romfs.c overlay_init loads romfs-patches-xbox or romfs-patches-xbox-label in place of romfs-patches). Drawn
@@ -56,7 +57,7 @@ ap.add_argument('--version', choices=('v121', 'v143'), default='v121')
 ap.add_argument('--romfs', type=Path, help='default build/extracted/<version>/romfs')
 ap.add_argument('--out', type=Path,
                 help='default build/<version>/romfs-patches (romfs-patches-<style> with --prompts)')
-ap.add_argument('--aspect', help='<w>x<h> of a game resolution wider than 16:9: also lay the UI out for it')
+ap.add_argument('--aspect', help='<w>x<h> of a game resolution of another shape than 16:9: also lay the UI out for it')
 ap.add_argument('--prompts', choices=('xbox', 'xbox-label'),
                 help='Xbox button icons in the prompts: xbox for pad_layout = nintendo (A shown as B, X as Y), '
                      'xbox-label for pad_layout = xbox or auto (the face buttons keep their letters)')

@@ -35,7 +35,7 @@ static const char *const known[] = {
     "BIND_LSTICK_RIGHT", "BIND_LSTICK_UP", "BIND_MINUS",
     "BIND_PLUS", "BIND_R", "BIND_RCLICK", "BIND_RIGHT", "BIND_RSTICK_DOWN", "BIND_RSTICK_LEFT", "BIND_RSTICK_RIGHT", "BIND_RSTICK_UP",
     "BIND_SKIP", "BIND_STATS", "BIND_UP", "BIND_X", "BIND_Y",
-    "BIND_ZL", "BIND_ZR", "BLOCK_VIEWS_3D", "CLOTH_REALTIME", "CORE_DIAG", "CRIT", "CRIT_OUT", "DESC_TEMPLATE", "DUMP", "DUMP_BUF", "DUMP_DIR", "DUMP_LOG",
+    "BIND_ZL", "BIND_ZR", "BLOCK_VIEWS_3D", "CLOTH_REALTIME", "CORE_DIAG", "CRIT", "CRIT_OUT", "DESC_TEMPLATE", "DEVICE_PROFILE", "DUMP", "DUMP_BUF", "DUMP_DIR", "DUMP_LOG",
     "EXEFS", "FEEDBACK", "FIX_C0", "FIX_ZERO", "FLIGHT", "FLIGHT_AT", "FLIGHT_DIR", "FLIGHT_FRAMES", "FLIGHT_SPIKE_MS",
     "FLIGHT_THUMBS", "FPS60", "FPS_LIMIT", "FREEZE_IDLE", "FREE_CORES", "FULLSCREEN", "GPL", "GPL_DRAW_BUILD", "GPU",
     "GPU_INDEX", "GPU_NAME", "HIGHFPS_FIX", "INPUT", "INPUT_RECORD", "INPUT_SCRIPT", "LANG", "LIB_PREBUILD",
@@ -59,7 +59,8 @@ static const struct { const char *key, *section; } sections[] = {
     {"REALTIME", "frame rate"}, {"CLOTH_REALTIME", "frame rate"}, {"HIGHFPS_FIX", "frame rate"},
     {"FULLSCREEN", "display"}, {"WINDOW_SIZE", "display"}, {"PERF_OVERLAY", "display"}, {"VK_PRESENT", "display"},
     {"GPU_INDEX", "display"}, {"OUTPUT_RES", "display"}, {"RENDER_SCALE", "display"}, {"UPSCALER", "display"},
-    {"SHARPNESS", "display"}, {"ASPECT", "display"}, {"ASSUME_FOCUS", "display"},
+    {"SHARPNESS", "display"}, {"ASPECT", "display"},
+    {"DEVICE_PROFILE", "display"}, {"ASSUME_FOCUS", "display"},
     {"MENU_LANG", "language"}, {"LANG", "language"}, {"OPERATION_MODE", "language"},
     {"VOLUME", "audio"},
     {"MOTION", "input"}, {"RUMBLE_STRENGTH", "input"}, {"RUMBLE_CURVE", "input"}, {"RUMBLE_TRIGGERS", "input"},
@@ -96,13 +97,14 @@ static const CfgMeta metas[] = {
     {"OUTPUT_RES", "1920x1080", NULL, RESTART}, {"RENDER_SCALE", "game", "game|50|67|75|100|125|150|200", RESTART},
     {"UPSCALER", "fsr", "fsr|bilinear", LIVE}, {"SHARPNESS", "80", "0..100", LIVE},
     {"ASPECT", "fit", "fit|stretch", LIVE},
+    {"DEVICE_PROFILE", "auto", "auto|desktop|deck", RESTART},
     // Game
-    {"FPS_LIMIT", "60", "30|60|90|120|144|display", LIVE}, {"FPS60", "1", "0|1", LIVE},
+    {"FPS_LIMIT", "60", "30|40|45|60|90|120|144|display", LIVE}, {"FPS60", "1", "0|1", LIVE},
     {"REALTIME", "1", "0|1", RESTART}, {"CLOTH_REALTIME", "1", "0|1", RESTART},
     {"HIGHFPS_FIX", "1", "0|1", RESTART},
     {"LANG", "", "ja|en-US|fr|de|it|es|zh-CN|ko|nl|pt|ru|zh-TW|en-GB|fr-CA|es-419|zh-Hans|zh-Hant|pt-BR", RESTART},
     {"OPERATION_MODE", "docked", "docked|handheld", RESTART},
-    {"ASSUME_FOCUS", "0", "0|1", LIVE},   // read on every focus change (ov_system.c)
+    {"ASSUME_FOCUS", "1", "0|1", LIVE},   // read on every focus change (ov_system.c)
     // Sound, Controls, Menu
     {"VOLUME", "100", "0..100", LIVE},
     {"MOTION", "1", "0|1", LIVE}, {"RUMBLE_STRENGTH", "130", "0..300", LIVE}, {"RUMBLE_CURVE", "0.6", "0.2..1.5", LIVE},
@@ -169,11 +171,11 @@ static void add(char *key, char *value, int line) {
     for (int i = 0; i < n_entries; i++)
         if (!strcmp(entries[i].key, key)) {   // a repeated key: the later line wins
             free(entries[i].value);
-            entries[i].value = _strdup(value);
+            entries[i].value = strdup(value);
             return;
         }
     if (n_entries == CFG_MAX_KEYS) return;
-    entries[n_entries++] = (CfgEntry){_strdup(key), _strdup(value), 0, 0};
+    entries[n_entries++] = (CfgEntry){strdup(key), strdup(value), 0, 0};
 }
 
 // 0.1.9 had the Xbox prompts as a pad layout: pad_layout = xbox_prompts is pad_layout = nintendo with prompts = xbox.
@@ -185,11 +187,11 @@ static void migrate(void) {
         if (!strcmp(entries[i].key, "PAD_LAYOUT")) layout = &entries[i];
         if (!strcmp(entries[i].key, "PROMPTS")) prompts = &entries[i];
     }
-    if (!layout || _stricmp(layout->value, "xbox_prompts")) return;
+    if (!layout || strcasecmp(layout->value, "xbox_prompts")) return;
     free(layout->value);
-    layout->value = _strdup("nintendo");
+    layout->value = strdup("nintendo");
     layout->dirty = 1;
-    if (!prompts && n_entries < CFG_MAX_KEYS) entries[n_entries++] = (CfgEntry){_strdup("PROMPTS"), _strdup("xbox"), 1, 0};
+    if (!prompts && n_entries < CFG_MAX_KEYS) entries[n_entries++] = (CfgEntry){strdup("PROMPTS"), strdup("xbox"), 1, 0};
     rt_log("cfg: totk.ini pad_layout = xbox_prompts is read as pad_layout = nintendo and prompts = %s",
            prompts ? prompts->value : "xbox");
 }
@@ -221,14 +223,74 @@ int cfg_load(const char *path) {
     return 1;
 }
 
-const char *cfg_get(const char *name) {
+// ---- device profiles: defaults for a known machine, below the environment and totk.ini and above the table, so any
+// key the player sets wins and resetting a key in the menu returns to the profile's value. TOTK_DEVICE_PROFILE = auto
+// (default: the Steam Deck when the firmware says so), desktop (none) or deck.
+//
+// The Steam Deck (LCD Jupiter, OLED Galileo; 1280x800, 16:10, 4 Zen 2 cores, RDNA 2 with 8 CUs sharing 16 GB): the game
+// at the screen's 1280x800 with its own 5/6 scene (on 1.4.3 the aspect patch gives the camera its 16:10, resolution.c,
+// and the romfs-patches-1280x800 overlay the HUD's);
+// fullscreen and vsync, as gamescope composes Game Mode; 40 fps, which divides 40 Hz (and 120 Hz on the OLED).
+// Starting points to replace with measured ones (docs/tester-guide.md, Steam Deck).
+static const struct { const char *key, *value; } DECK[] = {
+    {"FULLSCREEN", "1"}, {"WINDOW_SIZE", "1280x800"}, {"OUTPUT_RES", "1280x800"}, {"RENDER_SCALE", "game"},
+    {"VK_PRESENT", "fifo"}, {"FPS_LIMIT", "40"},
+};
+static int profile = -1;   // 0 none, 1 Steam Deck
+
+static int read_line(const char *path, char *out, size_t n) {
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    int ok = fgets(out, (int)n, f) != NULL;
+    fclose(f);
+    out[ok ? strcspn(out, "\r\n") : 0] = 0;
+    return ok;
+}
+
+// The Steam Deck: Valve's board, product Jupiter or Galileo (/sys/class/dmi/id); SteamDeck=1, which Steam sets on it.
+static int on_steam_deck(void) {
+    const char *env = getenv("SteamDeck");
+    if (env && !strcmp(env, "1")) return 1;
+    char vendor[64], product[64];
+    return read_line("/sys/class/dmi/id/board_vendor", vendor, sizeof vendor) && !strcmp(vendor, "Valve") &&
+           read_line("/sys/class/dmi/id/product_name", product, sizeof product) &&
+           (!strcmp(product, "Jupiter") || !strcmp(product, "Galileo"));
+}
+
+static const char *raw_get(const char *name);
+
+static int profile_of(void) {
+    int p = __atomic_load_n(&profile, __ATOMIC_ACQUIRE);
+    if (p >= 0) return p;
+    const char *set = raw_get(PREFIX "DEVICE_PROFILE");
+    if (set && !strcmp(set, "deck")) p = 1;
+    else if (set && *set && strcmp(set, "auto")) p = 0;
+    else p = on_steam_deck();
+    __atomic_store_n(&profile, p, __ATOMIC_RELEASE);
+    return p;
+}
+
+const char *cfg_device_profile(void) { return profile_of() ? "deck" : "desktop"; }
+
+static const char *raw_get(const char *name) {
     const char *e = getenv(name);
     if (e || strncmp(name, PREFIX, PREFIX_LEN)) return e;
     int n = __atomic_load_n(&n_entries, __ATOMIC_ACQUIRE);
     for (int i = 0; i < n; i++)
-        if (!_stricmp(entries[i].key, name + PREFIX_LEN)) return __atomic_load_n(&entries[i].value, __ATOMIC_ACQUIRE);
+        if (!strcasecmp(entries[i].key, name + PREFIX_LEN)) return __atomic_load_n(&entries[i].value, __ATOMIC_ACQUIRE);
     return NULL;
 }
+
+const char *cfg_get(const char *name) {
+    const char *v = raw_get(name);
+    if (v || strncmp(name, PREFIX, PREFIX_LEN) || !profile_of()) return v;
+    for (size_t i = 0; i < sizeof DECK / sizeof *DECK; i++)
+        if (!strcasecmp(DECK[i].key, name + PREFIX_LEN)) return DECK[i].value;
+    return NULL;
+}
+
+// Whether name's value comes from the player (the environment or totk.ini), not a profile or the table.
+int cfg_is_set(const char *name) { return raw_get(name) != NULL; }
 
 unsigned cfg_version(void) { return __atomic_load_n(&version, __ATOMIC_ACQUIRE); }
 
@@ -244,12 +306,12 @@ void cfg_set(const char *name, const char *value) {
     while (i < n && strcmp(entries[i].key, key)) i++;
     if (i < n) {
         if (!entries[i].value || strcmp(entries[i].value, value)) {
-            __atomic_store_n(&entries[i].value, _strdup(value), __ATOMIC_RELEASE);   // the old string stays for readers
+            __atomic_store_n(&entries[i].value, strdup(value), __ATOMIC_RELEASE);   // the old string stays for readers
             entries[i].dirty = 1;
         }
         entries[i].removed = 0;   // a value set after cfg_reset replaces the line instead of deleting it
     } else if (n < CFG_MAX_KEYS) {
-        entries[n] = (CfgEntry){_strdup(key), _strdup(value), 1, 0};
+        entries[n] = (CfgEntry){strdup(key), strdup(value), 1, 0};
         __atomic_store_n(&n_entries, n + 1, __ATOMIC_RELEASE);
     }
     __atomic_add_fetch(&version, 1, __ATOMIC_RELEASE);
@@ -269,7 +331,7 @@ int cfg_reset(const char *const *keys, int n) {
         while (i < n_entries && strcmp(entries[i].key, name)) i++;
         if (i == n_entries) {   // no value in memory ("key =" in the file): the line still has to go
             if (i == CFG_MAX_KEYS) continue;
-            entries[i] = (CfgEntry){_strdup(name), NULL, 0, 1};
+            entries[i] = (CfgEntry){strdup(name), NULL, 0, 1};
             __atomic_store_n(&n_entries, i + 1, __ATOMIC_RELEASE);
         } else if (entries[i].value) {
             __atomic_store_n(&entries[i].value, NULL, __ATOMIC_RELEASE);   // the old string stays for readers
@@ -565,7 +627,7 @@ static int find_ini(void) {
     if (ini_path[0]) return 1;
     char path[1024];
     if (!plat_exe_path(path, sizeof path)) return 0;
-    char *cut = strrchr(path, '\\');
+    char *cut = plat_last_sep(path);
     if (!cut) cut = strrchr(path, '/');
     if (!cut || cut + 10 >= path + sizeof path) return 0;
     strcpy(cut + 1, "totk.ini");
@@ -579,7 +641,7 @@ int cfg_save(void) {
     return 0;
 }
 
-void cfg_init(void) {
+static void load_ini(void) {
     if (!find_ini()) return;
     if (!cfg_load(ini_path)) {
         rt_log("cfg: no settings file at %s", ini_path);
@@ -591,4 +653,11 @@ void cfg_init(void) {
         snprintf(var, sizeof var, PREFIX "%s", entries[i].key);
         if (getenv(var)) rt_log("cfg: %s is set in the environment and overrides totk.ini", var);
     }
+}
+
+void cfg_init(void) {
+    load_ini();
+    if (profile_of())
+        rt_log("cfg: device profile Steam Deck: defaults for the keys totk.ini does not set (TOTK_DEVICE_PROFILE=desktop "
+               "turns it off)");
 }

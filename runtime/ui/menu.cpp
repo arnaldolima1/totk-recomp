@@ -1,6 +1,6 @@
 // The in-game menu core: Dear ImGui state, the event queue the window adapter fills, gamepad navigation, the Vulkan back
 // end on our device and the menu's pages. Free of any window system (menu.h). ImGui runs on the present path only,
-// under gfx_window.c's present lock; the event functions only queue.
+// under gfx_present.c's present lock; the event functions only queue.
 //
 // The Vulkan set-up follows LAS Recomp's runtime/nvn/vulkan/imgui_glue.cpp (https://github.com/peiikai/LASRecomp @
 // da35b83a9611d046a9a681aae668d7085954d37f, MIT, Copyright (c) 2026 Peiikai): dynamic rendering into the swapchain
@@ -239,7 +239,7 @@ static int vk_up(const MenuTarget *t) {
     ii.Queue = t->queue;
     ii.DescriptorPoolSize = 16;
     ii.MinImageCount = 2;
-    ii.ImageCount = 4;   // vertex buffers rotate per recorded frame: more than gfx_window.c's 2 frames in flight
+    ii.ImageCount = 4;   // vertex buffers rotate per recorded frame: more than gfx_present.c's 2 frames in flight
     ii.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
     ii.UseDynamicRendering = true;
     g_vk_fmt = t->format;
@@ -416,11 +416,13 @@ static void row_window_size(void) {
 }
 
 // The game resolution (resolution.c): 16:9 sizes from its smallest, 1280x720 (for weak GPUs), up, the common 21:9 and
-// 32:9 monitor sizes (the camera and the HUD follow a wider shape, resolution.c res_init; the installer lays the HUD out
-// for each, installer/steps.py WIDE_SIZES), and the current value when it is another size.
+// 32:9 monitor sizes and the 16:10 screens of the Steam Deck, handhelds and laptops (the camera and the HUD follow
+// another shape, resolution.c res_init; the installer lays the HUD out for each, installer/steps.py ASPECT_SIZES), and
+// the current value when it is another size.
 static void row_output_res(void) {
     static const char *const vals[] = {"1280x720", "1600x900", "1920x1080", "2560x1440", "3200x1800", "3840x2160",
-                                       "2560x1080", "3440x1440", "3840x1600", "5120x2160", "3840x1080", "5120x1440"};
+                                       "2560x1080", "3440x1440", "3840x1600", "5120x2160", "3840x1080", "5120x1440",
+                                       "1280x800", "1680x1050", "1920x1200", "2560x1600"};
     enum { N = sizeof vals / sizeof *vals };
     char shown[N][32];
     const char *names[N];
@@ -484,9 +486,10 @@ static void row_game_lang(void) {
 
 // The frame limit (frame_rate.c): unset, the older fps60 = 0 still means 30. The monitor choice shows the rate it gives.
 static void row_fps_limit() {
-    static const char *const vals[] = {"30", "60", "90", "120", "144", "display"};
-    static const UiTextId ids[] = {UI_MENU_FPS_30, UI_MENU_FPS_60, UI_MENU_FPS_90, UI_MENU_FPS_120, UI_MENU_FPS_144,
-                                    UI_MENU_FPS_DISPLAY};
+    // 40 and 45: the Steam Deck's screen runs at 40 to 60 Hz (the OLED to 90); 40 divides 40 and 120 Hz evenly
+    static const char *const vals[] = {"30", "40", "45", "60", "90", "120", "144", "display"};
+    static const UiTextId ids[] = {UI_MENU_FPS_30, UI_MENU_FPS_40,  UI_MENU_FPS_45,  UI_MENU_FPS_60,
+                                   UI_MENU_FPS_90, UI_MENU_FPS_120, UI_MENU_FPS_144, UI_MENU_FPS_DISPLAY};
     enum { N = sizeof vals / sizeof *vals };
     const char *names[N];
     for (int i = 0; i < N; i++) names[i] = menu_text(ids[i]);
@@ -577,8 +580,8 @@ static const char *pad_layout_note(void) {
 // The note under the prompts. The settings name a folder of prompts (input_prompts_folder: the prompts and the pad
 // layout, as a layout that puts A on the right button needs the face buttons named the other way round), but the game
 // reads its fonts and UI archive once at start (romfs.c overlay_init). While the folder in use differs: "files
-// missing" when the setup did not write the one asked for, why it was left out at start (damaged, a wide game
-// resolution, a RomFS mod with the same files, TOTK_ROMFS_PATCHES), else "prompts change after restart", and only then
+// missing" when the setup did not write the one asked for, why it was left out at start (damaged, a game resolution
+// that is not 16:9, a RomFS mod with the same files, TOTK_ROMFS_PATCHES), else "prompts change after restart", and only then
 // *restart is set: a restart would bring the prompts asked for. NULL when they match.
 static const char *prompts_note(bool *restart) {
     *restart = false;
@@ -588,7 +591,7 @@ static const char *prompts_note(bool *restart) {
     if (want && !romfs_prompts_ready(want)) return menu_text(UI_MENU_PROMPTS_MISSING);
     switch (romfs_prompts_off(want)) {
     case ROMFS_PROMPTS_FAILED: return menu_text(UI_MENU_PROMPTS_FAILED);
-    case ROMFS_PROMPTS_WIDE: return menu_text(UI_MENU_PROMPTS_OFF_WIDE);
+    case ROMFS_PROMPTS_SHAPE: return menu_text(UI_MENU_PROMPTS_OFF_SHAPE);
     case ROMFS_PROMPTS_MODS: return menu_text(UI_MENU_PROMPTS_OFF_MODS);
     case ROMFS_PROMPTS_PATCHES: return menu_text(UI_MENU_PROMPTS_OFF_PATCHES);
     default: *restart = true; return menu_text(UI_MENU_PROMPTS_RESTART);
@@ -770,7 +773,7 @@ static void tab_advanced(float scale) {
     static char rec_path[600];   // the recording goes beside the log
     if (!rec_path[0]) {
         char dir[512];
-        snprintf(rec_path, sizeof rec_path, "%s\\input-record.txt", sysinfo_log_folder(dir, sizeof dir) ? dir : ".");
+        snprintf(rec_path, sizeof rec_path, "%s/input-record.txt", sysinfo_log_folder(dir, sizeof dir) ? dir : ".");
     }
     row_set_or_not("TOTK_INPUT_RECORD", UI_MENU_INPUT_RECORD, UI_MENU_INPUT_RECORD_DESC, rec_path);
     if (opt_button("##open_log", UI_MENU_OPEN_LOG, UI_MENU_OPEN_LOG_DESC, action_value(log_note, UI_MENU_OPEN_LOG))) {
@@ -1015,7 +1018,7 @@ static void perf_label(UiTextId label, const ImVec4 &c) {
 static float perf_gb(float mb) { return mb < 0 ? -1 : mb / 1024; }
 
 // The picture lines: the window, the game image the present shows and the 3D scene it holds (resolution.c), how the
-// present scales the image to the window (gfx_window.c, the last present), the frame limit and the presentation mode
+// present scales the image to the window (gfx_present.c, the last present), the frame limit and the presentation mode
 // in use.
 static void perf_picture(const MenuTarget *t, const ImVec4 &c) {
     unsigned out[2], scene[2];
