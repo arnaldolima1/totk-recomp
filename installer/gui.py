@@ -67,6 +67,7 @@ class App:
             root.iconphoto(True, self.icon)
         root.protocol('WM_DELETE_WINDOW', self.on_close)
         self.ui_font = 'Segoe UI' if os.name == 'nt' else 'DejaVu Sans'
+        self.mono_font = 'Consolas' if os.name == 'nt' else 'DejaVu Sans Mono'
         style = ttk.Style(root)
         style.configure('Title.TLabel', font=(self.ui_font, 15, 'bold'))
         style.configure('Notice.TLabel', background='#fff3cd', foreground='#664d03', padding=8)
@@ -234,7 +235,7 @@ class App:
         self.warn_label = ttk.Label(f, wraplength=620, justify='left', foreground='#9a6700')
         self.warn_label.pack(anchor='w')
         self.log_frame = ttk.Frame(f)
-        self.log = tk.Text(self.log_frame, height=10, wrap='word', state='disabled', font=('Consolas' if os.name == 'nt' else 'DejaVu Sans Mono', 9))
+        self.log = tk.Text(self.log_frame, height=10, wrap='word', state='disabled', font=(self.mono_font, 9))
         scroll = ttk.Scrollbar(self.log_frame, command=self.log.yview)
         self.log.configure(yscrollcommand=scroll.set)
         scroll.pack(side='right', fill='y')
