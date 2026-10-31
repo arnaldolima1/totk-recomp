@@ -38,6 +38,7 @@ import subprocess
 import sys
 import tarfile
 import time
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -125,12 +126,26 @@ def fetch(name):
     if name == 'libvpx-src':
         path = DL / 'libvpx-1.17.0.tar.gz'
     if not path.is_file():
-        print(f'download {url}')
-        with urllib.request.urlopen(url) as r, open(path, 'wb') as f:
-            shutil.copyfileobj(r, f)
+        # into <name>.part, renamed once complete: a cut connection leaves a .part that the next run resumes, never a
+        # short file under the final name
+        part = path.with_name(path.name + '.part')
+        have = part.stat().st_size if part.is_file() else 0
+        print(f'download {url}' + (f' (resuming at {have} bytes)' if have else ''))
+        req = urllib.request.Request(url, headers={'Range': f'bytes={have}-'} if have else {})
+        try:
+            with urllib.request.urlopen(req) as r:
+                if have and r.status != 206:   # the server ignored the range: start over
+                    have = 0
+                with open(part, 'ab' if have else 'wb') as f:
+                    shutil.copyfileobj(r, f)
+        except urllib.error.HTTPError as e:
+            if e.code != 416:   # 416: the .part already holds the whole file
+                raise
+        part.replace(path)
     got = sha256_file(path)
     if got != want:
-        sys.exit(f'{path}: sha256 {got}, pinned {want}')
+        path.unlink()   # so the next run downloads it again instead of failing on the same file
+        sys.exit(f'{path}: sha256 {got}, pinned {want}; deleted, run again to download it anew')
     return path
 
 
