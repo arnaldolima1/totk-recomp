@@ -87,6 +87,14 @@ From the repository root, in PowerShell. Every step that depends on the game ver
    ```
 
    Lifting takes about 15 s, a clean compile about 200 s on 24 threads; later builds recompile only what changed.
+   A compiler cache in front of clang shortens it further: with `SCCACHE` set to an sccache executable, `build_game.py`
+   writes it into the ninja file ahead of `cc`, and every lift rewrites the generated chunks with the same contents, so
+   a second build of the same version hits all of their objects:
+
+   ```powershell
+   $env:SCCACHE = "path\to\sccache.exe"
+   .venv\Scripts\python tools\build_game.py --version <ver>
+   ```
    `--patches` builds in the frame-rate, resolution and other patch sets, switchable at run time. The link copies
    `SDL3.dll`, `libiconv-2.dll` and `libopus-0.dll` next to the exe.
    For Xbox button prompts, run `make_romfs_patches.py` once more with `--xbox-prompts`: it writes
