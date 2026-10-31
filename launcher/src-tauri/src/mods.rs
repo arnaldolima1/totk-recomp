@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 pub const SCRIPT: &str = include_str!("mods.py");
+pub const ADAPT_SCRIPT: &str = include_str!("adapt.py");
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct State {

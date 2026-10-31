@@ -488,9 +488,10 @@ $$('[data-preset]').forEach((b) => (b.onclick = async () => { await saveIni(PRES
 let mods = { mods: [], enabled: [], version: null, stale: false }, modsBusy = false;
 const AREAS = { Voice: 'vozes', Sound: 'sons', Mals: 'textos', UI: 'interface', Font: 'fontes', TexToGo: 'texturas',
   Model: 'modelos', System: 'sistema', Event: 'cenas', Movie: 'vídeos', Shader: 'shaders', Pack: 'pacotes' };
+const otherVersion = (m) => (m.made_for || []).filter((v) => v !== mods.version);
 function modProblem(m) {
   if (!m.romfs) return m.exefs ? 'Só tem exefs (código): o recomp não aceita' : 'Sem pasta romfs';
-  const other = (m.made_for || []).filter((v) => v !== mods.version);
+  const other = otherVersion(m);
   if (other.length) return `Feito para o jogo ${other.join(' / ')}; esta instalação é ${mods.version || '?'}`;
   return null;
 }
@@ -520,7 +521,7 @@ function renderMods() {
     a.innerHTML = `<div class="mod-art"><span class="mod-num">${m.files ? (m.files > 999 ? `${(m.files / 1000).toFixed(1)}k` : m.files) : '–'}</span><small>ARQUIVOS</small></div>
       <div class="mod-body"><div class="mod-head"><h3></h3>${problem ? '<span class="badge warn"></span>' : on ? '<span class="badge">Ligado</span>' : ''}</div>
       <p class="mod-info"></p><ul class="mod-tags"></ul></div>
-      <div class="mod-side"><button class="ghost small" data-up title="Subir">▲</button><button class="ghost small" data-down title="Descer">▼</button><button class="ghost small" data-del title="Apagar">×</button></div>
+      <div class="mod-side"><button class="gold small hidden" data-adapt></button><button class="ghost small" data-up title="Subir">▲</button><button class="ghost small" data-down title="Descer">▼</button><button class="ghost small" data-del title="Apagar">×</button></div>
       <label class="toggle mod-toggle" title="Ligar / desligar"><input type="checkbox" /><span class="knob"></span></label>`;
     a.querySelector('h3').textContent = name;
     if (problem) a.querySelector('.badge').textContent = problem;
@@ -537,6 +538,13 @@ function renderMods() {
       [e[i], e[j]] = [e[j], e[i]];
       applyMods(e);
     };
+    if (m.romfs && otherVersion(m).length) {   // made for another version: adapt.py makes a copy for this one
+      const b = a.querySelector('[data-adapt]');
+      b.classList.remove('hidden');
+      b.textContent = `Adaptar para ${mods.version}`;
+      b.disabled = modsBusy;
+      b.onclick = () => adaptMod(name);
+    }
     a.querySelector('[data-up]').onclick = () => move(-1);
     a.querySelector('[data-down]').onclick = () => move(1);
     a.querySelector('[data-up]').disabled = a.querySelector('[data-down]').disabled = !on || mods.enabled.length < 2 || modsBusy;
@@ -588,6 +596,39 @@ async function addMod(directory) {
   try { await invoke('mods_add', { path }); } catch (e) { showError('Não foi possível adicionar o mod', String(e)); }
   loadMods();
 }
+// A mod made for another game version: adapt.py (main.rs mods_adapt) writes "<name> (<version>)" into mods/ with the
+// text merged message by message, the size table rebuilt and the other version's layout archives left out.
+async function adaptMod(src) {
+  modsBusy = true;
+  renderMods();
+  $('#mods-status').textContent = 'Adaptando o mod para a versão instalada…';
+  $('#mods-bar').classList.remove('hidden', 'idle', 'error');
+  $('#mods-fill').style.width = '0%';
+  try {
+    const r = await invoke('mods_adapt', { src });
+    const text = Object.values(r.text || {}).reduce((a, t) => a + t.messages, 0);
+    const kept = Object.values(r.text || {}).reduce((a, t) => a + t.untranslated, 0);
+    const left = (r.left_out || []).map((x) => x.path.split('/').pop());
+    $('#mods-status').textContent = `Pronto: "${r.name}" criado (${r.copied + r.added} arquivos${text ? `, ${text} mensagens traduzidas, ${kept} novas da versão ficaram no original` : ''}).`
+      + (left.length ? ` Ficou de fora: ${left.join(', ')}.` : '') + ' Ligue-o abaixo.';
+  } catch (e) {
+    $('#mods-bar').classList.add('error');
+    $('#mods-status').textContent = '';
+    showError('Não foi possível adaptar o mod', String(e));
+  }
+  modsBusy = false;
+  $('#mods-bar').classList.add('hidden');
+  const keep = $('#mods-status').textContent;
+  await loadMods();
+  $('#mods-status').textContent = keep;
+}
+listen('adapt-progress', ({ payload: p }) => {
+  if (p.total) $('#mods-fill').style.width = `${(p.done / p.total) * 100}%`;
+});
+$('#mod-adapt-zip').onclick = async () => {
+  const path = await openDialog({ title: 'Mod feito para outra versão (.zip)', filters: [{ name: 'Zip', extensions: ['zip'] }] });
+  if (path) adaptMod(path);
+};
 $('#mod-add-dir').onclick = () => addMod(true);
 $('#mod-add-zip').onclick = () => addMod(false);
 $('#mod-refresh').onclick = () => loadMods();

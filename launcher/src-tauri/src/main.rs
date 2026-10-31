@@ -195,7 +195,9 @@ fn status(app: AppHandle, procs: State<Procs>) -> Status {
     let field = |path: &[&str]| -> Option<String> {
         path.iter().try_fold(state.as_ref()?, |v, k| v.get(k)).and_then(|v| v.as_str()).map(String::from)
     };
-    let finished = state.as_ref().and_then(|s| s["steps"].get("cleanup")).is_some();
+    // The installer records the steps that build something; check and cleanup run every time and are never recorded
+    // (installer/runner.py `always`), so a finished install is one whose last recorded step, prepare, is there.
+    let finished = state.as_ref().and_then(|s| s["steps"].get("prepare")).is_some();
     Status {
         installed: h.join(GAME_EXE).is_file() && finished,
         has_state: state.is_some(),
@@ -378,7 +380,12 @@ async fn releases(app: AppHandle) -> Result<Vec<release::Release>, String> {
 // ---------------------------------------------------------------- mods (mods.rs, mods.py)
 
 /// Runs mods.py with the release's Python in the install folder: its stdout lines, each a JSON object, go to `line`.
-fn run_mods_py(app: &AppHandle, args: &[String], mut line: impl FnMut(serde_json::Value)) -> Result<(), String> {
+fn run_mods_py(app: &AppHandle, args: &[String], line: impl FnMut(serde_json::Value)) -> Result<(), String> {
+    run_py(app, "mods.py", mods::SCRIPT, args, line)
+}
+
+/// Runs one of the launcher's scripts (mods.py, adapt.py) with the release's Python in the install folder.
+fn run_py(app: &AppHandle, name: &str, source: &str, args: &[String], mut line: impl FnMut(serde_json::Value)) -> Result<(), String> {
     let h = home(app);
     if !h.join("romfs-index.bin").is_file() {
         return Err("Instale o jogo antes de usar mods.".into());
@@ -387,8 +394,8 @@ fn run_mods_py(app: &AppHandle, args: &[String], mut line: impl FnMut(serde_json
     let py = python(&root).ok_or("O Python do instalador não foi encontrado.")?;
     let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let script = dir.join("mods.py");
-    std::fs::write(&script, mods::SCRIPT).map_err(|e| e.to_string())?;
+    let script = dir.join(name);
+    std::fs::write(&script, source).map_err(|e| e.to_string())?;
     let mut cmd = Command::new(py);
     cmd.arg(&script).args(args).arg("--home").arg(&h).current_dir(&h)
         .env("PYTHONNOUSERSITE", "1").env("PYTHONIOENCODING", "utf-8").env("PYTHONUTF8", "1")
@@ -411,7 +418,7 @@ fn run_mods_py(app: &AppHandle, args: &[String], mut line: impl FnMut(serde_json
     match (ok, last_error) {
         (true, _) => Ok(()),
         (false, Some(e)) => Err(e),
-        (false, None) => Err(err_text.lines().last().unwrap_or("mods.py falhou").to_string()),
+        (false, None) => Err(err_text.lines().last().map(String::from).unwrap_or_else(|| format!("{name} falhou"))),
     }
 }
 
@@ -472,6 +479,47 @@ async fn mods_apply(app: AppHandle, enabled: Vec<String>) -> Result<serde_json::
 async fn mods_add(app: AppHandle, path: String) -> Result<String, String> {
     let h = home(&app);
     tauri::async_runtime::spawn_blocking(move || mods::add(&h, Path::new(&path))).await.map_err(|e| e.to_string())?
+}
+
+/// Adapts a mod made for another game version to the installed one (adapt.py): a mod folder of mods/ or a folder or
+/// zip elsewhere becomes the new mod "<name> (<installed version>)" in mods/; "adapt-progress" events while it runs.
+/// Returns adapt.py's result (what was copied, merged and left out).
+#[tauri::command]
+async fn mods_adapt(app: AppHandle, src: String) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let h = home(&app);
+        let src_path = if mods::valid_name(&h, &src) { mods::dir(&h).join(&src) } else { PathBuf::from(&src) };
+        if !src_path.exists() {
+            return Err(format!("mod não encontrado: {src}"));
+        }
+        let version = install_state(&h).and_then(|s| s["version"].as_str().map(String::from)).unwrap_or_else(|| "adaptado".into());
+        let stem = src_path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "mod".into());
+        let stem = stem.trim_start_matches('.').trim().to_string();
+        let mut name = format!("{stem} ({version})");
+        let mut n = 2;
+        while mods::dir(&h).join(&name).exists() {
+            name = format!("{stem} ({version}) {n}");
+            n += 1;
+        }
+        let out = mods::dir(&h).join(&name);
+        let args = vec!["--src".to_string(), src_path.to_string_lossy().into_owned(), "--out".to_string(), out.to_string_lossy().into_owned()];
+        let mut result = serde_json::Value::Null;
+        let run = run_py(&app, "adapt.py", mods::ADAPT_SCRIPT, &args, |v| {
+            if v["type"] == "progress" {
+                let _ = app.emit("adapt-progress", v.clone());
+            } else if v["type"] == "result" {
+                result = v;
+            }
+        });
+        if let Err(e) = run {
+            let _ = std::fs::remove_dir_all(&out);
+            return Err(e);
+        }
+        result["name"] = serde_json::json!(name);
+        Ok(result)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Deletes a mod folder (the launcher asks first).
@@ -932,7 +980,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             status, set_home, set_release, get_source, set_source, installer_text, start_view, custom_art, read_ini, write_ini, releases,
-            download_release, cancel_download, find_game_files, mods_list, mods_apply, mods_add, mods_remove, start_build, cancel_build, launch_game, stop_game, log_tail, open_path,
+            download_release, cancel_download, find_game_files, mods_list, mods_apply, mods_add, mods_adapt, mods_remove, start_build, cancel_build, launch_game, stop_game, log_tail, open_path,
         ])
         .run(tauri::generate_context!())
         .expect("launcher");

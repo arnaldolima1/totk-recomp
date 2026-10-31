@@ -505,6 +505,11 @@ const EN = {
   'O launcher está atualizado.': 'The launcher is up to date.',
   'Não foi possível verificar o launcher (sem conexão, ou o repositório é privado).': 'Could not check the launcher (offline, or the repository is private).',
   'O jogo está na versão mais nova.': 'The game is on the newest version.',
+  'Adaptar mod de outra versão…': 'Adapt a mod from another version…',
+  'Um mod feito para outra versão do jogo (1.2.1, por exemplo): o launcher gera uma cópia adaptada à versão instalada': 'A mod made for another game version (1.2.1, say): the launcher makes a copy adapted to the installed one',
+  'Adaptando o mod para a versão instalada…': 'Adapting the mod to the installed version…',
+  'Não foi possível adaptar o mod': 'Could not adapt the mod',
+  'Mod feito para outra versão (.zip)': 'Mod made for another version (.zip)',
 };
 
 const PATTERNS = [
@@ -536,6 +541,8 @@ const PATTERNS = [
   [/^Pronto: (\d+) arquivos para o jogo\.(.*)$/, (m, a, b) => `Ready: ${a} files for the game.${b}`],
   [/^(.*)Launcher (\S+) disponível\.(.*)$/, (m, a, b, c) => `${a}Launcher ${b} available.${c}`],
   [/^(.*)Jogo (\S+) disponível\.(.*)$/, (m, a, b, c) => `${a}Game ${b} available.${c}`],
+  [/^Adaptar para (.+)$/, (m, a) => `Adapt to ${a}`],
+  [/^Pronto: "(.+)" criado \((\d+) arquivos(?:, (\d+) mensagens traduzidas, (\d+) novas da versão ficaram no original)?\)\.(?: Ficou de fora: (.+?)\.)? Ligue-o abaixo\.$/, (m, a, b, c, d, e) => `Done: "${a}" created (${b} files${c ? `, ${c} messages translated, ${d} new to the version kept as they were` : ''}).${e ? ` Left out: ${e}.` : ''} Turn it on below.`],
   [/^Apagar o mod "(.+)"\?$/, (m, a) => `Delete the mod "${a}"?`],
   [/^Já existe um mod chamado "(.+)"\.$/, (m, a) => `There is already a mod named "${a}".`],
   [/^mod não encontrado: (.+)$/, (m, a) => `mod not found: ${a}`],
