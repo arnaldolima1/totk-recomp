@@ -223,9 +223,19 @@ class Check(Step):
     id = 'check'
     always = True
 
+    def key(self, ctx):
+        # The compile step fingerprints the CPU level, and every key is computed before a step runs: probe the host
+        # here, once, so both steps see the same answer (the check step itself is always run). A failed probe is
+        # reported by run(), where the error names this step.
+        try:
+            self.host(ctx)
+        except InstallError:
+            pass
+        return ''
+
     def run(self, ctx):
         layout, rep, dest = ctx.layout, ctx.reporter, ctx.dest
-        missing = layout.missing()
+        missing = layout.missing(getattr(ctx, 'cpu', 'v3'))
         if missing:
             raise InstallError('check.release_incomplete', paths=missing[:5])
         if dest.exists() and not dest.is_dir():
@@ -258,6 +268,8 @@ class Check(Step):
         return {}
 
     def host(self, ctx):
+        if getattr(ctx, 'host', None) is not None:
+            return
         layout, work = ctx.layout, ctx.temp / 'check'
         glibc = linux_glibc()
         if glibc and glibc < GLIBC_NEEDED and not layout.dev:
@@ -282,8 +294,10 @@ class Check(Step):
         except ValueError:
             raise InstallError('check.host_probe_failed', code=r.returncode) from None
         ctx.reporter.log(f'host: {r.stdout.strip()}')
-        if not host['x86_64_v3']:
-            raise InstallError('check.cpu_no_avx2')
+        if not host['x86_64_v2']:
+            raise InstallError('check.cpu_too_old')
+        # v3 is the faster build; v2 runs on CPUs without AVX2/FMA (runtime/fma.c supplies the fused multiply-add).
+        ctx.cpu = 'v3' if host['x86_64_v3'] else 'v2'
         if not host['loader']:
             raise InstallError('check.vulkan_missing')
         devices = host['devices']
@@ -572,11 +586,12 @@ class Compile(Step):
     id = 'compile'
 
     def key(self, ctx):
-        layout = ctx.layout
+        layout, cpu = ctx.layout, getattr(ctx, 'cpu', 'v3')
         clang = subprocess.run([str(layout.clang), '--version'], capture_output=True, text=True).stdout
         tools = [layout.tools / n for n in ('build_game.py', 'romfs_index.py', 'check_content.py')]
-        return fingerprint('compile-1', ctx.keys['lift'], layout.runtime, layout.runtime_lib, layout.deps or 'system',
-                           layout.sysroot or 'host', *tools, clang, *[d.name for d in layout.dlls])
+        return fingerprint('compile-2', cpu, layout.runtime_lib_for(cpu), ctx.keys['lift'], layout.runtime,
+                           layout.deps or 'system', layout.sysroot or 'host', *tools, clang,
+                           *[d.name for d in layout.dlls])
 
     def current(self, ctx, record):
         exe = ctx.dest / ('totk' + EXE)
@@ -600,10 +615,12 @@ class Compile(Step):
                 rep.progress('compile', 'link', force=True)
 
         rep.progress('compile', 'compile', force=True)
+        cpu = getattr(ctx, 'cpu', 'v3')
+        lib = layout.runtime_lib_for(cpu)
         code, log = run_tool(ctx, 'compile', layout.tools / 'build_game.py', [
-            '--gen', ctx.temp / 'gen', '--out', build, '--toolchain', layout.llvm,
+            '--gen', ctx.temp / 'gen', '--out', build, '--toolchain', layout.llvm, '--cpu', cpu,
             *(['--deps', layout.deps] if layout.deps else []), *(['--sysroot', layout.sysroot] if layout.sysroot else []),
-            '--runtime', layout.runtime, '--runtime-lib', layout.runtime_lib, '--ninja', layout.ninja,
+            '--runtime', layout.runtime, *(['--runtime-lib', lib] if lib else ()), '--ninja', layout.ninja,
             '--version', version_tag(game_version(ctx)), '--expected', layout.expected(game_version(ctx)),
             '--exefs', dest / 'exefs', '--romfs', dest / 'romfs',
             '--profile', dest / 'profile'], parse)
@@ -617,7 +634,7 @@ class Compile(Step):
         replace_file(build / 'romfs-index.bin', dest / 'romfs-index.bin')
         for dll in layout.dlls:
             replace_file(dll, dest / dll.name)
-        return {'exe_sha256': file_sha256(dest / exe.name)}
+        return {'exe_sha256': file_sha256(dest / exe.name), 'cpu': cpu}
 
 
 # ---- 5. prepare
