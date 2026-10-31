@@ -36,7 +36,7 @@ CALLS = [
     "SuspendThread", "ResumeThread", "GetThreadContext", "SetThreadContext", "OpenThread", "CreateFiber(Ex)?",
     "ConvertThreadToFiber(Ex)?", "ConvertFiberToThread", "SwitchToFiber", "DeleteFiber", "BCrypt[A-Za-z]*",
     "_aligned_malloc", "_aligned_free", "_stricmp", "_strnicmp", "_strdup", "_wfopen", "_fseeki64", "_ftelli64",
-    "localtime_s", "strtok_s", "GetModuleHandle(Ex)?[AW]?", "ExitProcess", "SetEnvironmentVariable[AW]?",
+    "localtime_s", "strtok_s", "GetModuleHandle(Ex)?[AW]?", "ExitProcess", "SetEnvironmentVariable[AW]?", "_putenv(_s)?",
     "GetLastError", "MultiByteToWideChar", "WideCharToMultiByte", "HWND", "LARGE_INTEGER", "FILETIME",
     "MAX_PATH", "GetActiveProcessorCount", "timeBeginPeriod",
 ]
