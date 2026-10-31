@@ -71,7 +71,7 @@ PINS = {
     # appimagetool and the runtime are published only under the moving "continuous" tag: pinned by hash, so a new
     # upload stops the build until the pins are updated on purpose
     'appimagetool': ('https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage',
-                     '793fca0ce4bcc309dc65d3f66669f58e3755643e4dadbe03932e7b436128494f'),
+                     'ac7fd56feade6002c2f57db39587113275d351fce911a5fbb29ea84cd0666cab'),
     'appimage-runtime': ('https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64',
                          '617aa77314d57c8b8e4fae9c3f0b35af7b30d5529cb69e98f64f92510ed98a46'),
 }
