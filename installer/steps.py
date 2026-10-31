@@ -16,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -95,8 +96,34 @@ def kill_tree(proc):
         return
     if os.name == 'nt':
         subprocess.run(['taskkill', '/T', '/F', '/PID', str(proc.pid)], capture_output=True)
-    else:
+        return
+    try:   # run_tool starts each tool in a session of its own: the group holds ninja, clang and the game
+        os.killpg(proc.pid, signal.SIGKILL)
+    except OSError:
         proc.kill()
+
+
+def linux_glibc():
+    """(major, minor) of the C library this Linux process runs on, None elsewhere or when it is not glibc."""
+    try:
+        name = os.confstr('CS_GNU_LIBC_VERSION') if sys.platform.startswith('linux') else None
+    except (ValueError, OSError):
+        return None
+    m = re.match(r'glibc (\d+)\.(\d+)', name or '')
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+# The bundled clang, lld and the cryptography wheel are built against glibc 2.34 (tools/make_release_linux.py
+# GLIBC_FLOOR); on an older one they cannot start
+GLIBC_NEEDED = (2, 34)
+
+
+def linux_kernel():
+    """(major, minor) of the running Linux kernel, None elsewhere."""
+    if not sys.platform.startswith('linux'):
+        return None
+    m = re.match(r'(\d+)\.(\d+)', os.uname().release)
+    return (int(m.group(1)), int(m.group(2))) if m else None
 
 
 def run_tool(ctx, step, script, args, parse=None, cwd=None):
@@ -110,7 +137,8 @@ def run_tool(ctx, step, script, args, parse=None, cwd=None):
     env = dict(os.environ, PYTHONUNBUFFERED='1', PYTHONIOENCODING='utf-8')
     with open(log, 'w', encoding='utf-8', newline='\n') as out:
         proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=cwd or ctx.layout.root,
-                                env=env, text=True, encoding='utf-8', errors='replace', bufsize=1)
+                                env=env, text=True, encoding='utf-8', errors='replace', bufsize=1,
+                                start_new_session=os.name != 'nt')
         try:
             for line in proc.stdout:
                 out.write(line)
@@ -202,7 +230,8 @@ class Check(Step):
             raise InstallError('check.release_incomplete', paths=missing[:5])
         if dest.exists() and not dest.is_dir():
             raise InstallError('check.dest_not_folder', path=str(dest))
-        if ctx.mode == 'install' and dest.is_dir() and any(dest.iterdir()):
+        own = (ctx.temp, *ctx.temp.parents)   # a temp folder inside the install folder (installer/cli.py) is ours
+        if ctx.mode == 'install' and dest.is_dir() and any(p not in own for p in dest.iterdir()):
             raise InstallError('check.dest_not_empty', path=str(dest))
         lang = ini.canonical_language(ctx.options.lang or ctx.state.get('lang'))
         if not lang:
@@ -230,9 +259,17 @@ class Check(Step):
 
     def host(self, ctx):
         layout, work = ctx.layout, ctx.temp / 'check'
+        glibc = linux_glibc()
+        if glibc and glibc < GLIBC_NEEDED and not layout.dev:
+            raise InstallError('check.glibc_old', version='.'.join(map(str, glibc)),
+                               need='.'.join(map(str, GLIBC_NEEDED)))
         work.mkdir(parents=True, exist_ok=True)
         exe = work / ('hostcheck' + EXE)
-        command = [str(layout.clang), '-O1', str(HOSTCHECK), '-I', str(layout.deps / 'include'), '-o', str(exe)]
+        command = [str(layout.clang), '-O1', str(HOSTCHECK), '-o', str(exe)]
+        if layout.deps:
+            command += ['-I', str(layout.deps / 'include')]
+        if layout.sysroot:
+            command += [f'--sysroot={layout.sysroot}', '-fuse-ld=lld']
         if os.name != 'nt':
             command.append('-ldl')
         r = subprocess.run(command, capture_output=True, text=True, errors='replace')
@@ -255,6 +292,11 @@ class Check(Step):
         if not any(tuple(d['api'][:2]) >= (1, 3) for d in devices):
             raise InstallError('check.vulkan_too_old',
                                devices=', '.join(f'{d["name"]} ({d["api"][0]}.{d["api"][1]})' for d in devices))
+        kernel = linux_kernel()
+        if kernel and kernel < (6, 7):
+            # Without userfaultfd's asynchronous write protection nothing tracks the CPU's writes: the game copies whole
+            # pools to the GPU at each submit and its texture checks see every page as changed (docs/building.md, Linux)
+            ctx.reporter.warning('warn.kernel_old', version='.'.join(map(str, kernel)))
         ctx.host = host
 
     def inputs(self, ctx):
@@ -533,8 +575,8 @@ class Compile(Step):
         layout = ctx.layout
         clang = subprocess.run([str(layout.clang), '--version'], capture_output=True, text=True).stdout
         tools = [layout.tools / n for n in ('build_game.py', 'romfs_index.py', 'check_content.py')]
-        return fingerprint('compile-1', ctx.keys['lift'], layout.runtime, layout.runtime_lib, layout.deps, *tools,
-                           clang, *[d.name for d in layout.dlls])
+        return fingerprint('compile-1', ctx.keys['lift'], layout.runtime, layout.runtime_lib, layout.deps or 'system',
+                           layout.sysroot or 'host', *tools, clang, *[d.name for d in layout.dlls])
 
     def current(self, ctx, record):
         exe = ctx.dest / ('totk' + EXE)
@@ -559,7 +601,8 @@ class Compile(Step):
 
         rep.progress('compile', 'compile', force=True)
         code, log = run_tool(ctx, 'compile', layout.tools / 'build_game.py', [
-            '--gen', ctx.temp / 'gen', '--out', build, '--toolchain', layout.llvm, '--deps', layout.deps,
+            '--gen', ctx.temp / 'gen', '--out', build, '--toolchain', layout.llvm,
+            *(['--deps', layout.deps] if layout.deps else []), *(['--sysroot', layout.sysroot] if layout.sysroot else []),
             '--runtime', layout.runtime, '--runtime-lib', layout.runtime_lib, '--ninja', layout.ninja,
             '--version', version_tag(game_version(ctx)), '--expected', layout.expected(game_version(ctx)),
             '--exefs', dest / 'exefs', '--romfs', dest / 'romfs',
