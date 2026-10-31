@@ -24,6 +24,7 @@
 
 extern "C" {
 #include "cfg.h"
+#include "fs.h"
 #include "input.h"
 #include "input_map.h"
 #include "perfmon.h"
@@ -38,9 +39,6 @@ void vk_queue_unlock(void);
 void res_sizes(unsigned out[2], unsigned scene[2]);
 double frame_step_limit_hz(void);
 extern const int rt_game_version;
-// fs.h (romfs.c): romfs-patches-xbox was next to romfs-index.bin at start, and was loaded.
-int romfs_xbox_prompts_ready(void);
-int romfs_xbox_prompts_active(void);
 extern const char rt_port_version[];
 }
 
@@ -563,14 +561,8 @@ static void tab_sound(float scale) {
     opt_end();
 }
 
-// The note under the layout. Xbox prompts (the Nintendo layout with the A/B and X/Y prompts swapped, romfs.c
-// overlay_init) change the buttons at once but the prompts only at the next start: "files missing" without
-// romfs-patches-xbox, "prompts change after restart" while the prompts in use differ from the choice. Automatic with a
-// gamepad connected: "in use: Xbox". NULL otherwise.
+// The note under the layout: Automatic with a gamepad connected, the layout it picked ("in use: Xbox"). NULL otherwise.
 static const char *pad_layout_note(void) {
-    bool want = !_stricmp(cfg_value("TOTK_PAD_LAYOUT"), "xbox_prompts");
-    if (want && !romfs_xbox_prompts_ready()) return menu_text(UI_MENU_PAD_LAYOUT_PROMPTS_MISSING);
-    if (want != (romfs_xbox_prompts_active() != 0)) return menu_text(UI_MENU_PAD_LAYOUT_PROMPTS_RESTART);
     int got = input_pad_layout();
     if (got < 0 || strcmp(cfg_value("TOTK_PAD_LAYOUT"), "auto")) return nullptr;
     static char note[96];
@@ -579,11 +571,32 @@ static const char *pad_layout_note(void) {
     return note;
 }
 
+// The note under the prompts. The settings name a folder of prompts (input_prompts_folder: the prompts and the pad
+// layout, as a layout that puts A on the right button needs the face buttons named the other way round), but the game
+// reads its fonts and UI archive once at start (romfs.c overlay_init). While the folder in use differs: "files
+// missing" when the setup did not write the one asked for, why it was left out at start (damaged, a wide game
+// resolution, a RomFS mod with the same files, TOTK_ROMFS_PATCHES), else "prompts change after restart". NULL when
+// they match.
+static const char *prompts_note(void) {
+    const char *layout = cfg_value("TOTK_PAD_LAYOUT"), *used = romfs_prompts();
+    const char *want = input_prompts_folder(input_prompts_pick(cfg_get("TOTK_PROMPTS"), layout), layout);
+    if (want == used || (want && used && !strcmp(want, used))) return nullptr;
+    if (want && !romfs_prompts_ready(want)) return menu_text(UI_MENU_PROMPTS_MISSING);
+    switch (romfs_prompts_off(want)) {
+    case ROMFS_PROMPTS_FAILED: return menu_text(UI_MENU_PROMPTS_FAILED);
+    case ROMFS_PROMPTS_WIDE: return menu_text(UI_MENU_PROMPTS_OFF_WIDE);
+    case ROMFS_PROMPTS_MODS: return menu_text(UI_MENU_PROMPTS_OFF_MODS);
+    case ROMFS_PROMPTS_PATCHES: return menu_text(UI_MENU_PROMPTS_OFF_PATCHES);
+    default: return menu_text(UI_MENU_PROMPTS_RESTART);
+    }
+}
+
 static void tab_controls(float scale) {
     opt_begin("##controls", scale);
-    static const UiTextId layout[] = {UI_MENU_PAD_LAYOUT_AUTO, UI_MENU_PAD_LAYOUT_NINTENDO, UI_MENU_PAD_LAYOUT_XBOX,
-                                      UI_MENU_PAD_LAYOUT_XBOX_PROMPTS};
-    opt_choice("TOTK_PAD_LAYOUT", UI_MENU_PAD_LAYOUT, layout, 4, UI_MENU_PAD_LAYOUT_DESC, pad_layout_note());
+    static const UiTextId layout[] = {UI_MENU_PAD_LAYOUT_AUTO, UI_MENU_PAD_LAYOUT_NINTENDO, UI_MENU_PAD_LAYOUT_XBOX};
+    opt_choice("TOTK_PAD_LAYOUT", UI_MENU_PAD_LAYOUT, layout, 3, UI_MENU_PAD_LAYOUT_DESC, pad_layout_note());
+    static const UiTextId prompts[] = {UI_MENU_PROMPTS_NINTENDO, UI_MENU_PROMPTS_XBOX};
+    opt_choice("TOTK_PROMPTS", UI_MENU_PROMPTS, prompts, 2, UI_MENU_PROMPTS_DESC, prompts_note());
     opt_toggle("TOTK_MOTION", UI_MENU_MOTION, UI_MENU_MOTION_DESC);
     opt_slider("TOTK_RUMBLE_STRENGTH", UI_MENU_RUMBLE_STRENGTH, 0, 300, UI_MENU_RUMBLE_STRENGTH_DESC, 10, "%.0f %%");
     opt_slider("TOTK_RUMBLE_CURVE", UI_MENU_RUMBLE_CURVE, 0.2f, 1.5f, UI_MENU_RUMBLE_CURVE_DESC, 0.05f, "%.2f");
