@@ -261,6 +261,27 @@ int probe_cfg(void) {
     CHECK((int64_t)st[0] * st[0] + (int64_t)st[1] * st[1] <= 32768ll * 32768, "mouse: clamped to the unit circle");
     input_mouse_stick(30, 0, 1.0 / 60, 0, st);
     CHECK(st[0] == 0 && st[1] == 0, "mouse: sensitivity 0 is off");
+    {
+        double ease[2] = {0, 0};
+        int32_t io[2] = {20000, -10000};
+        input_mouse_smooth(io, 1.0 / 60, 0, ease);
+        CHECK(io[0] == 20000 && io[1] == -10000, "mouse smoothing: 0 passes the deflection through");
+        ease[0] = ease[1] = 0;
+        io[0] = 20000, io[1] = 0;
+        input_mouse_smooth(io, 1.0 / 60, 35, ease);
+        CHECK(io[0] > 0 && io[0] < 20000, "mouse smoothing: a sudden move comes in part of the way in one frame");
+        for (int i = 0; i < 120; i++) io[0] = 20000, io[1] = 0, input_mouse_smooth(io, 1.0 / 60, 35, ease);
+        CHECK(io[0] >= 19990, "mouse smoothing: a held move reaches its deflection");
+        for (int i = 0; i < 120; i++) io[0] = io[1] = 0, input_mouse_smooth(io, 1.0 / 60, 35, ease);
+        CHECK(io[0] == 0 && ease[0] == 0, "mouse smoothing: the camera comes to rest");
+        double a[2] = {0, 0}, b[2] = {0, 0};
+        int32_t x[2] = {20000, 0}, y[2] = {20000, 0};
+        input_mouse_smooth(x, 1.0 / 30, 35, a);
+        input_mouse_smooth(y, 1.0 / 60, 35, b);
+        y[0] = 20000, y[1] = 0;
+        input_mouse_smooth(y, 1.0 / 60, 35, b);
+        CHECK(abs(x[0] - y[0]) <= 2, "mouse smoothing: the easing follows time, not the frame rate");
+    }
     input_pad_stick(3000, -2000, 0.15f, st);
     CHECK(st[0] == 0 && st[1] == 0, "pad stick: an 11% drift inside a 15% dead zone reads centred");
     input_pad_stick(4000, -3000, 0, st);

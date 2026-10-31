@@ -52,6 +52,10 @@ Without the folder (an install made by an older setup, or one where the setup co
 | F10 | L3 + R3 (both stick clicks) | performance overlay: off, frame rate, full panel |
 | F11 | | borderless fullscreen on or off, saved to `totk.ini` |
 
+`TOTK_BORDERLESS` (`borderless`, *Borderless window* on the Screen tab, live) takes the title bar and edges off the window
+outside fullscreen: the client area keeps the window size and is centred on its monitor, the window stays on the
+taskbar. F11 still switches to fullscreen and back to the borderless window.
+
 The Minus+Plus combo never reaches the game. In the menu the arrow keys, the D-pad or the left stick move, Enter or A selects, Q and E or L and R switch tabs, Esc or B goes back (Switch button names, as in the table above).
 
 ## Remapping
@@ -80,11 +84,23 @@ bind_Y = pad:north, key:mouse_l
 
 Mouse motion (raw input) becomes right-stick deflection. Each presented frame takes the counts moved since the last frame, divides by the frame time and sets the deflection to `counts per second * TOTK_MOUSE_SENS / 3000` of full, held for that frame, so the turn rate does not depend on the frame rate. This is not mouselook: the game's stick curve and dead zone still apply, so very slow movements do nothing and a fast flick saturates. The mouse deflection competes with the gamepad and arrow keys by the larger-deflection rule.
 
-`TOTK_MOUSE_SENS` (0 to 10, default 1; higher turns faster, 0 turns the mouse camera and the cursor capture off). While the window is the foreground window the cursor is hidden and confined to the client area. It is released on focus loss, minimise, while F11 changes the window, during a size or move loop and while a text entry is open. Esc releases it by hand: the cursor shows, the mouse camera and mouse buttons stop, and the window can be moved, minimised or closed. A mouse click inside the client area captures it again; that click does not reach the game. Activating the window by a click on its title bar or border does not capture, so it can be dragged or closed right away; Alt+Tab or a click in the client area captures as before. `TOTK_INPUT=none` disables the capture too.
+`TOTK_MOUSE_SENS` (0 to 10, default 1; higher turns faster, 0 turns the mouse camera and the cursor capture off). `TOTK_MOUSE_SMOOTH` (0 to 100, default 35) eases the deflection with a time constant of that many 1.2 ms (`input_mouse_smooth` in `runtime/input_map.c`): a mouse that reports unevenly, or frames of uneven length, turn the camera evenly, at the cost of the camera following a few tens of milliseconds later; 0 passes the deflection through as before. While the window is the foreground window the cursor is hidden and confined to the client area. It is released on focus loss, minimise, while F11 changes the window, during a size or move loop and while a text entry is open. Esc releases it by hand: the cursor shows, the mouse camera and mouse buttons stop, and the window can be moved, minimised or closed. A mouse click inside the client area captures it again; that click does not reach the game. Activating the window by a click on its title bar or border does not capture, so it can be dragged or closed right away; Alt+Tab or a click in the client area captures as before. `TOTK_INPUT=none` disables the capture too.
 
 `TOTK_STICK_DEADZONE` (0 to 50, default 8) is the gamepad stick dead zone in percent of full deflection, the same for both sticks. It is round: a stick inside the circle reads centred, and the rest of its travel is scaled to start at 0 at the edge, so full deflection still reaches full. Raise it for a stick that drifts. The game's own dead zone applies after it.
 
 The stick direction bits (`StickLLeft` to `StickRDown`) are derived from the sticks at 50% deflection. A gamepad plugged in later is picked up within one second; with none connected the log says `input: no gamepad`.
+
+## DualSense (PS5 controller)
+
+A DualSense is a gamepad like any other (buttons, rumble, gyro and accelerometer through SDL3), with two extras sent when
+it is opened and whenever a setting changes (`ds5_tick` in `runtime/input.c`):
+
+- `TOTK_DS_TRIGGERS` (`ds_triggers`, *Adaptive triggers (DualSense)*, default 1): both triggers resist from about 40 %
+  of their travel, where the game takes the press; ZR (the bow) firmly, ZL lightly. 0 clears the effect.
+- `TOTK_DS_LIGHT` (`ds_light`, *Light bar (DualSense)*, default 1): the light bar in the menu's teal; 0 sets SDL's blue
+  for the first player.
+
+The log says `input: DualSense: light bar ..., adaptive triggers ...`. Other gamepads ignore both settings.
 
 ## Nintendo Switch 2 controllers
 

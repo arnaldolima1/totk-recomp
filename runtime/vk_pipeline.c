@@ -2996,6 +2996,8 @@ void vk_pipeline_set_dynamic(VkCommandBuffer cb, const VkPipeState *s) {
 
 // ---- statistics, persistence, teardown
 
+uint32_t vk_pipeline_building(void) { return __atomic_load_n(&A.inflight, __ATOMIC_RELAXED); }
+
 void vk_pipeline_stats(VkPipeStats *s) {
     plat_mutex_lock_shared(&P.lock);
     *s = P.stats;

@@ -236,15 +236,30 @@ static float mouse_sens_get(void) {
 }
 
 
-// The mouse camera as a right-stick sample, held for the whole presented frame. Under `lock`.
+static float mouse_smooth = -1;            // TOTK_MOUSE_SMOOTH, 0 to 100; live (cfg_version)
+static unsigned mouse_smooth_seen;
+
+static float mouse_smooth_get(void) {
+    unsigned ver = cfg_version();
+    if (mouse_smooth >= 0 && ver == mouse_smooth_seen) return mouse_smooth;
+    mouse_smooth_seen = ver;
+    double v = cfg_double("TOTK_MOUSE_SMOOTH");
+    mouse_smooth = (float)(v < 0 ? 0 : v > 100 ? 100 : v);
+    return mouse_smooth;
+}
+
+// The mouse camera as a right-stick sample, held for the whole presented frame and eased between frames
+// (TOTK_MOUSE_SMOOTH). Under `lock`.
 static void mouse_camera(int32_t out[2]) {
     static uint64_t frame = ~0ull, t0;
     static int32_t held[2];
+    static double eased[2];
     uint64_t now = plat_now_ns();
     int32_t dx, dy;
     if (!ikb_captured()) {
         ikb_mouse_take(&dx, &dy);
         held[0] = held[1] = 0;
+        eased[0] = eased[1] = 0;
         frame = ~0ull;
     } else {
         uint64_t fr = __atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED);
@@ -253,10 +268,12 @@ static void mouse_camera(int32_t out[2]) {
             double dt = age < 0.004 ? 0.004 : age > 0.1 ? 0.1 : age;
             ikb_mouse_take(&dx, &dy);
             input_mouse_stick(dx, dy, dt, mouse_sens_get(), held);
+            input_mouse_smooth(held, dt, mouse_smooth_get(), eased);
             frame = fr;
             t0 = now;
         } else if (age > 0.1) {
             held[0] = held[1] = 0;   // frames stopped: do not hold a deflection
+            eased[0] = eased[1] = 0;
         }
     }
     out[0] = held[0];
@@ -407,11 +424,48 @@ static void pick(int32_t *x, int32_t *y, int32_t kx, int32_t ky) {
     if (b > a) { *x = kx; *y = ky; }
 }
 
+// ---- DualSense extras: the light bar in the settings menu's teal (TOTK_DS_LIGHT) and a resistance on both triggers
+// from about 40 % of their travel, where the game takes the press (TOTK_DS_TRIGGERS): ZR, the bow, firmer than ZL.
+// The triggers go through SDL_SendGamepadEffect as a DualSense output report: the 47-byte layout of SDL's
+// DS5EffectsState_t (SDL src/joystick/hidapi/SDL_hidapi_ps5.c), of which only the two trigger effects and the bits
+// enabling them are set. A trigger effect is a mode byte and its parameters: 0x01 a constant resistance from a start
+// position (0 to 255) with a force (0 to 255), 0x05 none.
+typedef struct {
+    uint8_t enable1, enable2, rumble_right, rumble_left, headphone_vol, speaker_vol, mic_vol, audio_bits, mic_light,
+        audio_mute, right_trigger[11], left_trigger[11], unknown1[6], led_flags, unknown2[2], led_anim, led_brightness,
+        pad_lights, led_red, led_green, led_blue;
+} Ds5Effects;
+_Static_assert(sizeof(Ds5Effects) == 47, "the DualSense effects report is 47 bytes");
+
+static SDL_Gamepad *ds5_pad;   // the gamepad the extras were sent to
+static unsigned ds5_seen;      // ... at this cfg_version
+
+// Under lock: sends the extras to a DualSense when it is opened or a setting changed.
+static void ds5_tick(void) {
+    if (!pad || SDL_GetGamepadType(pad) != SDL_GAMEPAD_TYPE_PS5) return;
+    unsigned ver = cfg_version();
+    if (pad == ds5_pad && ver == ds5_seen) return;
+    ds5_pad = pad;
+    ds5_seen = ver;
+    int light = cfg_bool("TOTK_DS_LIGHT"), triggers = cfg_bool("TOTK_DS_TRIGGERS");
+    if (light) SDL_SetGamepadLED(pad, 0x2e, 0xd8, 0xa8);   // kUiZonai (ui/option_rows.h), a little deeper to read as teal
+    else SDL_SetGamepadLED(pad, 0, 0, 0x40);              // SDL's own colour for the first player
+    Ds5Effects e = {0};
+    e.enable1 = 0x04 | 0x08;   // the right and the left trigger effect
+    static const uint8_t off[11] = {0x05}, zr[11] = {0x01, 100, 150}, zl[11] = {0x01, 100, 70};
+    memcpy(e.right_trigger, triggers ? zr : off, sizeof e.right_trigger);
+    memcpy(e.left_trigger, triggers ? zl : off, sizeof e.left_trigger);
+    int sent = SDL_SendGamepadEffect(pad, &e, sizeof e);
+    rt_log("input: DualSense: light bar %s, adaptive triggers %s%s", light ? "teal" : "default", triggers ? "on" : "off",
+           sent ? "" : " (the effect report was not taken)");
+}
+
 // Under lock, state 1: the open gamepad's inputs by position (pd[PAD_*] != 0 held); 0 without a connected gamepad.
 static int pad_physical(uint8_t pd[PAD_COUNT]) {
     if ((!pad || !SDL_GamepadConnected(pad)) && plat_now_ns() / 1000000u >= next_scan) { next_scan = plat_now_ns() / 1000000u + RESCAN_MS; scan_pads(); }
     SDL_UpdateGamepads();
     if (!pad || !SDL_GamepadConnected(pad)) return 0;
+    ds5_tick();
     for (int p = PAD_SOUTH; p < PAD_ZL; p++) pd[p] = SDL_GetGamepadButton(pad, pad_sdl[p]);
     pd[PAD_ZL] = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > TRIGGER_ON;
     pd[PAD_ZR] = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > TRIGGER_ON;

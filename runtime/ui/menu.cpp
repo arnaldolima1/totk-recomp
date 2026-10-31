@@ -35,6 +35,7 @@ extern "C" {
 void rt_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 void vk_queue_lock(void);
 void vk_queue_unlock(void);
+uint32_t vk_pipeline_building(void);
 void res_sizes(unsigned out[2], unsigned scene[2]);
 double frame_step_limit_hz(void);
 extern const int rt_game_version;
@@ -548,11 +549,13 @@ static const char *present_note(void) {
 static void tab_screen(float scale) {
     opt_begin("##screen", scale);
     opt_toggle("TOTK_FULLSCREEN", UI_MENU_FULLSCREEN, UI_MENU_FULLSCREEN_DESC);
+    opt_toggle("TOTK_BORDERLESS", UI_MENU_BORDERLESS, UI_MENU_BORDERLESS_DESC);
     row_window_size();
     static const UiTextId present[] = {UI_MENU_PRESENT_MAILBOX, UI_MENU_PRESENT_VSYNC, UI_MENU_PRESENT_IMMEDIATE};
     opt_choice("TOTK_VK_PRESENT", UI_MENU_PRESENT, present, 3, UI_MENU_PRESENT_DESC, present_note());
     row_gpu();
     static const UiTextId perf[] = {UI_MENU_PERF_OFF, UI_MENU_PERF_FPS, UI_MENU_PERF_FULL};
+    opt_toggle("TOTK_SHADER_TOAST", UI_MENU_SHADER_TOAST, UI_MENU_SHADER_TOAST_DESC);
     opt_choice("TOTK_PERF_OVERLAY", UI_MENU_PERF_OVERLAY, perf, 3, UI_MENU_PERF_OVERLAY_DESC);
     opt_group(UI_MENU_GRAPHICS);
     row_output_res();
@@ -609,8 +612,11 @@ static void tab_controls(float scale) {
     opt_slider("TOTK_RUMBLE_STRENGTH", UI_MENU_RUMBLE_STRENGTH, 0, 300, UI_MENU_RUMBLE_STRENGTH_DESC, 10, "%.0f %%");
     opt_slider("TOTK_RUMBLE_CURVE", UI_MENU_RUMBLE_CURVE, 0.2f, 1.5f, UI_MENU_RUMBLE_CURVE_DESC, 0.05f, "%.2f");
     opt_toggle("TOTK_RUMBLE_TRIGGERS", UI_MENU_RUMBLE_TRIGGERS, UI_MENU_RUMBLE_TRIGGERS_DESC);
+    opt_toggle("TOTK_DS_TRIGGERS", UI_MENU_DS_TRIGGERS, UI_MENU_DS_TRIGGERS_DESC);
+    opt_toggle("TOTK_DS_LIGHT", UI_MENU_DS_LIGHT, UI_MENU_DS_LIGHT_DESC);
     opt_slider("TOTK_STICK_DEADZONE", UI_MENU_STICK_DEADZONE, 0, 50, UI_MENU_STICK_DEADZONE_DESC, 1, "%.0f %%");
     opt_slider("TOTK_MOUSE_SENS", UI_MENU_MOUSE_SENS, 0, 10, UI_MENU_MOUSE_SENS_DESC, 0.1f, "%.1f");
+    opt_slider("TOTK_MOUSE_SMOOTH", UI_MENU_MOUSE_SMOOTH, 0, 100, UI_MENU_MOUSE_SMOOTH_DESC, 5, "%.0f %%");
     binds_rows(scale);
     opt_end();
     binds_after_page();
@@ -1268,12 +1274,60 @@ static void perf_draw(const MenuTarget *t, float scale) {
     dl->AddText(ImVec2(p.x + pad, p.y + pad), IM_COL32(255, 255, 255, 235), g_perf_text);
 }
 
+// ---- the shader notice (TOTK_SHADER_TOAST): while the background workers build pipelines for more than a moment, a
+// small panel in the bottom right corner says so, so a short stutter has a visible reason. It fades out once they are
+// done. Off, it costs a cfg_bool per present.
+static float g_toast_a;          // 0 hidden .. 1 shown
+static uint64_t g_toast_since;   // plat_now_ns the workers became busy, 0 idle
+static uint32_t g_toast_n;       // pipelines in flight, for the text
+
+// Advances the notice; true while it is shown or fading.
+static bool toast_tick(uint64_t now, float dt) {
+    uint32_t n = cfg_bool("TOTK_SHADER_TOAST") ? vk_pipeline_building() : 0;
+    if (!n) g_toast_since = 0;
+    else if (!g_toast_since) g_toast_since = now;
+    if (n) g_toast_n = n;
+    bool want = n && now - g_toast_since > 300000000ull;   // a build shorter than 0.3 s shows nothing
+    float to = want ? 1.0f : 0.0f, rate = want ? 6.0f : 2.5f;
+    g_toast_a += (to - g_toast_a) * fminf(1.0f, dt * rate);
+    if (!want && g_toast_a < 0.01f) g_toast_a = 0;
+    return g_toast_a > 0 || want;
+}
+
+static void toast_draw(const MenuTarget *t, float scale) {
+    if (g_toast_a <= 0) return;
+    char text[96];
+    snprintf(text, sizeof text, menu_text(UI_MENU_TOAST_SHADERS), g_toast_n);
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    ImFont *font = ImGui::GetFont();
+    float fs = ImGui::GetFontSize() * 0.78f, a = g_toast_a, pad = 14 * scale, icon = fs * 1.2f;
+    ImVec2 ts = font->CalcTextSizeA(fs, FLT_MAX, 0, text);
+    float w = pad * 2 + icon + 10 * scale + ts.x, h = pad * 1.5f + fs, rise = (1 - a) * 10 * scale;
+    ImVec2 p((float)t->width - 24 * scale - w, (float)t->height - 24 * scale - h + rise), q(p.x + w, p.y + h);
+    dl->AddRectFilled(p, q, ui_col(kUiPanel, 0.90f * a), 12 * scale);
+    dl->AddRect(p, q, ui_col(kUiZonai, 0.40f * a), 12 * scale, 0, 1.2f * scale);
+    // a diamond turning a quarter at a time, then resting
+    float tm = (float)ImGui::GetTime(), ph = fmodf(tm, 1.1f), turn = ph < 0.55f ? ph / 0.55f : 1.0f;
+    float ang = (floorf(tm / 1.1f) + turn * turn * (3 - 2 * turn)) * 1.5707963f, r = icon * 0.42f;
+    ImVec2 c(p.x + pad + icon * 0.5f, p.y + h * 0.5f), d[4];
+    for (int i = 0; i < 4; i++) {
+        float an = ang + i * 1.5707963f;
+        d[i] = ImVec2(c.x + cosf(an) * r, c.y + sinf(an) * r);
+    }
+    dl->AddPolyline(d, 4, ui_col(kUiZonai, a), ImDrawFlags_Closed, 1.8f * scale);
+    dl->AddText(font, fs, ImVec2(p.x + pad + icon + 10 * scale, p.y + (h - fs) * 0.5f), ui_col(kUiCream, a), text);
+}
+
 extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const char **shot) {
     *shot = NULL;
     if (!g_test.parsed) test_parse();
     if (g_test.next_set < g_test.n_sets && frame >= g_test.sets[g_test.next_set].frame) test_apply_sets(frame);
     if (g_perf_save.exchange(0)) cfg_save();
     perf_tick(plat_now_ns(), t);
+    static uint64_t toast_last;
+    uint64_t toast_now = plat_now_ns();
+    bool toast = toast_tick(toast_now, toast_last ? (float)((toast_now - toast_last) / 1e9) : 0);
+    toast_last = toast_now;
     bool open = g_open.load(std::memory_order_relaxed);
     if (!open) {
         if (g_save_pending) g_save_pending = opt_save_tick(1);   // closed: the last change goes to totk.ini now
@@ -1283,7 +1337,7 @@ extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const cha
             g_tab_request = 0;
             set_open(1);
             open = true;
-        } else if (!g_perf_mode) {
+        } else if (!g_perf_mode && !toast) {
             return 0;
         }
     }
@@ -1333,6 +1387,7 @@ extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const cha
     ImGui::NewFrame();
     if (open) layout_menu(t->width, t->height, scale);
     perf_draw(t, scale);
+    toast_draw(t, scale);
     ImGui::Render();
     if (open) g_save_pending = opt_save_tick(0);
     g_cost_ns += plat_now_ns() - t0;

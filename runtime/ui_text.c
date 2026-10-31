@@ -39,6 +39,8 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_HINT] = "B or Esc closes  ·  L / R or Q / E change tab  ·  F10 overlay  ·  F11 fullscreen",
 
     [UI_MENU_FULLSCREEN] = "Fullscreen", [UI_MENU_FULLSCREEN_DESC] = "Fills the screen with the game; F11 toggles it.",
+    [UI_MENU_BORDERLESS] = "Borderless window",
+    [UI_MENU_BORDERLESS_DESC] = "The window without its title bar and edges, centred on the screen, at the window size. Outside fullscreen only.",
     [UI_MENU_WINDOW_SIZE] = "Window size", [UI_MENU_WINDOW_SIZE_DESC] = "Size of the game window when not fullscreen.",
     [UI_MENU_WINDOW_SIZE_CUSTOM] = "Custom",
     [UI_MENU_PRESENT] = "Presentation", [UI_MENU_PRESENT_DESC] = "How finished frames reach the screen.",
@@ -46,6 +48,10 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_PRESENT_IN_USE] = "in use: %s",
     [UI_MENU_GPU] = "Graphics card", [UI_MENU_GPU_DESC] = "The Vulkan device that draws the game.",
     [UI_MENU_GPU_AUTO] = "Automatic",
+    [UI_MENU_SHADER_TOAST] = "Shader notice",
+    [UI_MENU_SHADER_TOAST_DESC] = "A small notice in the bottom right corner while shaders and pipelines are being "
+                                  "compiled, which is when the game can stutter for a moment.",
+    [UI_MENU_TOAST_SHADERS] = "Compiling shaders (%u)",
     [UI_MENU_PERF_OVERLAY] = "Performance overlay",
     [UI_MENU_PERF_OVERLAY_DESC] = "Frame rate in the top right corner. Full adds frame times with a graph, CPU, GPU and "
                                   "memory load, temperatures and the render thread's waits. F10 cycles the modes.",
@@ -106,6 +112,11 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_RUMBLE_CURVE_DESC] = "Lower values make weak vibration stronger.",
     [UI_MENU_RUMBLE_TRIGGERS] = "Trigger vibration (Xbox)",
     [UI_MENU_RUMBLE_TRIGGERS_DESC] = "Vibrates the triggers of an Xbox controller too.",
+    [UI_MENU_DS_TRIGGERS] = "Adaptive triggers (DualSense)",
+    [UI_MENU_DS_TRIGGERS_DESC] = "The triggers of a PS5 controller resist from where the game takes the press: ZR, the "
+                                 "bow, firmly, ZL lightly.",
+    [UI_MENU_DS_LIGHT] = "Light bar (DualSense)",
+    [UI_MENU_DS_LIGHT_DESC] = "Lights the PS5 controller's light bar in the menu's teal; off, it keeps the usual blue.",
     [UI_MENU_PAD_LAYOUT] = "Button layout",
     [UI_MENU_PAD_LAYOUT_DESC] = "Which button is A. Nintendo: the right one, as on a Switch. Xbox: the bottom one, as "
                                 "labelled on an Xbox controller (cross on a PlayStation controller). Automatic picks "
@@ -122,6 +133,9 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_STICK_DEADZONE_DESC] = "How far a gamepad stick moves before the game sees it. Raise it if the character or the camera moves on its own.",
     [UI_MENU_MOUSE_SENS] = "Mouse camera sensitivity",
     [UI_MENU_MOUSE_SENS_DESC] = "How fast the mouse turns the camera.",
+    [UI_MENU_MOUSE_SMOOTH] = "Mouse camera smoothing",
+    [UI_MENU_MOUSE_SMOOTH_DESC] = "Eases the camera's turn over a few milliseconds so an uneven mouse or frame rate turns it "
+                                  "evenly. Higher is smoother but follows the mouse a little later; 0 turns it off.",
 
     [UI_BINDS_HELP] = "Select a cell and press A or Enter, then the key, mouse button or controller button. Delete or "
                       "X clears a cell. A key in use moves here; a controller button swaps with the one it replaces.",
@@ -284,6 +298,8 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_HINT] = "B или Esc — закрыть  ·  L / R или Q / E — вкладки  ·  F10 — индикатор  ·  F11 — полный экран",
 
     [UI_MENU_FULLSCREEN] = "Полный экран", [UI_MENU_FULLSCREEN_DESC] = "Игра на весь экран; F11 переключает режим.",
+    [UI_MENU_BORDERLESS] = "Окно без рамки",
+    [UI_MENU_BORDERLESS_DESC] = "Окно без заголовка и рамки, по центру экрана, в размере окна. Только вне полноэкранного режима.",
     [UI_MENU_WINDOW_SIZE] = "Размер окна", [UI_MENU_WINDOW_SIZE_DESC] = "Размер окна игры вне полноэкранного режима.",
     [UI_MENU_WINDOW_SIZE_CUSTOM] = "Другой",
     [UI_MENU_PRESENT] = "Вывод кадров", [UI_MENU_PRESENT_DESC] = "Как готовые кадры попадают на экран.",
@@ -292,6 +308,10 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_PRESENT_IN_USE] = "сейчас: %s",
     [UI_MENU_GPU] = "Видеокарта", [UI_MENU_GPU_DESC] = "Устройство Vulkan, которое рисует игру.",
     [UI_MENU_GPU_AUTO] = "Автоматически",
+    [UI_MENU_SHADER_TOAST] = "Уведомление о шейдерах",
+    [UI_MENU_SHADER_TOAST_DESC] = "Небольшое уведомление в правом нижнем углу, пока компилируются шейдеры и конвейеры: "
+                                  "в это время игра может ненадолго подтормаживать.",
+    [UI_MENU_TOAST_SHADERS] = "Компиляция шейдеров (%u)",
     [UI_MENU_PERF_OVERLAY] = "Индикатор производительности",
     [UI_MENU_PERF_OVERLAY_DESC] = "Частота кадров в правом верхнем углу. «Полный» добавляет время кадров с графиком, "
                                   "загрузку ЦП, GPU и памяти, температуры и ожидания потока отрисовки. F10 переключает "
@@ -351,6 +371,11 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_RUMBLE_CURVE_DESC] = "Чем ниже значение, тем сильнее слабая вибрация.",
     [UI_MENU_RUMBLE_TRIGGERS] = "Вибрация триггеров (Xbox)",
     [UI_MENU_RUMBLE_TRIGGERS_DESC] = "Вибрация и в триггерах контроллера Xbox.",
+    [UI_MENU_DS_TRIGGERS] = "Адаптивные триггеры (DualSense)",
+    [UI_MENU_DS_TRIGGERS_DESC] = "Триггеры контроллера PS5 сопротивляются с того места, где игра засчитывает нажатие: "
+                                 "ZR (лук) — сильно, ZL — слабо.",
+    [UI_MENU_DS_LIGHT] = "Световая панель (DualSense)",
+    [UI_MENU_DS_LIGHT_DESC] = "Световая панель контроллера PS5 горит бирюзовым, как меню; выключено — обычный синий.",
     [UI_MENU_PAD_LAYOUT] = "Раскладка кнопок",
     [UI_MENU_PAD_LAYOUT_DESC] = "Какая кнопка работает как A. Nintendo: правая, как на Switch. Xbox: нижняя, как "
                                 "подписано на контроллере Xbox (крест на контроллере PlayStation). Автоматически: "
@@ -368,6 +393,10 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_STICK_DEADZONE_DESC] = "Насколько нужно отклонить стик геймпада, чтобы игра это заметила. Увеличьте, если персонаж или камера двигаются сами.",
     [UI_MENU_MOUSE_SENS] = "Чувствительность мыши",
     [UI_MENU_MOUSE_SENS_DESC] = "Как быстро мышь поворачивает камеру.",
+    [UI_MENU_MOUSE_SMOOTH] = "Сглаживание камеры мыши",
+    [UI_MENU_MOUSE_SMOOTH_DESC] = "Сглаживает поворот камеры на несколько миллисекунд, чтобы неровное движение мыши или "
+                                  "частота кадров поворачивали её ровно. Больше — плавнее, но камера чуть позже следует "
+                                  "за мышью; 0 выключает.",
 
     [UI_BINDS_HELP] = "Выберите ячейку и нажмите A или Enter, затем клавишу, кнопку мыши или кнопку контроллера. "
                       "Delete или X очищает ячейку. Занятая клавиша переходит сюда; кнопка контроллера меняется "
@@ -536,6 +565,8 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_HINT] = "B ou Esc fecha  ·  L / R ou Q / E troca de aba  ·  F10 indicador  ·  F11 tela cheia",
 
     [UI_MENU_FULLSCREEN] = "Tela cheia", [UI_MENU_FULLSCREEN_DESC] = "O jogo ocupa a tela inteira; F11 alterna.",
+    [UI_MENU_BORDERLESS] = "Janela sem borda",
+    [UI_MENU_BORDERLESS_DESC] = "A janela sem a barra de título e as bordas, centralizada na tela, no tamanho da janela. Só fora da tela cheia.",
     [UI_MENU_WINDOW_SIZE] = "Tamanho da janela",
     [UI_MENU_WINDOW_SIZE_DESC] = "Tamanho da janela do jogo fora da tela cheia.",
     [UI_MENU_WINDOW_SIZE_CUSTOM] = "Personalizado",
@@ -544,6 +575,10 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_PRESENT_IN_USE] = "em uso: %s",
     [UI_MENU_GPU] = "Placa de vídeo", [UI_MENU_GPU_DESC] = "O dispositivo Vulkan que desenha o jogo.",
     [UI_MENU_GPU_AUTO] = "Automática",
+    [UI_MENU_SHADER_TOAST] = "Aviso de compilação de shaders",
+    [UI_MENU_SHADER_TOAST_DESC] = "Um aviso pequeno no canto inferior direito enquanto shaders e pipelines são "
+                                  "compilados, que é quando o jogo pode engasgar por um instante.",
+    [UI_MENU_TOAST_SHADERS] = "Compilando shaders (%u)",
     [UI_MENU_PERF_OVERLAY] = "Indicador de desempenho",
     [UI_MENU_PERF_OVERLAY_DESC] = "Taxa de quadros no canto superior direito. Completo acrescenta os tempos de quadro com "
                                   "um gráfico, o uso de CPU, GPU e memória, as temperaturas e as esperas da thread de "
@@ -604,6 +639,11 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_RUMBLE_CURVE_DESC] = "Valores menores deixam as vibrações fracas mais fortes.",
     [UI_MENU_RUMBLE_TRIGGERS] = "Vibração dos gatilhos (Xbox)",
     [UI_MENU_RUMBLE_TRIGGERS_DESC] = "Vibra também os gatilhos de um controle Xbox.",
+    [UI_MENU_DS_TRIGGERS] = "Gatilhos adaptáveis (DualSense)",
+    [UI_MENU_DS_TRIGGERS_DESC] = "Os gatilhos do controle de PS5 fazem resistência a partir do ponto em que o jogo "
+                                 "conta o aperto: o ZR, do arco, com força, e o ZL de leve.",
+    [UI_MENU_DS_LIGHT] = "Barra de luz (DualSense)",
+    [UI_MENU_DS_LIGHT_DESC] = "Acende a barra de luz do controle de PS5 no turquesa do menu; desligado, fica no azul de sempre.",
     [UI_MENU_PAD_LAYOUT] = "Layout dos botões",
     [UI_MENU_PAD_LAYOUT_DESC] = "Qual botão é o A. Nintendo: o da direita, como no Switch. Xbox: o de baixo, como está "
                                 "escrito no controle Xbox (a cruz no controle PlayStation). Automático escolhe Nintendo "
@@ -621,6 +661,10 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_STICK_DEADZONE_DESC] = "Quanto o analógico do controle precisa se mover antes de o jogo perceber. Aumente se o personagem ou a câmera se mexerem sozinhos.",
     [UI_MENU_MOUSE_SENS] = "Sensibilidade da câmera no mouse",
     [UI_MENU_MOUSE_SENS_DESC] = "Quão rápido o mouse gira a câmera.",
+    [UI_MENU_MOUSE_SMOOTH] = "Suavização da câmera no mouse",
+    [UI_MENU_MOUSE_SMOOTH_DESC] = "Suaviza o giro da câmera ao longo de alguns milissegundos, para que um mouse ou uma taxa "
+                                  "de quadros irregular gire a câmera de forma uniforme. Mais alto é mais suave, mas segue "
+                                  "o mouse um pouco depois; 0 desliga.",
 
     [UI_BINDS_HELP] = "Selecione uma célula e aperte A ou Enter, depois a tecla, o botão do mouse ou o botão do controle. "
                       "Delete ou X limpa a célula. Uma tecla já usada passa para cá; um botão do controle troca de lugar "

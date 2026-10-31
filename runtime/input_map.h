@@ -96,6 +96,10 @@ void input_map_stick(const uint8_t down[KEY_COUNT], int stick, int32_t out[2]);
 // Mouse motion in raw counts over dt_s seconds to right-stick deflection: full deflection at 3000 / sens counts/s.
 // Clamped to the unit circle, up (negative dy) is +y.
 void input_mouse_stick(int32_t dx, int32_t dy, double dt_s, float sens, int32_t out[2]);
+// The mouse deflection eased over time: state follows io (in place) with a time constant of smooth * 1.2 ms (smooth 0 to
+// 100; 0 passes io through), so a jittery or uneven mouse turns the camera evenly. state starts at 0, 0 and holds the
+// eased deflection between frames.
+void input_mouse_smooth(int32_t io[2], double dt_s, float smooth, double state[2]);
 // A gamepad stick (x, y in -32768..32767, up is +y) through a round dead zone of `dead` (fraction of full deflection,
 // 0..0.5): inside the circle the stick reads 0, and the rest of the travel is scaled to start at 0 at the edge, so a
 // drifting stick rests at 0 and full deflection still reaches full. The result stays inside the unit square.

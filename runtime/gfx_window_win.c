@@ -48,13 +48,27 @@ int gfx_window_vk_presentable(VkInstance inst, VkPhysicalDevice pd, uint32_t fam
 }
 
 // ---- window thread
-#define WND_STYLE WS_OVERLAPPEDWINDOW
+// The window's style outside fullscreen: framed, or borderless (TOTK_BORDERLESS: no title bar or edges, still on the
+// taskbar and minimisable). WND_STYLES covers both, to take either off.
+#define WND_FRAMED WS_OVERLAPPEDWINDOW
+#define WND_BORDERLESS (WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX)
+#define WND_STYLES (WND_FRAMED | WND_BORDERLESS)
 #define WM_APP_SETTINGS (WM_APP + 1)
 #define WM_APP_FULLSCREEN (WM_APP + 2)   // the fullscreen setting, held back until the window is first activated
 
 static WINDOWPLACEMENT g_saved_place = {sizeof g_saved_place};   // the window behind fullscreen (window thread)
 
-static int is_fullscreen(HWND h) { return !(GetWindowLongW(h, GWL_STYLE) & WS_OVERLAPPEDWINDOW); }
+// Window thread: fullscreen as F11 or the setting made it. A borderless window has no frame either, so the style alone
+// does not tell the two apart.
+static int g_fs;
+static int g_borderless;   // the window's style outside fullscreen is WND_BORDERLESS (window thread)
+
+static int is_fullscreen(HWND h) {
+    (void)h;
+    return g_fs;
+}
+
+static LONG windowed_style(void) { return g_borderless ? WND_BORDERLESS : WND_FRAMED; }
 
 #define cfg_fullscreen gfx_cfg_fullscreen
 #define cfg_window_size gfx_cfg_window_size
@@ -66,7 +80,7 @@ unsigned gfx_window_dpi(void) { return (unsigned)plat_cas32(&g_dpi, 0, 0); }
 // at another display scale.
 static void outer_size(HWND h, int cw, int ch, int *ow, int *oh) {
     RECT r = {0, 0, cw, ch};
-    AdjustWindowRectExForDpi(&r, WND_STYLE, FALSE, 0, h ? GetDpiForWindow(h) : GetDpiForSystem());
+    AdjustWindowRectExForDpi(&r, windowed_style(), FALSE, 0, h ? GetDpiForWindow(h) : GetDpiForSystem());
     *ow = r.right - r.left;
     *oh = r.bottom - r.top;
 }
@@ -86,16 +100,18 @@ static void keep_awake(int on) {
 // user's windows and takes no focus.
 static void toggle_fullscreen(HWND h) {
     LONG style = GetWindowLongW(h, GWL_STYLE);
-    if (style & WS_OVERLAPPEDWINDOW) {
+    if (!g_fs) {
         MONITORINFO mi = {sizeof mi};
         if (!GetWindowPlacement(h, &g_saved_place) || !GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTOPRIMARY), &mi))
             return;
-        SetWindowLongW(h, GWL_STYLE, (style & ~WS_OVERLAPPEDWINDOW) | WS_POPUP);
+        g_fs = 1;
+        SetWindowLongW(h, GWL_STYLE, (style & ~WND_STYLES) | WS_POPUP);
         SetWindowPos(h, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right - mi.rcMonitor.left,
                      mi.rcMonitor.bottom - mi.rcMonitor.top,
                      SWP_NOOWNERZORDER | SWP_FRAMECHANGED | (g_background ? SWP_NOZORDER | SWP_NOACTIVATE : 0));
     } else {
-        SetWindowLongW(h, GWL_STYLE, (style & ~WS_POPUP) | WND_STYLE);
+        g_fs = 0;
+        SetWindowLongW(h, GWL_STYLE, (style & ~WND_STYLES) | windowed_style());
         if (g_background) g_saved_place.showCmd = SW_SHOWNOACTIVATE;
         SetWindowPlacement(h, &g_saved_place);
         SetWindowPos(h, NULL, 0, 0, 0, 0,
@@ -114,11 +130,37 @@ static void note_applied(void) {
     g_applied_fs = cfg_fullscreen();
 }
 
+// Window thread: the window style follows TOTK_BORDERLESS. Outside fullscreen the window keeps its client size and is
+// centred on its monitor when it loses its frame (it can no longer be dragged); in fullscreen only the style restored
+// when fullscreen ends changes.
+static void apply_borderless(HWND h) {
+    int want = cfg_bool("TOTK_BORDERLESS");
+    if (want == g_borderless) return;
+    g_borderless = want;
+    if (g_fs) return;
+    RECT have;
+    if (!GetClientRect(h, &have)) return;
+    if (IsZoomed(h)) ShowWindow(h, SW_RESTORE);
+    LONG style = GetWindowLongW(h, GWL_STYLE);
+    SetWindowLongW(h, GWL_STYLE, (style & ~WND_STYLES) | windowed_style());
+    int ow, oh, x = 0, y = 0, flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED;
+    outer_size(h, have.right, have.bottom, &ow, &oh);
+    MONITORINFO mi = {sizeof mi};
+    if (want && GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mi)) {
+        x = mi.rcWork.left + ((mi.rcWork.right - mi.rcWork.left) - ow) / 2;
+        y = mi.rcWork.top + ((mi.rcWork.bottom - mi.rcWork.top) - oh) / 2;
+    } else {
+        flags |= SWP_NOMOVE;
+    }
+    SetWindowPos(h, NULL, x, y, ow, oh, flags);
+}
+
 // Window thread: the window takes the size and fullscreen state of the settings when they changed. In fullscreen the
 // size goes into the placement restored when fullscreen ends.
 static void apply_settings(HWND h) {
     int size_changed = strcmp(cfg_value("TOTK_WINDOW_SIZE"), g_applied_size) != 0, fs = cfg_fullscreen(), fs_changed = fs != g_applied_fs;
     note_applied();
+    apply_borderless(h);
     if (size_changed) {
         int cw, ch, ow, oh;
         cfg_window_size(&cw, &ch);
@@ -241,7 +283,7 @@ static LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
             RECT c, r;
             if (GetClientRect(h, &c)) {
                 r = (RECT){0, 0, c.right, c.bottom};
-                if (AdjustWindowRectExForDpi(&r, WND_STYLE, FALSE, 0, LOWORD(w))) {
+                if (AdjustWindowRectExForDpi(&r, windowed_style(), FALSE, 0, LOWORD(w))) {
                     *(SIZE *)l = (SIZE){r.right - r.left, r.bottom - r.top};
                     return TRUE;
                 }
@@ -290,6 +332,7 @@ static void window_main(void *arg) {
                                             GetSystemMetrics(SM_CYSMICON), LR_SHARED),
                       .hCursor = LoadCursorW(NULL, (LPCWSTR)IDC_ARROW), .lpszClassName = L"TotKRecompWindow"};
     RegisterClassExW(&wc);
+    g_borderless = cfg_bool("TOTK_BORDERLESS");
     int cw, ch, ow, oh;
     cfg_window_size(&cw, &ch);
     outer_size(NULL, cw, ch, &ow, &oh);
@@ -299,7 +342,7 @@ static void window_main(void *arg) {
     // button flashes until it is brought up, and TOTK_FULLSCREEN waits for that first activation.
     // TOTK_BACKGROUND_WINDOW=1 (test runs): no flashing, never fullscreen at start, and F11 keeps the window's place.
     int background = g_background = cfg_get("TOTK_BACKGROUND_WINDOW") && atoi(cfg_get("TOTK_BACKGROUND_WINDOW"));
-    g_hwnd = CreateWindowExW(0, wc.lpszClassName, L"TotK Recomp", WND_STYLE, CW_USEDEFAULT, CW_USEDEFAULT, ow, oh, NULL,
+    g_hwnd = CreateWindowExW(0, wc.lpszClassName, L"TotK Recomp", windowed_style(), CW_USEDEFAULT, CW_USEDEFAULT, ow, oh, NULL,
                              NULL, inst, NULL);
     if (!g_hwnd) {
         rt_log("gfx: CreateWindowEx failed (%lu)", GetLastError());

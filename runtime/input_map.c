@@ -325,6 +325,20 @@ void input_mouse_stick(int32_t dx, int32_t dy, double dt_s, float sens, int32_t 
     out[1] = (int32_t)lrint(y);
 }
 
+void input_mouse_smooth(int32_t io[2], double dt_s, float smooth, double state[2]) {
+    if (!(smooth > 0) || !(dt_s > 0)) {
+        state[0] = io[0];
+        state[1] = io[1];
+        return;
+    }
+    double a = 1 - exp(-dt_s / (smooth * 0.0012));
+    for (int i = 0; i < 2; i++) {
+        state[i] += (io[i] - state[i]) * a;
+        if (fabs(state[i]) < 1) state[i] = 0;   // settle at rest instead of creeping for ever
+        io[i] = (int32_t)lrint(state[i]);
+    }
+}
+
 void input_pad_stick(int32_t x, int32_t y, float dead, int32_t out[2]) {
     double fx = x / (double)STICK_MAX, fy = y / (double)STICK_MAX, m = sqrt(fx * fx + fy * fy);
     out[0] = out[1] = 0;

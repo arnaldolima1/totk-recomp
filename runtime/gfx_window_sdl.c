@@ -109,6 +109,7 @@ static void apply_settings(void) {
         if (is_fullscreen() || (fs && !fs_changed)) SDL_SetWindowFullscreen(g_win, true);
     }
     if (fs_changed && fs != is_fullscreen()) set_fullscreen(fs);
+    SDL_SetWindowBordered(g_win, !cfg_bool("TOTK_BORDERLESS"));   // TOTK_BORDERLESS: no title bar outside fullscreen
 }
 
 void gfx_window_apply_settings(void) {
@@ -253,7 +254,8 @@ static void open_window(void *arg) {
     (void)arg;
     int w, h;
     gfx_cfg_window_size(&w, &h);
-    g_win = SDL_CreateWindow("TotK Recomp", w, h, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    g_win = SDL_CreateWindow("TotK Recomp", w, h, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
+                                                      (cfg_bool("TOTK_BORDERLESS") ? SDL_WINDOW_BORDERLESS : 0));
     if (!g_win) {
         rt_log("gfx: SDL_CreateWindow failed (%s)", SDL_GetError());
         return;

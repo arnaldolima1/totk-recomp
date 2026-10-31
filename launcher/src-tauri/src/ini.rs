@@ -46,11 +46,11 @@ pub fn read(text: &str) -> BTreeMap<String, String> {
 pub fn section_for(key: &str) -> &'static str {
     match key {
         "fps_limit" | "fps60" | "realtime" | "cloth_realtime" | "highfps_fix" => "frame rate",
-        "fullscreen" | "window_size" | "perf_overlay" | "vk_present" | "gpu_index" | "gpu_name" | "output_res"
+        "fullscreen" | "borderless" | "window_size" | "perf_overlay" | "shader_toast" | "vk_present" | "gpu_index" | "gpu_name" | "output_res"
         | "render_scale" | "upscaler" | "sharpness" => "display",
         "lang" | "locale" | "operation_mode" | "menu_lang" | "lang_mod" => "language",
         "audio" | "audio_prefill_ms" | "volume" => "audio",
-        "motion" | "rumble" | "rumble_strength" | "rumble_curve" | "rumble_triggers" | "pad_layout" | "mouse_sens"
+        "motion" | "rumble" | "rumble_strength" | "rumble_curve" | "rumble_triggers" | "ds_light" | "ds_triggers" | "pad_layout" | "mouse_sens" | "mouse_smooth"
         | "input_record" => "input",
         "romfs_mods" | "romfs_patches" => "files",
         "trace" | "flight" | "flight_spike_ms" => "diagnostics",
