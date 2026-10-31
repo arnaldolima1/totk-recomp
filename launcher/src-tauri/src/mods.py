@@ -120,6 +120,11 @@ def scan(home):
                 top = p.split('/')[0]
                 areas[top] = areas.get(top, 0) + 1
             entry['areas'] = areas
+            # the game languages whose text (Mals/<lang>.Product...) or voices (..._<lang>_...) the mod replaces: a
+            # translation shows the game in its language when the game runs in the language it replaces
+            entry['text_langs'] = sorted({m.group(1) for p in files if (m := re.match(r'Mals/([A-Z]{2}[a-z]{2})\.', p))})
+            entry['voice_langs'] = sorted({m.group(1) for p in files if p.startswith(('Voice/', 'Sound/'))
+                                           and (m := re.search(r'_([A-Z]{2}[a-z]{2})_', p))})
         mods.append(entry)
     print(json.dumps({'version': version, 'mods': mods}, ensure_ascii=False))
 

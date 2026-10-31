@@ -249,6 +249,7 @@ function iniToControls() {
   $('#set-extra').value = Object.entries(ini).filter(([k]) => !m.has(k)).map(([k, v]) => `${k} = ${v}`).join('\n');
   loadBinds();
   renderQuick();
+  renderGameLang();
 }
 function controlValue(el) {
   if (el.type === 'checkbox') return el.checked ? el.dataset.on : el.dataset.off;
@@ -481,18 +482,38 @@ function renderQuick() {
 }
 $$('[data-preset]').forEach((b) => (b.onclick = async () => { await saveIni(PRESETS[b.dataset.preset]); iniToControls(); }));
 
-// ---------------------------------------------------------------- mods (main.rs mods_list / mods_apply, mods.py)
+// ---------------------------------------------------------------- mods (main.rs mods_*, mods.py, adapt.py)
 // <install>/mods/<name>/ with a romfs/ folder. The enabled ones, in priority order (the first wins a file two mods
-// replace), are merged into mods/.merged, which totk.ini's romfs_mods points at. A mod whose versioned files name
-// another game version (Product.121 on a 1.4.3 install) cannot be enabled.
+// replace), are merged into mods/.merged, which totk.ini's romfs_mods points at. A mod made for another game version
+// (its versioned files name another version: Product.121 on a 1.4.3 install) is converted when it is added (adapt.py):
+// the converted copy replaces it and is turned on. A translation (a mod replacing a language's game text) shows in
+// Configurações > Jogo as its language, in place of the language it replaces, and the game is set to that language.
 let mods = { mods: [], enabled: [], version: null, stale: false }, modsBusy = false;
 const AREAS = { Voice: 'vozes', Sound: 'sons', Mals: 'textos', UI: 'interface', Font: 'fontes', TexToGo: 'texturas',
   Model: 'modelos', System: 'sistema', Event: 'cenas', Movie: 'vídeos', Shader: 'shaders', Pack: 'pacotes' };
+const MALS_LANG = { USen: 'en-US', EUen: 'en-GB', USes: 'es-419', EUes: 'es', USfr: 'fr-CA', EUfr: 'fr', EUde: 'de',
+  EUit: 'it', EUnl: 'nl', EUru: 'ru', JPja: 'ja', KRko: 'ko', CNzh: 'zh-CN', TWzh: 'zh-TW' };
 const otherVersion = (m) => (m.made_for || []).filter((v) => v !== mods.version);
 function modProblem(m) {
   if (!m.romfs) return m.exefs ? 'Só tem exefs (código): o recomp não aceita' : 'Sem pasta romfs';
   const other = otherVersion(m);
   if (other.length) return `Feito para o jogo ${other.join(' / ')}; esta instalação é ${mods.version || '?'}`;
+  return null;
+}
+// The language a translation mod puts in the game, from its name (the files only say which language it replaces).
+function translationOf(m) {
+  if (!m || !(m.text_langs || []).length) return null;
+  const code = MALS_LANG[m.text_langs[0]];
+  const n = m.name.toLowerCase();
+  const label = /pt[-_ ]?br|portugu|brasil|tradu[cç][aã]o|dublagem/.test(n) ? 'Português (Brasil)'
+    : /espa[nñ]ol|spanish/.test(n) ? 'Español' : m.name;
+  return code ? { code, label, voices: (m.voice_langs || []).length > 0 } : null;
+}
+function activeTranslation() {
+  for (const name of mods.enabled) {
+    const t = translationOf(mods.mods.find((m) => m.name === name));
+    if (t) return t;
+  }
   return null;
 }
 async function loadMods() {
@@ -504,29 +525,50 @@ async function loadMods() {
   try { mods = await invoke('mods_list'); }
   catch (e) { $('#mods-status').textContent = String(e); return; }
   renderMods();
+  renderGameLang();
+}
+function modsProgress(on) {
+  $('#mods-progress').classList.toggle('hidden', !on);
+  $('#mods-fill').style.width = '0%';
+  $('#mods-progress .bar').classList.remove('error');
 }
 function renderMods() {
   const box = $('#mods-list');
   box.textContent = '';
   const order = [...mods.enabled.filter((n) => mods.mods.some((m) => m.name === n)), ...mods.mods.map((m) => m.name).filter((n) => !mods.enabled.includes(n))];
   if (!modsBusy) {
-    $('#mods-status').textContent = !mods.mods.length ? 'Nenhum mod ainda: adicione uma pasta ou um .zip, ou coloque-os na pasta de mods.'
+    $('#mods-status').textContent = !mods.mods.length ? 'Nenhum mod ainda. Adicione o .zip de um mod (a tradução PT-BR, por exemplo).'
       : mods.stale ? 'Um mod ligado ou os arquivos do jogo mudaram: os mods são preparados de novo ao jogar.' : '';
   }
   for (const name of order) {
     const m = mods.mods.find((x) => x.name === name), on = mods.enabled.includes(name), problem = modProblem(m);
+    const tr = translationOf(m);
     const a = document.createElement('article');
-    a.className = 'mod' + (on ? ' soon' : '');
+    a.className = 'mod-card' + (on ? ' on' : '') + (problem ? ' bad' : '');
     const areas = Object.entries(m.areas || {}).sort((x, y) => y[1] - x[1]).map(([k]) => AREAS[k] || k);
-    a.innerHTML = `<div class="mod-art"><span class="mod-num">${m.files ? (m.files > 999 ? `${(m.files / 1000).toFixed(1)}k` : m.files) : '–'}</span><small>ARQUIVOS</small></div>
-      <div class="mod-body"><div class="mod-head"><h3></h3>${problem ? '<span class="badge warn"></span>' : on ? '<span class="badge">Ligado</span>' : ''}</div>
-      <p class="mod-info"></p><ul class="mod-tags"></ul></div>
-      <div class="mod-side"><button class="gold small hidden" data-adapt></button><button class="ghost small" data-up title="Subir">▲</button><button class="ghost small" data-down title="Descer">▼</button><button class="ghost small" data-del title="Apagar">×</button></div>
-      <label class="toggle mod-toggle" title="Ligar / desligar"><input type="checkbox" /><span class="knob"></span></label>`;
+    a.innerHTML = `<div class="mod-badge"></div>
+      <div class="mod-main">
+        <div class="mod-title"><h3></h3><span class="mod-kind"></span></div>
+        <p class="mod-info"></p>
+        <ul class="mod-tags"></ul>
+        <p class="mod-warn hidden"></p>
+      </div>
+      <div class="mod-actions">
+        <label class="toggle mod-toggle" title="Ligar / desligar"><input type="checkbox" /><span class="knob"></span></label>
+        <div class="mod-small"><button class="icon-btn" data-up title="Subir">▲</button><button class="icon-btn" data-down title="Descer">▼</button><button class="icon-btn" data-adapt title="Converter para a versão instalada">⟳</button><button class="icon-btn danger" data-del title="Apagar">✕</button></div>
+      </div>`;
+    a.querySelector('.mod-badge').innerHTML = tr ? `<b>${tr.label === 'Português (Brasil)' ? 'PT-BR' : 'TXT'}</b><small>${tr.voices ? 'TEXTO + VOZ' : 'TEXTO'}</small>`
+      : `<b>${m.files ? (m.files > 999 ? `${(m.files / 1000).toFixed(1)}k` : m.files) : '–'}</b><small>ARQUIVOS</small>`;
     a.querySelector('h3').textContent = name;
-    if (problem) a.querySelector('.badge').textContent = problem;
+    a.querySelector('.mod-kind').textContent = tr ? (tr.voices ? 'Tradução e dublagem' : 'Tradução') : '';
     a.querySelector('.mod-info').textContent = m.files ? `${(m.size / 1e6).toFixed(0)} MB · substitui ${m.replaces} arquivos do jogo, adiciona ${m.adds}` : '';
     a.querySelector('.mod-tags').innerHTML = areas.slice(0, 5).map((x) => `<li>${esc(x)}</li>`).join('');
+    if (problem) { a.querySelector('.mod-warn').textContent = problem; a.querySelector('.mod-warn').classList.remove('hidden'); }
+    else if (tr && on) {
+      a.querySelector('.mod-warn').textContent = `O jogo fica em ${tr.label} (no lugar de ${LANGS.find(([v]) => v === tr.code)?.[1] || tr.code}).`;
+      a.querySelector('.mod-warn').classList.remove('hidden', 'bad');
+      a.querySelector('.mod-warn').classList.add('ok');
+    }
     const box2 = a.querySelector('input');
     box2.checked = on;
     box2.disabled = (!!problem && !on) || modsBusy;
@@ -538,16 +580,14 @@ function renderMods() {
       [e[i], e[j]] = [e[j], e[i]];
       applyMods(e);
     };
-    if (m.romfs && otherVersion(m).length) {   // made for another version: adapt.py makes a copy for this one
-      const b = a.querySelector('[data-adapt]');
-      b.classList.remove('hidden');
-      b.textContent = `Adaptar para ${mods.version}`;
-      b.disabled = modsBusy;
-      b.onclick = () => adaptMod(name);
-    }
-    a.querySelector('[data-up]').onclick = () => move(-1);
-    a.querySelector('[data-down]').onclick = () => move(1);
-    a.querySelector('[data-up]').disabled = a.querySelector('[data-down]').disabled = !on || mods.enabled.length < 2 || modsBusy;
+    const up = a.querySelector('[data-up]'), down = a.querySelector('[data-down]'), conv = a.querySelector('[data-adapt]');
+    up.onclick = () => move(-1);
+    down.onclick = () => move(1);
+    up.classList.toggle('hidden', !on || mods.enabled.length < 2);
+    down.classList.toggle('hidden', !on || mods.enabled.length < 2);
+    conv.classList.toggle('hidden', !(m.romfs && otherVersion(m).length));   // (a mod dropped in the folder by hand)
+    conv.onclick = () => convertMod(name, true);
+    [up, down, conv].forEach((b) => (b.disabled = modsBusy));
     a.querySelector('[data-del]').onclick = () => confirmBox(`Apagar o mod "${name}"?`, 'A pasta dele é apagada da pasta de mods.', async () => {
       try {
         if (on) await applyMods(mods.enabled.filter((n) => n !== name));
@@ -562,76 +602,92 @@ const MOD_WARN = {
   common_unpatched: (w) => `${w.mod}: o arquivo de interface do mod não recebeu o ajuste de 60 FPS; os menus rápidos podem abrir com fundo preto.`,
   no_romfs: (w) => `${w.mod}: sem pasta romfs, ignorado.`,
 };
-async function applyMods(enabled) {
+async function applyMods(enabled, quiet = false) {
   modsBusy = true;
   mods.enabled = enabled;
   renderMods();
   $('#mods-status').textContent = enabled.length ? 'Preparando os mods…' : 'Desligando os mods…';
-  $('#mods-bar').classList.remove('hidden', 'idle', 'error');
-  $('#mods-fill').style.width = '0%';
+  modsProgress(true);
   try {
     const r = await invoke('mods_apply', { enabled });
     const notes = (r.warnings || []).map((w) => (MOD_WARN[w.id] || ((x) => `${x.mod}: ${x.id}`))(w));
     if (r.conflicts && r.conflicts.length) notes.push(`${r.conflicts.length} arquivos estavam em mais de um mod; valeu o de cima.`);
-    $('#mods-status').textContent = enabled.length ? `Pronto: ${r.files} arquivos para o jogo.${notes.length ? ' ' + notes.join(' ') : ''}` : 'Mods desligados.';
+    if (!quiet) $('#mods-status').textContent = enabled.length ? `Pronto: ${r.files} arquivos para o jogo.${notes.length ? ' ' + notes.join(' ') : ''}` : 'Mods desligados.';
+    // a translation turned on: the game runs in the language it replaces (the mod's text is under that language)
+    const t = (() => { for (const n of enabled) { const x = translationOf(mods.mods.find((m) => m.name === n)); if (x) return x; } return null; })();
+    if (t && ini.lang !== t.code) await saveIni({ lang: t.code });
     await loadSettings();
   } catch (e) {
-    $('#mods-bar').classList.add('error');
+    $('#mods-progress .bar').classList.add('error');
     $('#mods-status').textContent = '';
     showError('Não foi possível preparar os mods', String(e));
   }
   modsBusy = false;
-  $('#mods-bar').classList.add('hidden');
+  modsProgress(false);
+  const keep = $('#mods-status').textContent;
   await loadMods();
+  if (keep) $('#mods-status').textContent = keep;
 }
 listen('mods-progress', ({ payload: p }) => {
   if (p.total) $('#mods-fill').style.width = `${(p.done / p.total) * 100}%`;
   $('#mods-status').textContent = `Preparando os mods · ${p.done} de ${p.total} arquivos`;
 });
-async function addMod(directory) {
-  const path = await openDialog(directory ? { directory: true, title: 'Pasta do mod (com romfs dentro)' }
-    : { title: 'Mod em .zip', filters: [{ name: 'Zip', extensions: ['zip'] }] });
-  if (!path) return;
-  $('#mods-status').textContent = 'Copiando o mod…';
-  try { await invoke('mods_add', { path }); } catch (e) { showError('Não foi possível adicionar o mod', String(e)); }
-  loadMods();
-}
-// A mod made for another game version: adapt.py (main.rs mods_adapt) writes "<name> (<version>)" into mods/ with the
-// text merged message by message, the size table rebuilt and the other version's layout archives left out.
-async function adaptMod(src) {
-  modsBusy = true;
-  renderMods();
-  $('#mods-status').textContent = 'Adaptando o mod para a versão instalada…';
-  $('#mods-bar').classList.remove('hidden', 'idle', 'error');
-  $('#mods-fill').style.width = '0%';
-  try {
-    const r = await invoke('mods_adapt', { src });
-    const text = Object.values(r.text || {}).reduce((a, t) => a + t.messages, 0);
-    const kept = Object.values(r.text || {}).reduce((a, t) => a + t.untranslated, 0);
-    const left = (r.left_out || []).map((x) => x.path.split('/').pop());
-    $('#mods-status').textContent = `Pronto: "${r.name}" criado (${r.copied + r.added} arquivos${text ? `, ${text} mensagens traduzidas, ${kept} novas da versão ficaram no original` : ''}).`
-      + (left.length ? ` Ficou de fora: ${left.join(', ')}.` : '') + ' Ligue-o abaixo.';
-  } catch (e) {
-    $('#mods-bar').classList.add('error');
-    $('#mods-status').textContent = '';
-    showError('Não foi possível adaptar o mod', String(e));
-  }
-  modsBusy = false;
-  $('#mods-bar').classList.add('hidden');
-  const keep = $('#mods-status').textContent;
-  await loadMods();
-  $('#mods-status').textContent = keep;
-}
 listen('adapt-progress', ({ payload: p }) => {
   if (p.total) $('#mods-fill').style.width = `${(p.done / p.total) * 100}%`;
 });
-$('#mod-adapt-zip').onclick = async () => {
-  const path = await openDialog({ title: 'Mod feito para outra versão (.zip)', filters: [{ name: 'Zip', extensions: ['zip'] }] });
-  if (path) adaptMod(path);
-};
+// A mod made for another game version: adapt.py (main.rs mods_adapt) writes "<name> (<version>)" into mods/ with the
+// text merged message by message, the size table rebuilt and the other version's layout archives left out. The
+// original goes away and the converted one is turned on.
+async function convertMod(name, keepOriginal = false) {
+  modsBusy = true;
+  renderMods();
+  $('#mods-status').textContent = `"${name}" foi feito para outra versão do jogo: convertendo para a ${mods.version}…`;
+  modsProgress(true);
+  let r = null;
+  try {
+    r = await invoke('mods_adapt', { src: name });
+    if (!keepOriginal) await invoke('mods_remove', { name }).catch(() => {});
+  } catch (e) {
+    $('#mods-progress .bar').classList.add('error');
+    showError('Não foi possível converter o mod', String(e));
+  }
+  modsBusy = false;
+  modsProgress(false);
+  await loadMods();
+  if (!r) return;
+  const text = Object.values(r.text || {}).reduce((a, t) => a + t.messages, 0);
+  const kept = Object.values(r.text || {}).reduce((a, t) => a + t.untranslated, 0);
+  await applyMods([r.name, ...mods.enabled.filter((n) => n !== name && n !== r.name)], true);
+  $('#mods-status').textContent = `Convertido e ligado: "${r.name}"${text ? ` · ${text} mensagens traduzidas; ${kept} novas desta versão ficaram no original` : ''}.`
+    + ((r.left_out || []).some((x) => x.path.includes('LayoutArchive')) ? ' As imagens de menu do mod (logo) ficaram de fora: são de outra versão.' : '');
+}
+async function addMod(directory) {
+  const path = await openDialog(directory ? { directory: true, title: 'Pasta do mod (com romfs dentro)' }
+    : { title: 'Mod (.zip)', filters: [{ name: 'Zip', extensions: ['zip'] }] });
+  if (!path) return;
+  $('#mods-status').textContent = 'Copiando o mod…';
+  modsProgress(true);
+  let name;
+  try { name = await invoke('mods_add', { path }); }
+  catch (e) { modsProgress(false); showError('Não foi possível adicionar o mod', String(e)); return; }
+  modsProgress(false);
+  await loadMods();
+  const m = mods.mods.find((x) => x.name === name);
+  if (m && m.romfs && otherVersion(m).length) return convertMod(name);   // made for another version: convert it
+  if (m && !modProblem(m)) applyMods([...mods.enabled.filter((n) => n !== name), name]);
+}
 $('#mod-add-dir').onclick = () => addMod(true);
 $('#mod-add-zip').onclick = () => addMod(false);
 $('#mod-refresh').onclick = () => loadMods();
+
+// Configurações > Jogo > Idioma do jogo: with a translation on, its language takes the place of the one it replaces.
+function renderGameLang() {
+  const sel = $('#set-game-lang'), t = activeTranslation();
+  sel.innerHTML = `<option value="">Do Windows</option>` + LANGS.map(([v, n]) =>
+    t && v === t.code ? `<option value="${v}">${esc(t.label)} · mod</option>` : `<option value="${v}">${n}</option>`).join('');
+  sel.value = ini.lang || '';
+  $('#game-lang-note').textContent = t ? `Com o mod de tradução ligado, escolha ${t.label} para jogar traduzido.` : '';
+}
 
 // ---------------------------------------------------------------- launcher settings
 $('#set-music').onchange = (e) => { prefs.music = e.target.checked; savePrefs(); applyMusic(); };

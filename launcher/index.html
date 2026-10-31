@@ -160,19 +160,19 @@
     <section class="view" id="view-mods">
       <div class="panel wide">
         <h2>Mods</h2>
-        <p class="lead">Mods de arquivos do jogo no formato de emulador (uma pasta com <code>romfs/</code> dentro). Ficam em <code>mods</code> na pasta de instalação; ligados, o launcher os junta para o jogo, sem tocar nos seus arquivos.</p>
+        <p class="lead">Mods no formato de emulador (um <code>.zip</code> ou uma pasta com <code>romfs</code> dentro). O launcher confere, converte quando o mod é de outra versão do jogo e junta os mods ligados, sem tocar nos seus arquivos.</p>
         <div class="panel-scroll">
-        <div class="actions left">
-          <button class="gold" id="mod-add-dir">Adicionar pasta…</button>
-          <button class="ghost" id="mod-add-zip">Adicionar .zip…</button>
-          <button class="ghost" id="mod-adapt-zip" title="Um mod feito para outra versão do jogo (1.2.1, por exemplo): o launcher gera uma cópia adaptada à versão instalada">Adaptar mod de outra versão…</button>
-          <button class="ghost" data-open="mods">Abrir a pasta de mods</button>
-          <button class="ghost" id="mod-refresh">Atualizar lista</button>
+        <div class="mod-toolbar">
+          <button class="gold" id="mod-add-zip">+ Adicionar mod (.zip)</button>
+          <button class="ghost" id="mod-add-dir">Pasta…</button>
+          <span class="grow"></span>
+          <button class="icon-btn" data-open="mods" title="Abrir a pasta de mods"><svg viewBox="0 0 24 24"><path d="M3 6.5h6l2 2h10v10.5H3z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg></button>
+          <button class="icon-btn" id="mod-refresh" title="Atualizar lista"><svg viewBox="0 0 24 24"><path d="M19 8a8 8 0 1 0 1 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         </div>
+        <div class="mods-progress hidden" id="mods-progress"><div class="bar dl-bar"><div id="mods-fill"></div></div></div>
         <p class="hint" id="mods-status"></p>
-        <div class="bar dl-bar idle hidden" id="mods-bar"><div id="mods-fill"></div></div>
-        <div class="mods" id="mods-list"></div>
-        <p class="hint">Mais de um mod mexendo no mesmo arquivo: vale o que está mais acima na lista (use as setas). Mods de código (<code>exefs</code>) não são aceitos pelo recomp.</p>
+        <div class="mod-list" id="mods-list"></div>
+        <p class="hint small-print">Dois mods mexendo no mesmo arquivo: vale o que está mais acima (setas). Mods de código (<code>exefs</code>) não são aceitos pelo recomp.</p>
         </div>
       </div>
     </section>
@@ -282,6 +282,7 @@
               <label class="field">
                 <span>Idioma do jogo <small>(ao abrir)</small></span>
                 <select data-ini="lang" id="set-game-lang"></select>
+                <small id="game-lang-note" class="ok-note"></small>
               </label>
               <label class="field">
                 <span>Volume: <b id="vol-val"></b></span>

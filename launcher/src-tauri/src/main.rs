@@ -854,8 +854,9 @@ fn launch_game(app: AppHandle, procs: State<Procs>) -> Result<(), String> {
     }
     let mut cmd = Command::new(exe);
     cmd.current_dir(&h);
-    #[cfg(unix)]
-    cmd.process_group(0);
+    // totk.exe is a console program: without this its console window opens behind the game. Its log goes to
+    // logs/totk.log either way.
+    no_window(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| e.to_string())?;
     let pid = child.id();
     *slot = Some(pid);
