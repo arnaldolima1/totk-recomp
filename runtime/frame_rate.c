@@ -11,8 +11,15 @@
 // game speed is right only when frames take exactly their interval. With the set realtime both read the patch page
 // instead: +0 ratio = seconds * 30, +4 seconds (1.4.3: +8 interval = seconds * 60, the producer's nominal interval
 // before its half-step coefficient), the moving average of the last 5 display intervals, at most 1/15 s
-// (slower frames slow the game down, as on the console), no lower bound, so a higher frame-rate cap only changes the
-// pacer (frame_step_cap_ns, TOTK_FPS_LIMIT). The set cloth gives hair and cloth the same clock and needs realtime.
+// (slower frames slow the game down, as on the console) and at least 1/240 s, so a higher frame-rate cap only changes
+// the pacer (frame_step_cap_ns, TOTK_FPS_LIMIT). The set cloth gives hair and cloth the same clock and needs realtime.
+//
+// The floor: with a shorter step (ratio below 0.125) 1.4.3 aborts within seconds of some save loads (issue #241, a
+// 280 Hz monitor): Havok's hkDefaultMemoryImpl reports "Out of memory" for the buffer the physics pre-solve (profiler
+// scope "TtPreSolve") resizes in main+0x1261630. Forced steps on the Depths save: 1/240 s plays, 1/244 s and shorter
+// abort; the field, sky island and fight saves play at 1/280 s, the town save aborts after about 800 frames. The
+// frame limit stops at 240 too (LIMIT_MAX_HZ), so the floor only catches the average dipping under 1/240 s at that
+// limit, and no limit makes the game run slower than the clock.
 //
 // The sample is the display time the pacer gives each present (nvnQueuePresentTexture), so the step follows the
 // frames as shown, pacing waits included. With the step on, the pacer ignores the game's interval and holds a frame
@@ -47,6 +54,7 @@
 #define STEP_MAX_S (1.0 / 15.0)    // longest step; a longer frame slows the game down
 #define STEP_RESET_S 0.25          // a gap this long (loading, a debugger) restarts the average
 #define STEP_FIRST_S (1.0 / 60.0)
+#define STEP_MIN_S (1.0 / 240.0)   // shortest step; a shorter one makes the game's physics run out of memory
 
 static _Atomic uint64_t *step_word;   // patch page +0: ratio (low float), seconds (high float)
 static double step_now = STEP_FIRST_S;   // the step the patch page holds: what the game steps each frame
@@ -90,14 +98,15 @@ void frame_step_init(void) {
 
 int frame_step_realtime(void) { return step_word != NULL; }
 
-// The frame limit (menu, TOTK_FPS_LIMIT, live): 30, 60, 90, 120, 144, any whole rate from 30 to 360, or display (the
-// refresh rate of the window's monitor). Unset, the older TOTK_FPS60=0 still means 30. A limit of 30 switches the set
+// The frame limit (menu, TOTK_FPS_LIMIT, live): 30, 60, 90, 120, 144, any whole rate from 30 to 240, or display (the
+// refresh rate of the window's monitor, at most 240). A higher number gives 240, the rate of the shortest step the
+// game survives (STEP_MIN_S). Unset, the older TOTK_FPS60=0 still means 30. A limit of 30 switches the set
 // fps60 off (the shipping minimum interval 2), every other limit switches it on; the controller reads its minimum
 // interval from the patched sites each frame. With the real-time step the pacer holds frames to the limit; above 60
-// only the pacer changes, as the step has no lower bound. Without it the game steps whole 60 Hz vsyncs and the pacer
+// only the pacer changes, as the step's floor is the limit's ceiling. Without it the game steps whole 60 Hz vsyncs and the pacer
 // follows the game's interval, so the limit stops at 60.
 #define LIMIT_MIN_HZ 30
-#define LIMIT_MAX_HZ 360
+#define LIMIT_MAX_HZ 240   // 1 / STEP_MIN_S
 static int fps60_set = -2;
 static unsigned limit_seen;
 static int limit_read;
@@ -109,8 +118,13 @@ static int limit_parse(void) {
     if (!strcmp(e, "display")) return 0;
     char *end;
     long n = strtol(e, &end, 10);
-    if (!*end && n >= LIMIT_MIN_HZ && n <= LIMIT_MAX_HZ) return (int)n;
-    rt_log("frame rate: TOTK_FPS_LIMIT=%s is not 30..360 or display; 60", e);
+    if (!*end && n > LIMIT_MAX_HZ) {
+        rt_log("frame rate: TOTK_FPS_LIMIT=%s is above %d, where the game's physics runs out of memory; %d", e,
+               LIMIT_MAX_HZ, LIMIT_MAX_HZ);
+        return LIMIT_MAX_HZ;
+    }
+    if (!*end && n >= LIMIT_MIN_HZ) return (int)n;
+    rt_log("frame rate: TOTK_FPS_LIMIT=%s is not %d..%d or display; 60", e, LIMIT_MIN_HZ, LIMIT_MAX_HZ);
     return 60;
 }
 
@@ -258,6 +272,7 @@ void frame_step_present(uint64_t display_ns, int interval) {
             double sum = 0;
             for (unsigned i = 0; i < sample_count; i++) sum += samples[i];
             step = sum / sample_count;
+            if (step < STEP_MIN_S) step = STEP_MIN_S;
             step_store((float)step);
         }
     }
