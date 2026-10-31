@@ -180,6 +180,9 @@ const vkey = (v) => (String(v || '').match(/\d+(?:\.\d+)*/) || ['0'])[0].split('
 const newer = (a, b) => { const x = vkey(a), y = vkey(b); for (let i = 0; i < Math.max(x.length, y.length); i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
 async function loadReleases() {
   try { releases = await invoke('releases'); releasesError = null; } catch (e) { releases = []; releasesError = String(e); }
+  // Newest version first. The API's order is not the versions' (game-v0.2.10 came after game-v0.2.9 there), and the
+  // list's first stable entry is what the update check offers.
+  releases.sort((a, b) => (newer(a.tag, b.tag) ? -1 : newer(b.tag, a.tag) ? 1 : 0));
   const sel = $('#rel-list');
   sel.innerHTML = releases.length
     ? releases.map((r, i) => `<option value="${i}">${esc(r.tag)}${r.prerelease ? ' · pré-lançamento' : ''} · ${(r.size / 1e6).toFixed(0)} MB</option>`).join('')

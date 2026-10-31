@@ -34,7 +34,7 @@ pub fn valid_repo(repo: &str) -> bool {
     ok(parts.next()) && ok(parts.next()) && parts.next().is_none()
 }
 
-/// The repository's releases that carry a Windows setup zip, newest first.
+/// The repository's releases that carry a Windows setup zip, in the API's order (the launcher sorts them by version).
 pub fn list(repo: &str, token: Option<&str>) -> Result<Vec<Release>, String> {
     if !valid_repo(repo) {
         return Err(format!("repositório inválido: {repo}"));
