@@ -276,26 +276,8 @@ static int copy_tree(const char *src, const char *dst, const char *base, int dur
 
 static int name_cmp(const void *a, const void *b) { return strcmp(a, b); }
 
-// Move old to save-backup/<UTC time> and delete all backups but the newest SAVE_BACKUPS.
-static void rotate_backup(void) {
-    if (!exists(old_root)) return;
-    uint64_t ns = plat_unix_time_ns();
-    struct tm t;
-    plat_gmtime((int64_t)(ns / 1000000000u), &t);
-    char name[48], *dst = NULL;
-    for (int k = 0; !dst || exists(dst); k++) {
-        free(dst);
-        int n = snprintf(name, sizeof name, "%04d%02d%02d-%02d%02d%02d-%03u", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
-                         t.tm_hour, t.tm_min, t.tm_sec, (unsigned)(ns / 1000000u % 1000u));
-        if (k) snprintf(name + n, sizeof name - (size_t)n, "-%d", k);
-        dst = join(backup_root, name);
-    }
-    if (move_dir(old_root, dst)) {
-        rt_log("fs: cannot move the replaced save to save-backup; deleted");
-        remove_tree(old_root);
-    }
-    free(dst);
-    static char names[64][48];
+// The backups' folder names (digits first), sorted: oldest first, as rotate_backup names them in creation order.
+static int backup_names(char (*names)[48]) {
     int n = 0;
     Listing l;
     list_dir(backup_root, &l);
@@ -305,6 +287,37 @@ static void rotate_backup(void) {
             strcpy(names[n++], l.e[i].name);
     listing_free(l.e, l.n);
     qsort(names, (size_t)n, sizeof *names, name_cmp);
+    return n;
+}
+
+// Move old to save-backup/<UTC time> and delete all backups but the newest SAVE_BACKUPS. The name always sorts after
+// every existing one: a commit in the same millisecond as the newest backup (or after the clock went back) takes its
+// time and the next -NNN suffix. A name that sorted lower would be the first one pruned, losing the backup just made.
+static void rotate_backup(void) {
+    if (!exists(old_root)) return;
+    static char names[64][48];
+    int n = backup_names(names);
+    uint64_t ns = plat_unix_time_ns();
+    struct tm t;
+    plat_gmtime((int64_t)(ns / 1000000000u), &t);
+    char name[48];
+    int len = snprintf(name, sizeof name, "%04d%02d%02d-%02d%02d%02d-%03u", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
+                       t.tm_hour, t.tm_min, t.tm_sec, (unsigned)(ns / 1000000u % 1000u));
+    const char *newest = n ? names[n - 1] : "";
+    if (strcmp(name, newest) <= 0 && strlen(newest) >= (size_t)len) {
+        unsigned k = 0;
+        sscanf(newest + len, "-%u", &k);   // no suffix: k stays 0
+        do   // until it sorts after newest, even after an unpadded "-1" of older builds
+            snprintf(name, sizeof name, "%.*s-%03u", len, newest, ++k);
+        while (strcmp(name, newest) <= 0 && k < 100000);
+    }
+    char *dst = join(backup_root, name);
+    if (move_dir(old_root, dst)) {
+        rt_log("fs: cannot move the replaced save to save-backup; deleted");
+        remove_tree(old_root);
+    }
+    free(dst);
+    n = backup_names(names);
     for (int i = 0; i + SAVE_BACKUPS < n; i++) {
         char *p = join(backup_root, names[i]);
         remove_tree(p);
