@@ -71,3 +71,6 @@ desktop.ini
 
 # Agent task worktrees (tools/worktree.py)
 /.worktrees/
+
+# Mods the player drops in for testing (game-derived content)
+/mods/

@@ -94,7 +94,7 @@ function showView(name) {
   $$('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${name}`));
   document.body.classList.toggle('panel-open', name !== 'home');
 }
-$$('.tab').forEach((t) => (t.onclick = () => showView(t.dataset.view)));
+$$('.tab').forEach((t) => (t.onclick = () => { showView(t.dataset.view); if (t.dataset.view === 'mods') loadMods(); }));
 $$('[data-set]').forEach((b) => (b.onclick = () => {
   $$('[data-set]').forEach((x) => x.classList.toggle('active', x === b));
   $$('.set-page').forEach((pg) => pg.classList.toggle('active', pg.id === `set-${b.dataset.set}`));
@@ -121,7 +121,6 @@ async function refresh() {
   $('#ini-note').textContent = status.running
     ? 'O jogo está aberto: as mudanças marcadas "ao abrir" valem na próxima vez; as outras o jogo lê na hora.'
     : status.installed ? '' : 'O jogo ainda não está instalado: estas escolhas ficam no totk.ini da pasta de instalação.';
-  $('#set-repo').value = status.repo || '';
   renderInstallForm();
   renderRelease();
   renderUpdates();
@@ -139,6 +138,7 @@ function renderInstallForm() {
   el.classList.toggle('low', free != null && free < need);
   for (const k of ['base', 'update', 'keys']) $(`#in-${k}`).value = prefs.inputs[k] || '';
   $('#in-lang').value = prefs.inputs.lang || status.lang || defaultGameLang();
+  $('#in-lang-field').classList.toggle('hidden', !!status.has_state);   // afterwards: Configurações > Jogo
   const known = $('#inputs-known');
   known.classList.toggle('hidden', !status.has_state);
   if (status.has_state) {
@@ -147,6 +147,29 @@ function renderInstallForm() {
       `pedidos de novo se a extração precisar rodar outra vez.${files ? `<br>${files}` : ''}`;
   }
 }
+
+// ---------------------------------------------------------------- installer source (main.rs get_source / set_source)
+// Oficial: valentderah/totk-pc-recomp. Alternativo: a repository of the player's choice (this launcher's own by
+// default), with a GitHub token when it is private.
+let source = {};
+async function loadSource() {
+  source = await invoke('get_source');
+  $$('#src-seg button').forEach((b) => b.classList.toggle('on', b.dataset.src === source.source));
+  $('#src-alt').classList.toggle('hidden', source.source !== 'alt');
+  $('#src-repo').value = source.alt;
+  $('#src-token').value = '';
+  $('#src-token').placeholder = source.has_token ? 'token salvo (deixe vazio para manter)' : 'token do GitHub (só para repositório privado)';
+}
+async function saveSource(which, withToken) {
+  try {
+    await invoke('set_source', { source: which, alt: $('#src-repo').value, token: withToken && $('#src-token').value ? $('#src-token').value : null });
+    await loadSource();
+    $('#rel-list').innerHTML = '<option value="">Buscando versões…</option>';
+    await loadReleases();
+  } catch (e) { showError('Não foi possível salvar', String(e)); }
+}
+$$('#src-seg button').forEach((b) => (b.onclick = () => saveSource(b.dataset.src, false)));
+$('#src-save').onclick = () => saveSource('alt', true);
 
 // ---------------------------------------------------------------- installer releases (main.rs releases / download_release)
 // TotK-Setup-<version>-windows.zip from the GitHub releases of status.repo, checked against its SHA-256 and unpacked
@@ -443,50 +466,159 @@ $('#keys-reset').onclick = () => {
   saveBinds(BINDS.map(([id]) => id));
 };
 
-// ---------------------------------------------------------------- quick settings (Ajustes rápidos)
+// ---------------------------------------------------------------- quality presets (Configurações > Exibição)
 const PRESETS = {
-  perf: { output_res: '', render_scale: '67', upscaler: '' },
-  balanced: { output_res: '', render_scale: '', upscaler: '' },
-  quality: { output_res: '2560x1440', render_scale: '100', upscaler: '' },
-  ultra: { output_res: '3840x2160', render_scale: '100', upscaler: '' },
+  perf: { output_res: '', render_scale: '67' },
+  balanced: { output_res: '', render_scale: '' },
+  quality: { output_res: '2560x1440', render_scale: '100' },
+  ultra: { output_res: '3840x2160', render_scale: '100' },
 };
 function renderQuick() {
-  const fps = ini.fps_limit || '60';
-  $$('#fps-seg button').forEach((b) => b.classList.toggle('on', b.dataset.fps === fps));
-  $('#mod-fps-num').textContent = fps === 'display' ? 'Hz' : fps;
-  $('#q-handheld').checked = ini.operation_mode === 'handheld';
   for (const b of $$('[data-preset]')) {
     const p = PRESETS[b.dataset.preset];
     b.classList.toggle('on', Object.entries(p).every(([k, v]) => (ini[k] || '') === v));
   }
 }
-$$('#fps-seg button').forEach((b) => (b.onclick = async () => {
-  await saveIni({ fps_limit: b.dataset.fps === '60' ? '' : b.dataset.fps });
-  iniToControls();
-}));
-$('#q-handheld').onchange = async (e) => { await saveIni({ operation_mode: e.target.checked ? 'handheld' : '' }); iniToControls(); };
 $$('[data-preset]').forEach((b) => (b.onclick = async () => { await saveIni(PRESETS[b.dataset.preset]); iniToControls(); }));
+
+// ---------------------------------------------------------------- mods (main.rs mods_list / mods_apply, mods.py)
+// <install>/mods/<name>/ with a romfs/ folder. The enabled ones, in priority order (the first wins a file two mods
+// replace), are merged into mods/.merged, which totk.ini's romfs_mods points at. A mod whose versioned files name
+// another game version (Product.121 on a 1.4.3 install) cannot be enabled.
+let mods = { mods: [], enabled: [], version: null, stale: false }, modsBusy = false;
+const AREAS = { Voice: 'vozes', Sound: 'sons', Mals: 'textos', UI: 'interface', Font: 'fontes', TexToGo: 'texturas',
+  Model: 'modelos', System: 'sistema', Event: 'cenas', Movie: 'vídeos', Shader: 'shaders', Pack: 'pacotes' };
+function modProblem(m) {
+  if (!m.romfs) return m.exefs ? 'Só tem exefs (código): o recomp não aceita' : 'Sem pasta romfs';
+  const other = (m.made_for || []).filter((v) => v !== mods.version);
+  if (other.length) return `Feito para o jogo ${other.join(' / ')}; esta instalação é ${mods.version || '?'}`;
+  return null;
+}
+async function loadMods() {
+  if (!status.installed) {
+    $('#mods-list').textContent = '';
+    $('#mods-status').textContent = 'Instale o jogo para usar mods.';
+    return;
+  }
+  try { mods = await invoke('mods_list'); }
+  catch (e) { $('#mods-status').textContent = String(e); return; }
+  renderMods();
+}
+function renderMods() {
+  const box = $('#mods-list');
+  box.textContent = '';
+  const order = [...mods.enabled.filter((n) => mods.mods.some((m) => m.name === n)), ...mods.mods.map((m) => m.name).filter((n) => !mods.enabled.includes(n))];
+  if (!modsBusy) {
+    $('#mods-status').textContent = !mods.mods.length ? 'Nenhum mod ainda: adicione uma pasta ou um .zip, ou coloque-os na pasta de mods.'
+      : mods.stale ? 'Um mod ligado ou os arquivos do jogo mudaram: os mods são preparados de novo ao jogar.' : '';
+  }
+  for (const name of order) {
+    const m = mods.mods.find((x) => x.name === name), on = mods.enabled.includes(name), problem = modProblem(m);
+    const a = document.createElement('article');
+    a.className = 'mod' + (on ? ' soon' : '');
+    const areas = Object.entries(m.areas || {}).sort((x, y) => y[1] - x[1]).map(([k]) => AREAS[k] || k);
+    a.innerHTML = `<div class="mod-art"><span class="mod-num">${m.files ? (m.files > 999 ? `${(m.files / 1000).toFixed(1)}k` : m.files) : '–'}</span><small>ARQUIVOS</small></div>
+      <div class="mod-body"><div class="mod-head"><h3></h3>${problem ? '<span class="badge warn"></span>' : on ? '<span class="badge">Ligado</span>' : ''}</div>
+      <p class="mod-info"></p><ul class="mod-tags"></ul></div>
+      <div class="mod-side"><button class="ghost small" data-up title="Subir">▲</button><button class="ghost small" data-down title="Descer">▼</button><button class="ghost small" data-del title="Apagar">×</button></div>
+      <label class="toggle mod-toggle" title="Ligar / desligar"><input type="checkbox" /><span class="knob"></span></label>`;
+    a.querySelector('h3').textContent = name;
+    if (problem) a.querySelector('.badge').textContent = problem;
+    a.querySelector('.mod-info').textContent = m.files ? `${(m.size / 1e6).toFixed(0)} MB · substitui ${m.replaces} arquivos do jogo, adiciona ${m.adds}` : '';
+    a.querySelector('.mod-tags').innerHTML = areas.slice(0, 5).map((x) => `<li>${esc(x)}</li>`).join('');
+    const box2 = a.querySelector('input');
+    box2.checked = on;
+    box2.disabled = (!!problem && !on) || modsBusy;
+    box2.onchange = () => applyMods(box2.checked ? [...mods.enabled, name] : mods.enabled.filter((n) => n !== name));
+    const move = (d) => {
+      const i = mods.enabled.indexOf(name), j = i + d;
+      if (i < 0 || j < 0 || j >= mods.enabled.length) return;
+      const e = [...mods.enabled];
+      [e[i], e[j]] = [e[j], e[i]];
+      applyMods(e);
+    };
+    a.querySelector('[data-up]').onclick = () => move(-1);
+    a.querySelector('[data-down]').onclick = () => move(1);
+    a.querySelector('[data-up]').disabled = a.querySelector('[data-down]').disabled = !on || mods.enabled.length < 2 || modsBusy;
+    a.querySelector('[data-del]').onclick = () => confirmBox(`Apagar o mod "${name}"?`, 'A pasta dele é apagada da pasta de mods.', async () => {
+      try {
+        if (on) await applyMods(mods.enabled.filter((n) => n !== name));
+        await invoke('mods_remove', { name });
+      } catch (e) { showError('Não foi possível apagar', String(e)); }
+      loadMods();
+    });
+    box.append(a);
+  }
+}
+const MOD_WARN = {
+  common_unpatched: (w) => `${w.mod}: o arquivo de interface do mod não recebeu o ajuste de 60 FPS; os menus rápidos podem abrir com fundo preto.`,
+  no_romfs: (w) => `${w.mod}: sem pasta romfs, ignorado.`,
+};
+async function applyMods(enabled) {
+  modsBusy = true;
+  mods.enabled = enabled;
+  renderMods();
+  $('#mods-status').textContent = enabled.length ? 'Preparando os mods…' : 'Desligando os mods…';
+  $('#mods-bar').classList.remove('hidden', 'idle', 'error');
+  $('#mods-fill').style.width = '0%';
+  try {
+    const r = await invoke('mods_apply', { enabled });
+    const notes = (r.warnings || []).map((w) => (MOD_WARN[w.id] || ((x) => `${x.mod}: ${x.id}`))(w));
+    if (r.conflicts && r.conflicts.length) notes.push(`${r.conflicts.length} arquivos estavam em mais de um mod; valeu o de cima.`);
+    $('#mods-status').textContent = enabled.length ? `Pronto: ${r.files} arquivos para o jogo.${notes.length ? ' ' + notes.join(' ') : ''}` : 'Mods desligados.';
+    await loadSettings();
+  } catch (e) {
+    $('#mods-bar').classList.add('error');
+    $('#mods-status').textContent = '';
+    showError('Não foi possível preparar os mods', String(e));
+  }
+  modsBusy = false;
+  $('#mods-bar').classList.add('hidden');
+  await loadMods();
+}
+listen('mods-progress', ({ payload: p }) => {
+  if (p.total) $('#mods-fill').style.width = `${(p.done / p.total) * 100}%`;
+  $('#mods-status').textContent = `Preparando os mods · ${p.done} de ${p.total} arquivos`;
+});
+async function addMod(directory) {
+  const path = await openDialog(directory ? { directory: true, title: 'Pasta do mod (com romfs dentro)' }
+    : { title: 'Mod em .zip', filters: [{ name: 'Zip', extensions: ['zip'] }] });
+  if (!path) return;
+  $('#mods-status').textContent = 'Copiando o mod…';
+  try { await invoke('mods_add', { path }); } catch (e) { showError('Não foi possível adicionar o mod', String(e)); }
+  loadMods();
+}
+$('#mod-add-dir').onclick = () => addMod(true);
+$('#mod-add-zip').onclick = () => addMod(false);
+$('#mod-refresh').onclick = () => loadMods();
 
 // ---------------------------------------------------------------- launcher settings
 $('#set-music').onchange = (e) => { prefs.music = e.target.checked; savePrefs(); applyMusic(); };
 $('#set-volume').oninput = (e) => { prefs.volume = +e.target.value; savePrefs(); if (musicOn()) bgm.volume = prefs.volume / 100; };
 $('#set-close').onchange = (e) => { prefs.closeOnPlay = e.target.checked; savePrefs(); };
-$('#repo-save').onclick = async () => {
-  try { await invoke('set_repo', { repo: $('#set-repo').value }); await refresh(); await loadReleases(); }
-  catch (e) { showError('Não foi possível salvar', String(e)); }
-};
 $$('[data-url]').forEach((b) => (b.onclick = () => invoke('open_path', { path: b.dataset.url })));
 $$('[data-open]').forEach((b) => (b.onclick = () => invoke('open_path', { path: b.dataset.open }).catch((e) => showError('Não foi possível abrir', String(e)))));
 
 // ---------------------------------------------------------------- dialog
 let dialogLog = null;   // the log the dialog's button opens: the installer's, else the game's
+let dialogConfirm = null;   // the action of a confirmation (confirmBox), run by OK
 function showError(title, body, log = null) {
   $('#dialog-title').textContent = title;
   $('#dialog-body').textContent = body;
   dialogLog = log;
+  dialogConfirm = null;
+  $('#dialog-log').classList.remove('hidden');
+  $('#dialog-cancel').classList.add('hidden');
   $('#dialog').classList.remove('hidden');
 }
-$('#dialog-ok').onclick = () => $('#dialog').classList.add('hidden');
+function confirmBox(title, body, action) {
+  showError(title, body);
+  dialogConfirm = action;
+  $('#dialog-log').classList.add('hidden');
+  $('#dialog-cancel').classList.remove('hidden');
+}
+$('#dialog-ok').onclick = () => { $('#dialog').classList.add('hidden'); const a = dialogConfirm; dialogConfirm = null; if (a) a(); };
+$('#dialog-cancel').onclick = () => { dialogConfirm = null; $('#dialog').classList.add('hidden'); };
 $('#dialog-log').onclick = () => invoke('open_path', { path: dialogLog || 'logs/totk.log' });
 
 // ---------------------------------------------------------------- install
@@ -725,6 +857,7 @@ listen('build-done', async (e) => {
   renderBuild();
   setBuilding(false);
   await loadSettings();   // (the installer wrote totk.ini)
+  loadMods();
   if (code !== 0 && code !== 3) {
     showError('A instalação parou', build.error || [...logEl.childNodes].slice(-14).map((n) => n.textContent).join(''), build.log);
   }
@@ -806,6 +939,12 @@ async function play() {
   fadeMusic(0, 1400);
   await new Promise((r) => setTimeout(r, 900));   // the transition fades in first
   try {
+    const m = await invoke('mods_list').catch(() => null);
+    if (m && m.stale) {   // a mod or the game files changed since the merge
+      $('#t-msg').textContent = 'Preparando os mods';
+      await invoke('mods_apply', { enabled: m.enabled });
+      $('#t-msg').textContent = 'Uma nova jornada começa no céu';
+    }
     await invoke('launch_game');
     refresh();
   } catch (e) {
@@ -957,6 +1096,7 @@ $('#set-close').checked = prefs.closeOnPlay;
   if (view && $(`#view-${view}`)) showView(view);
   const lv = await getVersion();
   $('#about-versions').textContent = `Launcher ${lv}` + (status.installed_release ? ` · jogo: ${status.installed_release}` : '');
+  await loadSource();
   loadReleases();
   checkUpdates();
 })();

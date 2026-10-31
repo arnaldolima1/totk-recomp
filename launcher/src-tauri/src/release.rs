@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 pub const DEFAULT_REPO: &str = "valentderah/totk-pc-recomp";
+pub const ALT_REPO: &str = "arnaldolima1/totk-recomp";
 const AGENT: &str = concat!("totk-recomp-launcher/", env!("CARGO_PKG_VERSION"));
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -21,29 +22,34 @@ pub struct Release {
     pub notes: String,
     pub asset: String,
     pub url: String,
+    #[serde(default)]
+    pub api_url: String,   // the asset through the API: the download of a private repository's asset, with the token
     pub size: u64,
     pub sha256: Option<String>,
 }
 
-fn valid_repo(repo: &str) -> bool {
+pub fn valid_repo(repo: &str) -> bool {
     let mut parts = repo.split('/');
     let ok = |p: Option<&str>| p.is_some_and(|p| !p.is_empty() && !p.starts_with('.') && p.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)));
     ok(parts.next()) && ok(parts.next()) && parts.next().is_none()
 }
 
 /// The repository's releases that carry a Windows setup zip, newest first.
-pub fn list(repo: &str) -> Result<Vec<Release>, String> {
+pub fn list(repo: &str, token: Option<&str>) -> Result<Vec<Release>, String> {
     if !valid_repo(repo) {
         return Err(format!("repositório inválido: {repo}"));
     }
     let url = format!("https://api.github.com/repos/{repo}/releases?per_page=20");
-    let body: serde_json::Value = ureq::get(&url)
-        .set("User-Agent", AGENT)
-        .set("Accept", "application/vnd.github+json")
-        .timeout(Duration::from_secs(20))
+    let mut req = ureq::get(&url).set("User-Agent", AGENT).set("Accept", "application/vnd.github+json").timeout(Duration::from_secs(20));
+    if let Some(t) = token {
+        req = req.set("Authorization", &format!("Bearer {t}"));
+    }
+    let body: serde_json::Value = req
         .call()
         .map_err(|e| match e {
-            ureq::Error::Status(404, _) => format!("{repo}: repositório não encontrado (ou privado)"),
+            ureq::Error::Status(404, _) if token.is_none() => format!("{repo}: repositório não encontrado, ou privado (um token do GitHub em Avançado dá acesso)"),
+            ureq::Error::Status(404, _) => format!("{repo}: repositório não encontrado, ou o token não tem acesso a ele"),
+            ureq::Error::Status(401, _) => "o token do GitHub foi recusado".to_string(),
             e => e.to_string(),
         })?
         .into_json()
@@ -63,6 +69,7 @@ pub fn list(repo: &str) -> Result<Vec<Release>, String> {
             notes: s(r, "body"),
             asset: s(a, "name"),
             url: s(a, "browser_download_url"),
+            api_url: s(a, "url"),
             size: a["size"].as_u64().unwrap_or(0),
             sha256: a["digest"].as_str().and_then(|d| d.strip_prefix("sha256:")).map(str::to_ascii_lowercase),
         });
@@ -84,9 +91,10 @@ pub fn find_root(dir: &Path) -> Option<PathBuf> {
 
 /// Downloads `rel` into `releases/<tag>.zip`, checks it and unpacks it into `releases/<tag>/`; returns the installer
 /// root inside. `progress(done, total)` is called about four times a second; `cancel` stops the download.
-pub fn download(rel: &Release, releases: &Path, cancel: &AtomicBool, progress: impl Fn(u64, u64, &str)) -> Result<PathBuf, String> {
+pub fn download(rel: &Release, releases: &Path, token: Option<&str>, cancel: &AtomicBool, progress: impl Fn(u64, u64, &str)) -> Result<PathBuf, String> {
     let tag: String = rel.tag.chars().filter(|c| c.is_ascii_alphanumeric() || "-_.".contains(*c)).collect();
-    if tag.is_empty() || !rel.url.starts_with("https://github.com/") {
+    let private = token.is_some() && rel.api_url.starts_with("https://api.github.com/");
+    if tag.is_empty() || !(rel.url.starts_with("https://github.com/") || private) {
         return Err("release inválido".into());
     }
     std::fs::create_dir_all(releases).map_err(|e| e.to_string())?;
@@ -96,7 +104,14 @@ pub fn download(rel: &Release, releases: &Path, cancel: &AtomicBool, progress: i
     }
     let part = releases.join(format!("{tag}.zip.part"));
     let agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(20)).timeout_read(Duration::from_secs(60)).build();
-    let resp = agent.get(&rel.url).set("User-Agent", AGENT).call().map_err(|e| e.to_string())?;
+    // A private asset comes through the API with the token; the redirect to the storage host drops the Authorization
+    // header (ureq's default).
+    let req = if private {
+        agent.get(&rel.api_url).set("Accept", "application/octet-stream").set("Authorization", &format!("Bearer {}", token.unwrap()))
+    } else {
+        agent.get(&rel.url)
+    };
+    let resp = req.set("User-Agent", AGENT).call().map_err(|e| e.to_string())?;
     let total = resp.header("Content-Length").and_then(|v| v.parse().ok()).unwrap_or(rel.size);
     let mut from = resp.into_reader();
     let mut file = std::fs::File::create(&part).map_err(|e| e.to_string())?;

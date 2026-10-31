@@ -52,7 +52,7 @@ pub fn section_for(key: &str) -> &'static str {
         "audio" | "audio_prefill_ms" | "volume" => "audio",
         "motion" | "rumble" | "rumble_strength" | "rumble_curve" | "rumble_triggers" | "pad_layout" | "mouse_sens"
         | "input_record" => "input",
-        "romfs_mods" => "files",
+        "romfs_mods" | "romfs_patches" => "files",
         "trace" | "flight" | "flight_spike_ms" => "diagnostics",
         k if k.starts_with("bind_") => "input",
         _ => "performance",

@@ -37,7 +37,7 @@
     <nav class="tabs" data-tauri-drag-region>
       <button class="tab active" data-view="home">Início</button>
       <button class="tab" data-view="install">Instalação</button>
-      <button class="tab" data-view="mods">Ajustes rápidos</button>
+      <button class="tab" data-view="mods">Mods</button>
       <button class="tab" data-view="settings">Configurações</button>
       <button class="tab" data-view="about">Sobre</button>
     </nav>
@@ -81,6 +81,15 @@
         <div class="panel-scroll">
 
         <!-- the installer release (TotK-Setup): downloaded from GitHub (main.rs download_release) or a folder chosen by hand -->
+        <div class="field">
+          <span>Origem do instalador</span>
+          <div class="seg" id="src-seg"><button data-src="official">Oficial <small>valentderah</small></button><button data-src="alt">Alternativo</button></div>
+          <div class="path hidden" id="src-alt">
+            <input id="src-repo" placeholder="dono/repositório" spellcheck="false" />
+            <input id="src-token" type="password" placeholder="token do GitHub (só para repositório privado)" spellcheck="false" />
+            <button class="ghost" id="src-save">Salvar</button>
+          </div>
+        </div>
         <label class="field">
           <span>Instalador <small id="release-version"></small></span>
           <div class="path">
@@ -113,7 +122,7 @@
             <span>prod.keys</span>
             <div class="path"><input id="in-keys" readonly /><button class="ghost" data-pick="keys">Escolher</button></div>
           </label>
-          <label class="field">
+          <label class="field" id="in-lang-field">
             <span>Idioma do jogo</span>
             <select id="in-lang"></select>
           </label>
@@ -147,53 +156,22 @@
       </div>
     </section>
 
-    <!-- QUICK SETTINGS: presets over the totk.ini keys of Configurações -->
+    <!-- MODS: <install>/mods/<name>/romfs (main.rs mods_*, mods.py) -->
     <section class="view" id="view-mods">
       <div class="panel wide">
-        <h2>Ajustes rápidos</h2>
-        <p class="lead">Atalhos para as configurações do <code>totk.ini</code>. Nenhum arquivo do jogo é modificado; tudo pode ser refinado em <b>Configurações</b> ou no menu do jogo (<kbd>F1</kbd>).</p>
+        <h2>Mods</h2>
+        <p class="lead">Mods de arquivos do jogo no formato de emulador (uma pasta com <code>romfs/</code> dentro). Ficam em <code>mods</code> na pasta de instalação; ligados, o launcher os junta para o jogo, sem tocar nos seus arquivos.</p>
         <div class="panel-scroll">
-
-        <h3>Qualidade gráfica</h3>
-        <div class="presets" id="presets">
-          <button class="preset" data-preset="perf"><b>Desempenho</b><small>1080p · cena a 67% · FSR</small></button>
-          <button class="preset" data-preset="balanced"><b>Equilibrado</b><small>1080p · escala do jogo · FSR</small></button>
-          <button class="preset" data-preset="quality"><b>Qualidade</b><small>1440p · cena a 100%</small></button>
-          <button class="preset" data-preset="ultra"><b>Ultra</b><small>4K · cena a 100% · GPU forte</small></button>
+        <div class="actions left">
+          <button class="gold" id="mod-add-dir">Adicionar pasta…</button>
+          <button class="ghost" id="mod-add-zip">Adicionar .zip…</button>
+          <button class="ghost" data-open="mods">Abrir a pasta de mods</button>
+          <button class="ghost" id="mod-refresh">Atualizar lista</button>
         </div>
-
-        <div class="mods">
-          <article class="mod soon" id="mod-fps">
-            <div class="mod-art"><span class="mod-num" id="mod-fps-num">60</span><small>FPS</small></div>
-            <div class="mod-body">
-              <div class="mod-head">
-                <h3>Taxa de quadros</h3>
-                <span class="badge">Acima de 60: experimental</span>
-              </div>
-              <p>O limite de quadros do jogo. A física e o tempo seguem o relógio, então o jogo roda na velocidade certa em qualquer taxa.</p>
-              <div class="seg" id="fps-seg">
-                <button data-fps="30">30</button><button data-fps="60">60</button><button data-fps="90">90</button><button data-fps="120">120</button><button data-fps="144">144</button><button data-fps="display">Monitor</button>
-              </div>
-            </div>
-          </article>
-
-          <article class="mod" id="mod-handheld">
-            <div class="mod-art"><span class="mod-num">720</span><small>PORTÁTIL</small></div>
-            <div class="mod-body">
-              <div class="mod-head"><h3>Modo portátil</h3></div>
-              <p>O jogo se comporta como no Switch fora da base: resolução interna menor. Mais leve em PCs fracos.</p>
-            </div>
-            <label class="toggle mod-toggle" title="Ligar / desligar"><input type="checkbox" id="q-handheld" /><span class="knob"></span></label>
-          </article>
-
-          <article class="mod placeholder">
-            <div class="mod-art empty"><i></i></div>
-            <div class="mod-body">
-              <h3>Mods em breve</h3>
-              <p>Mods de arquivos do jogo (formato de emulador) vão aparecer aqui.</p>
-            </div>
-          </article>
-        </div>
+        <p class="hint" id="mods-status"></p>
+        <div class="bar dl-bar idle hidden" id="mods-bar"><div id="mods-fill"></div></div>
+        <div class="mods" id="mods-list"></div>
+        <p class="hint">Mais de um mod mexendo no mesmo arquivo: vale o que está mais acima na lista (use as setas). Mods de código (<code>exefs</code>) não são aceitos pelo recomp.</p>
         </div>
       </div>
     </section>
@@ -215,6 +193,12 @@
           <p class="hint" id="ini-note"></p>
           <div class="set-page active" id="set-display">
             <h3>Exibição</h3>
+            <div class="presets" id="presets">
+              <button class="preset" data-preset="perf"><b>Desempenho</b><small>1080p · cena a 67%</small></button>
+              <button class="preset" data-preset="balanced"><b>Equilibrado</b><small>1080p · escala do jogo</small></button>
+              <button class="preset" data-preset="quality"><b>Qualidade</b><small>1440p · cena a 100%</small></button>
+              <button class="preset" data-preset="ultra"><b>Ultra</b><small>4K · cena a 100% · GPU forte</small></button>
+            </div>
             <label class="toggle"><input type="checkbox" data-ini="fullscreen" data-on="1" data-off="" /><span class="knob"></span><div><b>Tela cheia</b><small>Janela sem borda sobre o monitor. <kbd>F11</kbd> alterna durante o jogo.</small></div></label>
             <div class="grid2">
               <label class="field">
@@ -357,7 +341,7 @@
             <label class="toggle"><input type="checkbox" id="set-intro" /><span class="knob"></span><div><b>Abertura animada</b><small>A animação ao abrir o launcher (um clique ou tecla pula).</small></div></label>
             <label class="toggle"><input type="checkbox" id="set-music" /><span class="knob"></span><div><b>Música de fundo</b><small>Toca no launcher; para quando o jogo abre. Use sua própria música e imagens: <code>music.mp3</code>, <code>bg1.jpg</code>…, <code>logo.png</code> e <code>loading.jpg</code> na pasta <code>launcher-art</code> (botão abaixo).</small></div></label>
             <label class="field">
-              <span>Volume</span>
+              <span>Volume da música</span>
               <input type="range" id="set-volume" min="0" max="100" />
             </label>
             <label class="toggle"><input type="checkbox" id="set-close" /><span class="knob"></span><div><b>Fechar o launcher ao jogar</b><small>Desligado, o launcher volta quando o jogo fecha (e mostra o erro se ele parar).</small></div></label>
@@ -368,10 +352,6 @@
             <label class="field">
               <span>Outras chaves do <code>totk.ini</code> (<code>chave = valor</code>, uma por linha; a lista completa está no <code>totk.ini.example</code>)</span>
               <textarea id="set-extra" rows="5" spellcheck="false" placeholder="replay_async = 1"></textarea>
-            </label>
-            <label class="field">
-              <span>Repositório dos instaladores <small>(GitHub, dono/nome)</small></span>
-              <div class="path"><input id="set-repo" spellcheck="false" /><button class="ghost" id="repo-save">Salvar</button></div>
             </label>
             <div class="actions left">
               <button class="ghost" data-open=".">Pasta do jogo</button>
@@ -420,7 +400,8 @@
         <p class="fork">Por <b>arnaldolima1</b>, vindo do fork do UltraTears:</p>
         <ul class="fork-list">
           <li><b>Instalação guiada</b>: baixa o instalador do GitHub, verifica e roda com barra de progresso</li>
-          <li><b>Configurações</b> do <code>totk.ini</code> com remapeamento de teclas e ajustes rápidos</li>
+          <li><b>Configurações</b> do <code>totk.ini</code> com remapeamento de teclas e presets de qualidade</li>
+          <li><b>Mods</b> no formato de emulador, juntados e verificados para o recomp</li>
           <li>Controle navega no launcher, música e arte personalizáveis</li>
         </ul>
 
@@ -446,7 +427,7 @@
     <div class="dialog-box">
       <h3 id="dialog-title"></h3>
       <pre id="dialog-body"></pre>
-      <div class="actions"><button class="ghost" id="dialog-log">Abrir log</button><button class="gold" id="dialog-ok">OK</button></div>
+      <div class="actions"><button class="ghost" id="dialog-log">Abrir log</button><button class="ghost hidden" id="dialog-cancel">Cancelar</button><button class="gold" id="dialog-ok">OK</button></div>
     </div>
   </div>
 

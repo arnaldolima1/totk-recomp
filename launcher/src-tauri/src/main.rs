@@ -5,11 +5,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod ini;
+mod mods;
 mod release;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::io::Read;
+use std::io::{BufRead, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -212,7 +213,7 @@ fn status(app: AppHandle, procs: State<Procs>) -> Status {
         free_gb: free_space(&h).map(|b| b as f64 / 1e9),
         building: procs.build.lock().unwrap().is_some(),
         downloading: procs.downloading.load(Ordering::Relaxed),
-        repo: repo(&app),
+        repo: source(&app).repo,
         running: procs.game.lock().unwrap().is_some(),
         home: h.to_string_lossy().into_owned(),
     }
@@ -317,20 +318,170 @@ fn write_ini(app: AppHandle, changes: BTreeMap<String, String>) -> Result<(), St
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
-fn repo(app: &AppHandle) -> String {
-    read_config(app).get("repo").and_then(|r| r.as_str()).filter(|r| !r.is_empty()).unwrap_or(release::DEFAULT_REPO).to_string()
+/// Where the installer releases come from: "official" (valentderah/totk-pc-recomp) or "alt" (a repository of the
+/// player's choice, by default this launcher's own). A GitHub token, when set, is sent to the API only, for a private
+/// repository.
+#[derive(Serialize)]
+struct Source {
+    source: String,
+    official: String,
+    alt: String,
+    repo: String,
+    has_token: bool,
+}
+
+fn source(app: &AppHandle) -> Source {
+    let cfg = read_config(app);
+    let s = |k: &str| cfg.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|v| !v.is_empty()).map(String::from);
+    let which = s("source").filter(|v| v == "alt").unwrap_or_else(|| "official".into());
+    let alt = s("repo_alt").unwrap_or_else(|| release::ALT_REPO.into());
+    Source {
+        repo: if which == "alt" { alt.clone() } else { release::DEFAULT_REPO.into() },
+        source: which,
+        official: release::DEFAULT_REPO.into(),
+        alt,
+        has_token: s("token").is_some(),
+    }
+}
+
+fn token(app: &AppHandle) -> Option<String> {
+    read_config(app).get("token").and_then(|v| v.as_str()).map(str::trim).filter(|v| !v.is_empty()).map(String::from)
 }
 
 #[tauri::command]
-fn set_repo(app: AppHandle, repo: String) -> Result<(), String> {
-    write_config(&app, "repo", repo.trim())
+fn get_source(app: AppHandle) -> Source {
+    source(&app)
 }
 
-/// The repository's installer releases, newest first (release.rs list).
+/// Sets the source, the alternative repository and the token (None keeps the saved token, "" removes it).
+#[tauri::command]
+fn set_source(app: AppHandle, source: String, alt: String, token: Option<String>) -> Result<(), String> {
+    let alt = alt.trim();
+    if !alt.is_empty() && !release::valid_repo(alt) {
+        return Err(format!("repositório inválido: {alt}"));
+    }
+    write_config(&app, "source", if source == "alt" { "alt" } else { "official" })?;
+    write_config(&app, "repo_alt", alt)?;
+    if let Some(t) = token {
+        write_config(&app, "token", t.trim())?;
+    }
+    Ok(())
+}
+
+/// The source's installer releases, newest first (release.rs list).
 #[tauri::command]
 async fn releases(app: AppHandle) -> Result<Vec<release::Release>, String> {
-    let repo = repo(&app);
-    tauri::async_runtime::spawn_blocking(move || release::list(&repo)).await.map_err(|e| e.to_string())?
+    let (repo, token) = (source(&app).repo, token(&app));
+    tauri::async_runtime::spawn_blocking(move || release::list(&repo, token.as_deref())).await.map_err(|e| e.to_string())?
+}
+
+// ---------------------------------------------------------------- mods (mods.rs, mods.py)
+
+/// Runs mods.py with the release's Python in the install folder: its stdout lines, each a JSON object, go to `line`.
+fn run_mods_py(app: &AppHandle, args: &[String], mut line: impl FnMut(serde_json::Value)) -> Result<(), String> {
+    let h = home(app);
+    if !h.join("romfs-index.bin").is_file() {
+        return Err("Instale o jogo antes de usar mods.".into());
+    }
+    let root = release_root(app).ok_or("Os mods precisam do instalador (baixe-o em Instalação).")?;
+    let py = python(&root).ok_or("O Python do instalador não foi encontrado.")?;
+    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let script = dir.join("mods.py");
+    std::fs::write(&script, mods::SCRIPT).map_err(|e| e.to_string())?;
+    let mut cmd = Command::new(py);
+    cmd.arg(&script).args(args).arg("--home").arg(&h).current_dir(&h)
+        .env("PYTHONNOUSERSITE", "1").env("PYTHONIOENCODING", "utf-8").env("PYTHONUTF8", "1")
+        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = no_window(&mut cmd).spawn().map_err(|e| e.to_string())?;
+    let mut err_text = String::new();
+    let mut stderr = child.stderr.take().unwrap();
+    let err_thread = thread::spawn(move || { let mut s = String::new(); let _ = stderr.read_to_string(&mut s); s });
+    let mut last_error = None;
+    for l in std::io::BufReader::new(child.stdout.take().unwrap()).lines().map_while(Result::ok) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&l) {
+            if v["type"] == "error" {
+                last_error = v["message"].as_str().map(String::from);
+            }
+            line(v);
+        }
+    }
+    let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+    err_text += &err_thread.join().unwrap_or_default();
+    match (ok, last_error) {
+        (true, _) => Ok(()),
+        (false, Some(e)) => Err(e),
+        (false, None) => Err(err_text.lines().last().unwrap_or("mods.py falhou").to_string()),
+    }
+}
+
+/// The mods of mods/ (mods.py scan) with the enabled ones in priority order.
+#[tauri::command]
+async fn mods_list(app: AppHandle) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut out = serde_json::Value::Null;
+        run_mods_py(&app, &["scan".into()], |v| out = v)?;
+        let state = mods::load(&home(&app));
+        out["enabled"] = serde_json::json!(state.enabled);
+        out["stale"] = serde_json::json!(!state.enabled.is_empty() && state.stamp != mods::stamp(&home(&app), &state.enabled));
+        Ok(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Enables `enabled` (in priority order): merges them (mods.py build, "mods-progress" events) and points totk.ini at
+/// the merge; an empty list turns mods off. Returns mods.py's result.
+#[tauri::command]
+async fn mods_apply(app: AppHandle, enabled: Vec<String>) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let h = home(&app);
+        if let Some(bad) = enabled.iter().find(|n| !mods::valid_name(&h, n)) {
+            return Err(format!("mod não encontrado: {bad}"));
+        }
+        let mut changes = BTreeMap::new();
+        let mut result = serde_json::json!({ "files": 0 });
+        if enabled.is_empty() {
+            changes.insert("romfs_mods".to_string(), String::new());
+            changes.insert("romfs_patches".to_string(), String::new());
+            let _ = std::fs::remove_dir_all(mods::dir(&h).join(".merged"));
+        } else {
+            let mut args = vec!["build".to_string(), "--mods".to_string()];
+            args.extend(enabled.iter().cloned());
+            run_mods_py(&app, &args, |v| {
+                if v["type"] == "progress" {
+                    let _ = app.emit("mods-progress", v.clone());
+                } else if v["type"] == "result" {
+                    result = v;
+                }
+            })?;
+            changes.insert("romfs_mods".to_string(), mods::dir(&h).join(".merged").to_string_lossy().into_owned());
+            changes.insert("romfs_patches".to_string(), if result["patches_merged"] == true { "0".into() } else { String::new() });
+        }
+        write_ini(app.clone(), changes)?;
+        let stamp = mods::stamp(&h, &enabled);
+        mods::save(&h, &mods::State { enabled, stamp })?;
+        Ok(result)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Copies a mod folder or unpacks a mod zip into mods/.
+#[tauri::command]
+async fn mods_add(app: AppHandle, path: String) -> Result<String, String> {
+    let h = home(&app);
+    tauri::async_runtime::spawn_blocking(move || mods::add(&h, Path::new(&path))).await.map_err(|e| e.to_string())?
+}
+
+/// Deletes a mod folder (the launcher asks first).
+#[tauri::command]
+fn mods_remove(app: AppHandle, name: String) -> Result<(), String> {
+    let h = home(&app);
+    if !mods::valid_name(&h, &name) {
+        return Err(format!("mod não encontrado: {name}"));
+    }
+    std::fs::remove_dir_all(mods::dir(&h).join(&name)).map_err(|e| e.to_string())
 }
 
 #[derive(Serialize, Clone)]
@@ -351,6 +502,7 @@ fn download_release(app: AppHandle, procs: State<Procs>, rel: release::Release) 
         return Err("O download já está rodando.".into());
     }
     procs.cancel_download.store(false, Ordering::SeqCst);
+    let tok = token(&app);
     let dir = match app.path().app_local_data_dir() {
         Ok(d) => d.join("releases"),
         Err(e) => {
@@ -364,7 +516,7 @@ fn download_release(app: AppHandle, procs: State<Procs>, rel: release::Release) 
             let phase = if phase == "unpack" { "unpack" } else { "download" };
             let _ = app.emit("dl-progress", DlProgress { done, total, phase });
         };
-        let result = release::download(&rel, &dir, &procs.cancel_download, emit).and_then(|root| {
+        let result = release::download(&rel, &dir, tok.as_deref(), &procs.cancel_download, emit).and_then(|root| {
             write_config(&app, "release", &root.to_string_lossy())?;
             release::prune(&dir, &root);
             Ok(())
@@ -713,8 +865,8 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            status, set_home, set_release, set_repo, installer_text, start_view, custom_art, read_ini, write_ini, releases,
-            download_release, cancel_download, find_game_files, start_build, cancel_build, launch_game, stop_game, log_tail, open_path,
+            status, set_home, set_release, get_source, set_source, installer_text, start_view, custom_art, read_ini, write_ini, releases,
+            download_release, cancel_download, find_game_files, mods_list, mods_apply, mods_add, mods_remove, start_build, cancel_build, launch_game, stop_game, log_tail, open_path,
         ])
         .run(tauri::generate_context!())
         .expect("launcher");
