@@ -1172,7 +1172,17 @@ size_t plat_getenv(const char *name, char *out, size_t cap) {
     return n;
 }
 
-uint32_t plat_thread_id(void) { return (uint32_t)syscall(SYS_gettid); }
+// The kernel's id of the calling thread, kept per thread after the first call. The runtime asks for it about 700,000
+// times a second in the open world (plat_rmutex_lock in common.c, on every acquire), and syscall(SYS_gettid) enters the
+// kernel each time.
+// A thread's id never changes, and the runtime does not fork. noinline: a fiber may resume on another thread
+// (platform.h), and a caller that inlined this could reuse the address of tid it computed before a plat_fiber_switch;
+// as a call it reads the slot of the thread it runs on, as the syscall did.
+__attribute__((noinline)) uint32_t plat_thread_id(void) {
+    static __thread uint32_t tid;
+    if (!tid) tid = (uint32_t)syscall(SYS_gettid);
+    return tid;
+}
 
 // The first set variable of names ("ru_RU.UTF-8") as a BCP-47 tag ("ru-RU") into tag; "" for C and POSIX.
 static void locale_tag(const char *const *names, int n, char *tag, size_t cap) {
