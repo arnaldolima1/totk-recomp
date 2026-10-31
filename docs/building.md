@@ -104,7 +104,8 @@ From the repository root, in PowerShell. Every step that depends on the game ver
    The AMD driver keeps its pipeline cache per exe path and holds a limited amount: preparing another build folder can
    evict this one's. `totk.exe --warm-shaders` rebuilds it from the shader cache.
 
-7. Run. Keep the window in the foreground; an unfocused window stalls the game.
+7. Run. The game pauses while its window is out of focus, as it does on the Switch when Home is pressed;
+   `assume_focus = 1` in `totk.ini`, or the Game tab, keeps it running in another window.
 
    ```powershell
    build\<ver>\totk.exe

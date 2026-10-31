@@ -102,6 +102,9 @@
 # here. Changes while the game runs take effect at once.
 # window_size = 1920x1080
 # fullscreen = 0
+# The game pauses when its window loses focus, as it does on the Switch when Home is pressed. 1 keeps it running while
+# you are in another window; the keyboard stays quiet until the window is in front again. Read at each focus change.
+# assume_focus = 0
 # Performance overlay in the top right corner: off, fps, or full (frame rate, mean and longest frame time). F10
 # cycles the modes in game.
 # perf_overlay = off
