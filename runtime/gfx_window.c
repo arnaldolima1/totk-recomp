@@ -28,6 +28,7 @@
 #include "gfx.h"
 #include "input.h"
 #include "nvn_api.h"
+#include "platform/platform.h"
 #include "ui/menu.h"
 #include "vk.h"
 
@@ -47,6 +48,7 @@ static HWND g_hwnd;
 static HANDLE g_wnd_ready;
 static VkSurfaceKHR g_surface;
 static volatile LONG g_dirty;               // WM_SIZE seen; swapchain stale
+static volatile LONG g_restart;             // gfx_window_request_restart: WM_CLOSE starts totk.exe again
 static volatile LONG g_focused = 1;
 static volatile LONG g_focus_msgs;
 static CRITICAL_SECTION g_start_lock;       // gfx_window_start / vsync start
@@ -318,6 +320,19 @@ void gfx_window_request_close(void) {
     if (g_hwnd) PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
 }
 
+void gfx_window_request_restart(void) {
+    InterlockedExchange(&g_restart, 1);
+    gfx_window_request_close();
+}
+
+// The restart, once WM_CLOSE has written the saves and the pipeline cache: totk.exe again with this process's command
+// line and environment (plat_restart), and the new one waits until this one is gone (main.c) before it moves the log
+// and opens the RomFS and the saves.
+static void relaunch(void) {
+    SetEnvironmentVariableA("TOTK_REEXEC", NULL);   // the new process counts its own address-space retries (memory.c)
+    if (!plat_restart()) rt_log("gfx: the restart could not start totk.exe again (error %lu)", GetLastError());
+}
+
 // ---- refresh rate of the window's monitor (TOTK_FPS_LIMIT=display). The window thread measures it when the window
 // opens, lands on another monitor or the display mode changes; readers take the stored value. QueryDisplayConfig gives
 // the exact rational rate (59.94, 143.998); EnumDisplaySettings' whole hertz is the fallback.
@@ -447,11 +462,13 @@ static LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     }
     case WM_CLOSE:
-        // The process ends with the window, as in MNG, once a save Commit still running in the background is done.
-        rt_log("gfx: window closed; exiting");
+        // The process ends with the window, as in MNG, once a save Commit still running in the background is done;
+        // after a restart request a new totk.exe takes over (relaunch).
+        rt_log("gfx: window closed; %s", g_restart ? "restarting" : "exiting");
         fs_save_flush();
         vk_pipeline_save();
         prof_write();   // ExitProcess runs no atexit handlers
+        if (g_restart) relaunch();
         ExitProcess(0);
     case WM_ERASEBKGND:
         return 1;

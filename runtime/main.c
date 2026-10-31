@@ -512,6 +512,9 @@ static void portable_paths(RtConfig *c) {
 
 int main(int argc, char **argv) {
     mem_init();   // first: claim the guest address space before anything else can land there; reads totk.ini
+    // A restart from the settings menu (gfx_window.c relaunch) starts this process while the one it replaces is still
+    // exiting: its log, RomFS and saves are free once it is gone.
+    if (plat_restart_wait(30000) < 0) rt_log("restart: the previous process still runs after 30 s; starting anyway");
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
     AddVectoredExceptionHandler(0, crash_handler);
