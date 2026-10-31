@@ -278,6 +278,17 @@ static int ensure_init(void) {
         P.dyn_wmask = e3.extendedDynamicState3ColorWriteMask && PROC(set_wmask, "vkCmdSetColorWriteMaskEXT");
         P.dyn_a2c = e3.extendedDynamicState3AlphaToCoverageEnable && PROC(set_a2c, "vkCmdSetAlphaToCoverageEnableEXT");
     }
+    // TOTK_VK_DYN_A2C=0/1 forces dynamic alpha to coverage off or on. Default off on AMD's Windows driver branch for
+    // RDNA 2 and older (vk_caps.amd_sc), which applies alpha to coverage while the dynamic state says off: on an RX 590
+    // (24.9.1) TotK, which never turns it on, drew Link and the NPCs with depth but no colour (black silhouettes) and
+    // dithered other surfaces into checkerboards (issue #67, RX 470/570/580). Taken out of the dynamic state, it goes
+    // into the pipeline key and the characters draw.
+    const char *da = cfg_get("TOTK_VK_DYN_A2C");   // no fixed default: it depends on the driver, see above
+    int da_on = da && *da ? strcmp(da, "0") != 0 : !vk_caps.amd_sc;
+    if (!da_on && P.dyn_a2c) {
+        P.dyn_a2c = 0;
+        rt_log("vk_pipeline: dynamic alpha to coverage off (%s)", da && *da ? "TOTK_VK_DYN_A2C=0" : "AMD's driver for RDNA 2 and older");
+    }
 #undef PROC
     static const VkDynamicState core[] = {
         VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT, VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT, VK_DYNAMIC_STATE_DEPTH_BIAS,
