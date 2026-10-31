@@ -582,6 +582,35 @@ static const char *present_note(void) {
 }
 
 // ---- the tabs
+// Colour adjustment (vk_color.c): a profile writes the four values (STS78721's presets, issue #136); moving one of them
+// makes the profile Custom.
+static void rows_color(void) {
+    static const struct { const char *name, *b, *c, *s, *g; } presets[] = {
+        {"default", "0", "100", "100", "1"}, {"vivid", "0", "115", "135", "0.95"}, {"clarity", "2", "110", "115", "1"}};
+    static const UiTextId names[] = {UI_MENU_COLOR_DEFAULT, UI_MENU_COLOR_VIVID, UI_MENU_COLOR_CLARITY,
+                                     UI_MENU_COLOR_CUSTOM};
+    opt_group(UI_MENU_COLOR);
+    if (opt_choice("TOTK_COLOR_PRESET", UI_MENU_COLOR_PRESET, names, 4, UI_MENU_COLOR_PRESET_DESC)) {
+        const char *p = cfg_value("TOTK_COLOR_PRESET");
+        for (const auto &e : presets)
+            if (!strcmp(p, e.name)) {
+                cfg_set("TOTK_COLOR_BRIGHTNESS", e.b), cfg_set("TOTK_COLOR_CONTRAST", e.c);
+                cfg_set("TOTK_COLOR_SATURATION", e.s), cfg_set("TOTK_COLOR_GAMMA", e.g);
+                cfg_save();
+            }
+    }
+    bool moved = opt_slider("TOTK_COLOR_BRIGHTNESS", UI_MENU_COLOR_BRIGHTNESS, -30, 30, UI_MENU_COLOR_BRIGHTNESS_DESC, 1,
+                            "%+.0f %%");
+    moved |= opt_slider("TOTK_COLOR_CONTRAST", UI_MENU_COLOR_CONTRAST, 70, 150, UI_MENU_COLOR_CONTRAST_DESC, 5, "%.0f %%");
+    moved |= opt_slider("TOTK_COLOR_SATURATION", UI_MENU_COLOR_SATURATION, 50, 200, UI_MENU_COLOR_SATURATION_DESC, 5,
+                        "%.0f %%");
+    moved |= opt_slider("TOTK_COLOR_GAMMA", UI_MENU_COLOR_GAMMA, 0.8f, 1.2f, UI_MENU_COLOR_GAMMA_DESC, 0.02f, "%.2f");
+    if (moved && strcmp(cfg_value("TOTK_COLOR_PRESET"), "custom")) {
+        cfg_set("TOTK_COLOR_PRESET", "custom");
+        cfg_save();
+    }
+}
+
 static void tab_screen(float scale) {
     opt_begin("##screen", scale);
     opt_toggle("TOTK_FULLSCREEN", UI_MENU_FULLSCREEN, UI_MENU_FULLSCREEN_DESC);
@@ -600,6 +629,7 @@ static void tab_screen(float scale) {
     static const UiTextId aspect[] = {UI_MENU_ASPECT_FIT, UI_MENU_ASPECT_STRETCH};
     opt_choice("TOTK_ASPECT", UI_MENU_ASPECT, aspect, 2, UI_MENU_ASPECT_DESC);
     opt_slider("TOTK_FOV", UI_MENU_FOV, 70, 140, UI_MENU_FOV_DESC, 5, "%.0f %%");
+    rows_color();
     opt_end();
 }
 
