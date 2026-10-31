@@ -125,9 +125,12 @@
 # lang = en-US
 # System mode reported to the game: docked or handheld.
 # operation_mode = docked
-# Language of the settings menu and the overlay: en or ru. Default: the Windows display language, English if it is
-# neither.
+# Language of the settings menu and the overlay: en, ru or pt-BR. Default: the Windows display language (any
+# Portuguese gives pt-BR), English if it is none of them.
 # menu_lang = en
+# Written by the launcher while a translation mod is on: the language code whose text the mod replaces and the
+# translation's name. The settings menu shows that name in place of the language.
+# lang_mod = en-US:Português (Brasil)
 
 [audio]
 # none mixes without opening an audio device.

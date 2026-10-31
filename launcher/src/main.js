@@ -526,6 +526,13 @@ async function loadMods() {
   catch (e) { $('#mods-status').textContent = String(e); return; }
   renderMods();
   renderGameLang();
+  await syncLangMod();
+}
+// totk.ini lang_mod = <code>:<name>: the game's own menu (runtime/ui/menu.cpp row_game_lang) shows the translation
+// turned on under its name in place of the language it replaces. Empty when no translation is on.
+async function syncLangMod() {
+  const t = activeTranslation(), want = t ? `${t.code}:${t.label}` : '';
+  if ((ini.lang_mod || '') !== want) await saveIni({ lang_mod: want });
 }
 function modsProgress(on) {
   $('#mods-progress').classList.toggle('hidden', !on);

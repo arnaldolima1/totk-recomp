@@ -457,7 +457,9 @@ static void row_gpu(void) {
 }
 
 // The game language: one entry per language TotK ships (a Switch code that names it), each under its own name. The
-// Switch's Portuguese is not among them.
+// Switch's Portuguese is not among them. A translation mod the launcher turned on (TOTK_LANG_MOD "<code>:<name>",
+// launcher/src/main.js syncLangMod) puts its text under the language it replaces: that entry shows the translation's
+// name and sets the mod's code (en-GB for a mod of the British English text).
 static void row_game_lang(void) {
     static const struct { const char *code; UiTextId name; } langs[] = {
         {"en-US", UI_MENU_LANGNAME_EN}, {"ja", UI_MENU_LANGNAME_JA}, {"fr", UI_MENU_LANGNAME_FR},
@@ -470,10 +472,22 @@ static void row_game_lang(void) {
     vals[0] = "";
     names[0] = menu_text(UI_MENU_GAME_LANG_AUTO);
     const char *now = cfg_value("TOTK_LANG");
+    static char mod_code[16];
+    const char *mod = cfg_get("TOTK_LANG_MOD"), *mod_name = NULL;
+    const char *colon = mod ? strchr(mod, ':') : NULL;
+    if (colon && colon[1] && colon > mod && (size_t)(colon - mod) < sizeof mod_code) {
+        memcpy(mod_code, mod, colon - mod);
+        mod_code[colon - mod] = 0;
+        mod_name = colon + 1;
+    }
     int cur = *now ? -1 : 0;
     for (int i = 1; i < N; i++) {
         vals[i] = langs[i - 1].code;
         names[i] = menu_text(langs[i - 1].name);
+        if (mod_name && !strcmp(ui_text_lang(mod_code), ui_text_lang(vals[i]))) {
+            vals[i] = mod_code;
+            names[i] = mod_name;
+        }
         if (*now && !strcmp(ui_text_lang(now), ui_text_lang(vals[i]))) cur = i;   // en-GB is English too
     }
     opt_choice_list("TOTK_LANG", UI_MENU_GAME_LANG, vals, names, N, UI_MENU_GAME_LANG_DESC, cur);
@@ -581,8 +595,10 @@ static void tab_controls(float scale) {
 
 static void tab_menu(float scale) {
     opt_begin("##menu", scale);
-    static const UiTextId langs[] = {UI_MENU_MENU_LANG_AUTO, UI_MENU_LANGNAME_EN, UI_MENU_LANGNAME_RU};
-    opt_choice("TOTK_MENU_LANG", UI_MENU_MENU_LANG, langs, 3, UI_MENU_MENU_LANG_DESC);
+    // in the order of the key's values (cfg.c): automatic, en, ru, pt-BR
+    static const UiTextId langs[] = {UI_MENU_MENU_LANG_AUTO, UI_MENU_LANGNAME_EN, UI_MENU_LANGNAME_RU,
+                                     UI_MENU_LANGNAME_PT_BR};
+    opt_choice("TOTK_MENU_LANG", UI_MENU_MENU_LANG, langs, 4, UI_MENU_MENU_LANG_DESC);
     opt_end();
 }
 
