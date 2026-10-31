@@ -424,8 +424,8 @@ static int usage(const char *argv0) {
 }
 
 // Paths for a copied folder (tools/package_build.py). Per path: TOTK_EXEFS, TOTK_ROMFS, TOTK_PROFILE_DIR, else the
-// folder next to totk.exe (exefs, romfs, profile) if it exists, else the path baked in at build time. A relative
-// value is relative to totk.exe's folder.
+// folder next to totk.exe (exefs with main.npdm, romfs with romfs.bin, any profile folder) if it is there, else the
+// path baked in at build time. A relative value is relative to totk.exe's folder.
 static char pp_exefs[PLAT_PATH_MAX * 2], pp_romfs[PLAT_PATH_MAX * 2], pp_profile[PLAT_PATH_MAX * 2];
 
 static const char *portable_path(const char *dir, const char *var, const char *sub, const char *must, char *out, size_t cap,
@@ -439,6 +439,7 @@ static const char *portable_path(const char *dir, const char *var, const char *s
     }
     char probe[PLAT_PATH_MAX * 3];
     snprintf(out, cap, "%s/%s", dir, sub);
+    if (!must) return plat_dir_exists(out) ? out : fallback;   // the folder itself is the sign
     snprintf(probe, sizeof probe, "%s/%s", out, must);
     return plat_file_exists(probe) ? out : fallback;
 }
@@ -451,7 +452,7 @@ static void portable_paths(RtConfig *c) {
     *cut = 0;
     c->exefs = portable_path(exe, "TOTK_EXEFS", "exefs", "main.npdm", pp_exefs, sizeof pp_exefs, c->exefs);
     c->romfs = portable_path(exe, "TOTK_ROMFS", "romfs", "romfs.bin", pp_romfs, sizeof pp_romfs, c->romfs);
-    c->profile = portable_path(exe, "TOTK_PROFILE_DIR", "profile", ".", pp_profile, sizeof pp_profile, c->profile);
+    c->profile = portable_path(exe, "TOTK_PROFILE_DIR", "profile", NULL, pp_profile, sizeof pp_profile, c->profile);
 }
 
 int main(int argc, char **argv) {
