@@ -1,10 +1,6 @@
 // Vulkan-internal header of the graphics layer. Host code only; the guest never sees it.
 #pragma once
-#ifndef VK_USE_PLATFORM_WIN32_KHR
-#define VK_USE_PLATFORM_WIN32_KHR 1
-#endif
 #include <vulkan/vulkan.h>
-#include <vulkan/vulkan_win32.h>
 #include <stdint.h>
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wnullability-completeness"
@@ -32,7 +28,7 @@ typedef struct VkCtx {
     VmaAllocator vma;
     VkSemaphore timeline;                   // one timeline semaphore; values are issued by vk_sync.c
     VkDebugUtilsMessengerEXT messenger;
-    volatile long validation_errors;        // errors seen by the messenger (TOTK_VK_VALIDATION=1)
+    volatile int32_t validation_errors;        // errors seen by the messenger (TOTK_VK_VALIDATION=1)
     int validation;                         // layer active
     int has_custom_border_color, has_eds, has_eds2, has_eds3, has_vertex_input_dynamic_state,
         has_conditional_rendering, has_transform_feedback, has_provoking_vertex, has_device_fault, has_memory_budget,
@@ -89,7 +85,7 @@ void vk_crumbs_release(void);
 void vk_crumb(VkCommandBuffer cb, int kind, uint64_t n);
 void vk_crumbs_report(void);         // logs the two codes and what they name
 
-// ---- window and present (gfx_window.c). Host threads only.
+// ---- window and present (gfx_present.c). Host threads only.
 // vk_present_image: blits the crop rectangle {x, y, w, h} of src (NULL, or w/h <= 0: the whole w x h image), scaled
 // to the swapchain extent, into the acquired swapchain image and presents it. src is in layout, which is
 // VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL (its writes made visible to the transfer stage by the caller's barrier) or
@@ -113,12 +109,18 @@ void vk_queue_lock(void);
 void vk_queue_unlock(void);
 // Copy of the last presented swapchain image, for probes: on, the next presents read the image back into a host buffer
 // and wait for the GPU. *px stays valid until the next present; the format is the swapchain's. Returns 0 with no frame.
+// The rectangle {x, y, w, h} of a dw x dh swapchain image a cw x ch picture is presented in (gfx_present.c,
+// TOTK_ASPECT); the rest is black.
+void gfx_fit_rect(int cw, int ch, int dw, int dh, int out[4]);
 void vk_present_capture(int on);
 int vk_present_captured(const uint8_t **px, int *w, int *h, VkFormat *fmt);
 
-HWND gfx_window_handle(void);                      // NULL before gfx_window_start
+// The window system's part of device creation (gfx_window_win.c with Win32, gfx_window_sdl.c with SDL): the instance
+// extensions a surface needs (their count, at most max), and whether a queue family of pd can present to it.
+int gfx_window_vk_extensions(const char **out, int max);
+int gfx_window_vk_presentable(VkInstance inst, VkPhysicalDevice pd, uint32_t family);
 void gfx_window_resize(int client_w, int client_h);   // programmatic resize; returns after the swapchain is rebuilt
-void gfx_vsync_bind_counter(volatile long *counter);  // host-side stand-in for a bound event: incremented per tick
+void gfx_vsync_bind_counter(volatile int32_t *counter);  // host-side stand-in for a bound event: incremented per tick
 unsigned gfx_window_focus_messages(void);          // OE_MSG_FOCUS_STATE_CHANGED pushes made by the window thread
 void gfx_window_release_vk(void);                  // vk_shutdown calls it first: destroys swapchain, surface, present objects
 long vk_validation_errors_total(void);             // validation errors since the first vk_init, across vk_shutdown
@@ -193,6 +195,12 @@ void vk_mem_mirror_begin(void);
 int vk_mem_mirror_end(VkCommandBuffer cb, uint64_t fence);
 int vk_mem_mirror_pending(void);
 void vk_mem_mirror_prologue(VkCommandBuffer cb);
+// Shadow storage (vk_memory.c): vk_sync.c calls vk_mem_shadow_sync right before each submit; the replay notes every GPU
+// write into CPU-visible memory at record time (vk_mem_gpu_pending) and reports it at the fence with vk_gpu_written,
+// which copies the bytes back into guest memory before telling the texture cache (vk_guest_written).
+void vk_mem_shadow_sync(void);
+void vk_mem_gpu_pending(uint64_t addr, uint64_t size);
+void vk_gpu_written(uint64_t addr, uint64_t size);
 int vk_mem_mirror_probe(uint64_t addr);   // --probe-vkexec: the pool at addr gets its mirror as on a first buffer use;
                                           // 1 when it has one
 void vk_mem_class_log(const VkPhysicalDeviceProperties *p, const VkPhysicalDeviceMemoryProperties *m);   // once
@@ -362,7 +370,7 @@ VkCommandBuffer vk_sync_split(void);
 // Callbacks run in the order they were added, after those of earlier values; a value already done runs at once there.
 void vk_completion_add(uint64_t fence, void (*fn)(void *), void *arg);
 // gfx_vulkan_backend (vk_backend.c): presents go to a present thread and run after the submissions made before them.
-void rdoc_init(void);                     // runtime/rdoc_win.c: TOTK_RDOC debug capture; before vkCreateInstance
+void rdoc_init(void);                     // runtime/rdoc.c: TOTK_RDOC debug capture; before vkCreateInstance
 int rdoc_active(void);
 void rdoc_after_present(uint64_t frame);
 void vk_present_drain(void);               // returns once every queued present was submitted to gfx_queue

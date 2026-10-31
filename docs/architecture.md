@@ -94,11 +94,12 @@ Every guest thread is a host thread. TotK assumes Horizon's scheduler: three app
   (MacNativeGames' sites); `resolution.c` sets them from `output_res` and `render_scale` and grows the texture heap
   and the application pool to match. When the window is larger than the output, `vk_fsr.c` runs AMD FSR 1 (EASU,
   RCAS) on the present. An `output_res` that is not 16:9 (more than 1% off, `res_is_16x9`) also switches on the
-  `aspect` patch set (1.4.3 only), which hands the output's ratio to the camera, and `romfs.c` `overlay_init` loads the
+  `aspect` patch set, which hands the output's ratio to the camera, and `romfs.c` `overlay_init` loads the
   `romfs-patches-<w>x<h>` overlay for it when it exists (`tools/make_romfs_patches.py --aspect`, laid out by
-  `tools/ultrawide_layout.py`; the installer builds four sizes: 2560x1080, 3440x1440, 3840x1600, 5120x2160). Other
-  shapes, such as 16:10 or 32:9, get the wide camera and the 16:9 HUD stretched over it. 1.2.1 has no camera patch: a
-  wide size there keeps the 16:9 view. The `aspect` setting (`fit`, the default; `stretch`) decides what the present does
+  `tools/ultrawide_layout.py`; the installer builds ten sizes: 21:9 2560x1080, 3440x1440, 3840x1600, 5120x2160, 32:9
+  3840x1080, 5120x1440 and 16:10 1280x800, 1680x1050, 1920x1200, 2560x1600). A wider layout moves the HUD to the
+  screen's corners, a narrower one to its top and bottom edges. Other sizes get the camera of their shape and the 16:9
+  HUD stretched over it. The `aspect` setting (`fit`, the default; `stretch`) decides what the present does
   when the window's shape differs from the output's: `fit` letterboxes, where a 16:9 game in a wider window used to be
   stretched.
 - Occlusion queries never block the CPU; a result that is not ready counts as visible.
