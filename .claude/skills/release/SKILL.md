@@ -11,8 +11,9 @@ show on the GitHub release and on the update card of every installed launcher, s
 
 ## Steps
 
-1. Check the tree: `git status --porcelain --untracked-files=no` must be empty (commit first, asking the user) and
-   the branch should be `main`.
+1. Check the tree: `git status --porcelain --untracked-files=no` must be empty (commit first, asking the user). Work
+   lives on `develop`: `git checkout main` and `git merge --ff-only develop` before the release (`release.py` refuses
+   any other branch), and `git checkout develop` after it.
 2. Next version: the argument (`patch` by default, or `minor`, `major`, `X.Y.Z`) applied to `version` in
    `launcher/src-tauri/tauri.conf.json`.
 3. What changed: `git describe --tags --match "launcher-v*" --abbrev=0`, then

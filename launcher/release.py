@@ -3,13 +3,15 @@
 usage: python launcher/release.py 0.2.1 | patch | minor | major [--notes FILE] [--replace] [--no-push]
   - writes the version into tauri.conf.json, Cargo.toml, Cargo.lock, package.json and package-lock.json;
   - commits "launcher <version>" and tags launcher-v<version>;
-  - pushes the branch, pushes the tag, which starts
+  - runs on main only (work happens on develop, which is merged into main for a release);
+  - pushes main, pushes the tag, which starts
     .github/workflows/launcher-release.yml (installers + latest.json, signed with the TAURI_SIGNING_PRIVATE_KEY secret).
 --replace releases the current version again: deletes its GitHub release and tag first (gh), no bump.
 --notes FILE: the release notes (Markdown, Portuguese then English: what players see on the release and on the
   launcher's update card), kept as launcher/release-notes/<version>.md; without it, the commit subjects since the last
   launcher tag (the /release command in .claude/skills writes proper ones).
 --no-push stops after the local commit and tag.
+After the push, develop is fast-forwarded to main (the version commit), locally and on origin.
 Refuses a dirty working tree. Warns when ~/.tauri/ultratears-launcher.key.pub is not the pubkey in tauri.conf.json.
 """
 import argparse
@@ -100,6 +102,8 @@ def main():
         print(f'warning: {PUBKEY} is not the pubkey in tauri.conf.json; the release would not verify')
 
     branch = run('git', 'rev-parse', '--abbrev-ref', 'HEAD')
+    if branch != 'main':
+        sys.exit(f'on {branch}: release from main (git checkout main && git merge --ff-only develop)')
     if a.replace:
         v = cur
         tag = f'launcher-v{v}'
@@ -121,12 +125,17 @@ def main():
     print(f'{cur} -> {v}, tag {tag} on {branch}')
 
     if a.no_push:
-        print(f'not pushed; later: git push origin {branch} {branch}:main {tag}')
+        print(f'not pushed; later: git push origin main {tag} main:develop')
         return
-    run('git', 'push', 'origin', branch)
-    if branch != 'main':
-        run('git', 'push', 'origin', f'{branch}:main')   # fast-forward only; fails if main has its own commits
+    run('git', 'push', 'origin', 'main')
     run('git', 'push', 'origin', tag)
+    # the version commit goes back to develop; fast-forward only, so a develop with its own commits is left alone
+    print('> git push origin main:develop; git fetch origin develop:develop')
+    synced = subprocess.run(['git', 'push', 'origin', 'main:develop'], cwd=ROOT, capture_output=True).returncode == 0
+    synced = synced and subprocess.run(['git', 'fetch', 'origin', 'develop:develop'], cwd=ROOT,
+                                       capture_output=True).returncode == 0
+    if not synced:
+        print('warning: develop has commits main lacks; merge main into develop by hand')
     print(f'workflow started: https://github.com/{REPO}/actions')
 
 

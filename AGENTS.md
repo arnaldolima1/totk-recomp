@@ -2,6 +2,16 @@
 
 Static recompilation of *Tears of the Kingdom* (Switch, ARM64) into a native Windows x86-64 exe with a Vulkan renderer. Design: [docs/architecture.md](docs/architecture.md). Toolchain, build commands and tests: [docs/building.md](docs/building.md).
 
+## Branches and releases
+
+- Work and tests happen on `develop`. `main` only moves when a release goes out: `git checkout main`,
+  `git merge --ff-only develop`, then the release from `main`.
+- Launcher: the `/release` skill (`launcher/release.py`, tag `launcher-v<version>`); it runs on `main` and brings the
+  version commit back to `develop`.
+- Game: raise `VERSION`, write `release-notes/game/<version>.md`, merge into `main`, tag `game-v<version>` there and
+  push the tag (`.github/workflows/game-release.yml`, [docs/installer.md](docs/installer.md) "Publishing (fork)").
+- No other long-lived branches.
+
 ## Game content boundary
 
 This repository is public. Game data lives outside it and every derived file stays in ignored folders.
