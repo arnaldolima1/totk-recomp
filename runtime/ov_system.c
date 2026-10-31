@@ -160,18 +160,15 @@ static void ov_focus_mode(Cpu *c) {
 // FocusState GetCurrentFocusState(): 1 in focus, 2 out of focus (nn::oe::FocusState). In focus until the window
 // reports otherwise through oe_set_focus; TOTK_ASSUME_FOCUS=1 (unattended runs) pins it to 1. The caller of
 // oe_set_focus also pushes OE_MSG_FOCUS_STATE_CHANGED.
+//
+// The setting is read on every focus change rather than once at start: a focus change is rare, the lookup is a short
+// walk of the loaded ini entries, and the Game tab's row then takes effect the next time the window is left, without
+// a restart.
 static volatile LONG focus_state = 1;
-static int assume_focus(void) {
-    static volatile LONG v = -1;
-    LONG a = v;
-    if (a < 0) {
-        const char *e = cfg_get("TOTK_ASSUME_FOCUS");
-        a = e && atoi(e) ? 1 : 0;
-        InterlockedExchange(&v, a);
-    }
-    return (int)a;
+void oe_set_focus(int in_focus) {
+    const char *e = cfg_get("TOTK_ASSUME_FOCUS");
+    InterlockedExchange(&focus_state, in_focus || (e && atoi(e)) ? 1 : 2);
 }
-void oe_set_focus(int in_focus) { InterlockedExchange(&focus_state, in_focus || assume_focus() ? 1 : 2); }
 static void ov_focus_state(Cpu *c) { ret_x(c, (uint64_t)focus_state); }
 
 static volatile LONG notify_resume, notify_operation, notify_performance;

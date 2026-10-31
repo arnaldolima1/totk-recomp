@@ -86,6 +86,10 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_OPERATION_MODE] = "Console mode",
     [UI_MENU_OPERATION_MODE_DESC] = "Whether the game thinks it runs docked or handheld.",
     [UI_MENU_MODE_DOCKED] = "Docked", [UI_MENU_MODE_HANDHELD] = "Handheld",
+    [UI_MENU_ASSUME_FOCUS] = "Keep running out of focus",
+    [UI_MENU_ASSUME_FOCUS_DESC] = "The game pauses when its window loses focus, as it does on the Switch when Home is "
+                                  "pressed. On, it keeps running while you are in another window, and the keyboard "
+                                  "stays quiet until the window is in front again.",
 
     [UI_MENU_VOLUME] = "Volume", [UI_MENU_VOLUME_DESC] = "Master volume of the game.",
 
@@ -320,6 +324,10 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_OPERATION_MODE] = "Режим консоли",
     [UI_MENU_OPERATION_MODE_DESC] = "Игра считает, что консоль в док-станции или в портативном режиме.",
     [UI_MENU_MODE_DOCKED] = "В док-станции", [UI_MENU_MODE_HANDHELD] = "Портативный",
+    [UI_MENU_ASSUME_FOCUS] = "Работать без фокуса",
+    [UI_MENU_ASSUME_FOCUS_DESC] = "Игра встаёт на паузу, когда окно теряет фокус, как на Switch при нажатии Home. "
+                                  "Включено: игра идёт, пока вы в другом окне, а клавиатура не действует, пока "
+                                  "окно не вернётся на передний план.",
 
     [UI_MENU_VOLUME] = "Громкость", [UI_MENU_VOLUME_DESC] = "Общая громкость игры.",
 
