@@ -354,7 +354,6 @@ int probe_cfg(void) {
     cfg_load("cfg-probe-missing.ini");
     plat_setenv("TOTK_FPS60", NULL);
     plat_setenv("TOTK_MOUSE_SENS", NULL);
-    plat_setenv("TOTK_FREE_CORES", NULL);
     CHECK(cfg_bool("TOTK_FPS60") == 1, "default: unset FPS60 is on");
     CHECK(EQ(cfg_value("TOTK_VK_PRESENT"), "mailbox") && cfg_int("TOTK_SPLIT_DRAWS") == 64, "default: text and integer");
     plat_setenv("TOTK_MOUSE_SENS", "2.5");
@@ -364,12 +363,7 @@ int probe_cfg(void) {
     plat_setenv("TOTK_MOUSE_SENS", NULL);
     cfg_set("TOTK_MOUSE_SENS", "3");
     CHECK(cfg_double("TOTK_MOUSE_SENS") == 3.0 && cfg_int("TOTK_MOUSE_SENS") == 3, "a cfg_set value beats the default");
-    CHECK(cfg_bool("TOTK_FREE_CORES") == 0, "free_cores unset: off");
-    plat_setenv("TOTK_FREE_CORES", "0");
-    CHECK(cfg_bool("TOTK_FREE_CORES") == 0, "free_cores 0 gives the same as unset");
-    plat_setenv("TOTK_FREE_CORES", "1");
-    CHECK(cfg_bool("TOTK_FREE_CORES") == 1, "free_cores 1: on");
-    plat_setenv("TOTK_FREE_CORES", NULL);
+    CHECK(cfg_meta("FREE_CORES") == NULL, "free_cores is no setting: only the environment lifts the core gate");
     cfg_load("cfg-probe-missing.ini");
     int listed = 0;
     for (int i = 0; cfg_meta_at(i); i++) {
