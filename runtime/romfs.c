@@ -445,9 +445,31 @@ static void overlay_init(void) {
         def[strlen(def) - strlen("/manifest.tsv")] = 0;
         patches = def;
     }
+    size_t prompt_end = prompts_active >= 0 ? noverlay : 0;   // overlays[0, prompt_end): the prompt set's files
     const char *dirs[2] = {patches, cfg_get("TOTK_ROMFS_MODS")};
     for (int i = 0; i < 2; i++)
         if (dirs[i] && *dirs[i] && strcmp(dirs[i], "0")) overlay_load(dirs[i], 0);
+    // A mod (the launcher's translation, say) may replace a file the prompt set changes too, such as a language's
+    // Mals archive with the diamond's letters. The mod's file wins and the prompt set gives that one file up, so the
+    // game starts with the mod and every other prompt change; only that file keeps the Switch letters.
+    size_t dropped = 0;
+    for (size_t k = 0; k < prompt_end; k++) {
+        int taken = 0;
+        for (size_t j = prompt_end; j < noverlay && !taken; j++) taken = overlays[j].index == overlays[k].index;
+        if (!taken) continue;
+        rt_log("RomFS overlay: a mod replaces %s, so the %s prompts leave that file as the mod has it",
+               overlays[k].name, prompt_sets[prompts_active].name);
+        free(overlays[k].path);
+        free(overlays[k].name);
+        overlays[k].path = NULL;   // dropped; compacted below
+        dropped++;
+    }
+    if (dropped) {
+        size_t w = 0;
+        for (size_t r = 0; r < noverlay; r++)
+            if (overlays[r].path) overlays[w++] = overlays[r];
+        noverlay = w;
+    }
     heapdef_overlay();
     added_init();
     if (noverlay) qsort(overlays, noverlay, sizeof *overlays, overlay_order);

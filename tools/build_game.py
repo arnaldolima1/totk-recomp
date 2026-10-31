@@ -892,7 +892,8 @@ def main():
         print(f'{below_root(exe)}: {mib(exe.stat().st_size)}')
         return
     if OBJECT_CACHE:
-        kept, dropped, gone = objcache.prune(OBJECT_CACHE[0], cache_start - 2)
+        keep = {file_sha256(o) for mod, files in objs.items() if mod != 'runtime' for o in files}
+        kept, dropped, gone = objcache.prune(OBJECT_CACHE[0], keep)
         print(f'object cache: {kept} entries kept, {dropped} older entries and {gone} objects deleted')
     for dll in dlls:   # dynamic SDL3 (zlib) and its libiconv (LGPL, unmodified DLL), found next to totk.exe
         shutil.copy2(dll, exe.parent / dll.name)

@@ -55,6 +55,8 @@ extern const int rt_game_version;
 // fs.h (romfs.c): a layout's prompt folder (romfs-patches-xbox, -ps) was next to romfs-index.bin at start, and the
 // layout whose prompts were loaded.
 int romfs_prompts_ready(const char *layout);
+// host.h (frame_rate.c): game time since the loaded save's first frame, -1 before; achievement notices wait for it.
+int64_t frame_step_world_us(void);
 const char *romfs_prompts_active(void);
 extern const char rt_port_version[];
 }
@@ -1612,6 +1614,9 @@ static bool note_tick(void) {
         if (now - g_note_at < len) return true;
         g_note = -1;
     }
+    // Not on the title screen or a loading screen: the unlocks a save already held at start (recorded while the save
+    // storage came up) wait until the player has been in the world for two seconds.
+    if (frame_step_world_us() < 2000000) return false;
     int count = 0, next = ach_take_notice(&count);
     if (next < 0) return false;
     if (!cfg_bool("TOTK_ACH_POPUP")) return false;   // turned off: the unlock is recorded, the notice dropped

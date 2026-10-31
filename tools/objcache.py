@@ -15,8 +15,8 @@ below the current -I directories; it copies the object (DIR/objects/<SHA-256>.o,
 output and writes a depfile naming the current paths, so Ninja sees what a compile would have told it. A miss compiles
 and records. Paths therefore may move between builds (another temp folder, another release folder) without a miss.
 
-prune(DIR, since) deletes the entries no compile used since a time and the objects no entry names, so the cache holds
-one build's objects (about 310 MiB for 1.4.3). build_game.py calls it after a successful link.
+prune(DIR, keep) deletes the entries whose object is not one of the build's and the objects no entry names, so the
+cache holds one build's objects (about 310 MiB for 1.4.3). build_game.py calls it after a successful link.
 
 Standard library only.
 """
@@ -165,14 +165,15 @@ def compile_cached(cache, ident, cmd):
     return 0
 
 
-def prune(cache, since):
-    """Delete entries not used since `since` (a time.time() value) and objects no remaining entry names. Returns
-    (entries kept, entries deleted, objects deleted)."""
+def prune(cache, keep):
+    """Delete the entries whose object is not one of keep (the SHA-256 digests of the build's generated objects, so an
+    object Ninja found up to date keeps its entry though no compile ran) and the objects no remaining entry names.
+    Returns (entries kept, entries deleted, objects deleted)."""
     cache = Path(cache)
     kept, dropped, names = 0, 0, set()
     for e in (cache / 'entries').glob('*.json'):
         try:
-            if e.stat().st_mtime < since:
+            if json.loads(e.read_text())['obj'] not in keep:
                 e.unlink(); dropped += 1; continue
             names.add(json.loads(e.read_text())['obj'] + '.o')
             kept += 1
