@@ -214,6 +214,7 @@ static void window_settings_live(void) {
     unsigned v = cfg_version();
     if (started && v == seen) return;
     seen = v;
+    res_fov_live();
     const char *e = cfg_value("TOTK_VK_PRESENT");
     if (!started || strncmp(e, present, sizeof present - 1)) {
         snprintf(present, sizeof present, "%s", e);
