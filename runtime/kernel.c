@@ -294,12 +294,11 @@ static uint32_t block_inner(RtThread *t, int kind, int64_t ns) {
 // which it does at its next SVC or indirect call (kern_checkpoint, rt_dispatch), as Horizon runs the better thread at
 // once; guest code without either keeps the core until it reaches one.
 //
-// TOTK_FREE_CORES=1 in the environment turns the gate off, for experiments; totk.ini cannot. Without the gate a thread
+// free_cores = 1 (TOTK_FREE_CORES) turns the gate off, for experiments only: the game does not run that way. A thread
 // that holds no core reports its ideal core to GetCurrentProcessorNumber, so the game's job workers all report core 0
-// and run its per-core code at once: two of them add the same per-core NVN control memory, which retires the command
-// handle the other just recorded there, and its CallCommands finds no recording (1.2.1, at start); 1.4.3 corrupts a
-// heap in main+0x82e00 or hangs at the title menu. The settings menu of earlier releases wrote free_cores = 1 to
-// totk.ini under a label that promised the gate, and those files would keep failing at every start.
+// and run its per-core code at once: on 1.2.1 two of them add the same per-core NVN control memory, which retires the
+// command handle the other just recorded, and CallCommands finds no recording at start (#212); 1.4.3 corrupts a heap
+// in main+0x82e00 or hangs at the title menu. The start log and every crash report say so (kern_free_cores_note).
 static RtThread *g_core_owner[NCORE], *g_core_wait;
 static int g_cores_on = -1, g_held_max;
 
@@ -308,22 +307,22 @@ static void ap_init(void);
 
 static int cores_enabled(void) {
     if (g_cores_on < 0) {
-        const char *e = getenv("TOTK_FREE_CORES");
-        g_cores_on = !e || !*e || !strcmp(e, "0");   // "0" keeps the gate, like unset
-        const char *ini = cfg_get("TOTK_FREE_CORES");   // the environment's value when set, else totk.ini's
+        g_cores_on = !cfg_bool("TOTK_FREE_CORES");   // "0" keeps the gate, like unset
         if (!g_cores_on)
-            rt_log("kernel: virtual core gate off (TOTK_FREE_CORES): guest threads run without the limit of one per "
-                   "core that the game's per-core data needs; for experiments only, the game can fail");
-        else if (!e && ini && *ini && strcmp(ini, "0"))
-            rt_log("kernel: free_cores = %s in totk.ini ignored: the virtual core gate stays on (only TOTK_FREE_CORES "
-                   "in the environment lifts it)", ini);
+            rt_log("kernel: WARNING: free_cores = 1 (TOTK_FREE_CORES) turns the virtual core gate off. This is an "
+                   "experimental mode and the game crashes or hangs in it, usually at start. Set free_cores = 0 in "
+                   "totk.ini to play");
         diag_init();
         ap_init();
     }
     return g_cores_on;
 }
 
-int kern_core_gate_on(void) { return cores_enabled(); }
+void kern_free_cores_note(void) {
+    if (!g_cores_on)
+        rt_log("fatal: free_cores = 1 was on: the game crashes in this experimental mode; set free_cores = 0 in "
+               "totk.ini before reporting this crash");
+}
 
 static int core_allowed(const RtThread *t, int c) { return (int)((t->mask >> c) & 1); }
 

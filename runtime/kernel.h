@@ -34,7 +34,6 @@ enum { KERN_WAIT_NONE, KERN_WAIT_LOCK, KERN_WAIT_CONDVAR, KERN_WAIT_ADDRESS, KER
 int kern_thread_state(uint32_t handle);               // KERN_WAIT_*, KERN_THREAD_EXITED, or -1 for a bad handle
 void kern_core_stats(int *held_now, int *held_max);   // virtual-core holders now and the most ever at once
 void kern_core_stats_reset(void);
-int kern_core_gate_on(void);                          // 0 when TOTK_FREE_CORES in the environment lifted the gate
 extern volatile int kern_test_cv_old_order;           // WaitProcessWideKeyAtomic: release the lock before setting
                                                       // the key (MNG's pre-fix order, the negative control)
 extern void (*volatile kern_test_cv_hook)(void);      // called right after the lock release, holding the kernel lock
