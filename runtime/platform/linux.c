@@ -1679,6 +1679,14 @@ static unsigned long long process_start(int pid) {
     return start;
 }
 
+// glibc 2.34 added posix_spawn_file_actions_addclosefrom_np, and the release links against the Steam Runtime's 2.31: a
+// weak reference, used when the running glibc has it. Without it the child inherits the open descriptors.
+extern int posix_spawn_file_actions_addclosefrom_np(posix_spawn_file_actions_t *fa, int from) __attribute__((weak));
+
+static void spawn_close_from(posix_spawn_file_actions_t *fa, int from) {
+    if (posix_spawn_file_actions_addclosefrom_np) posix_spawn_file_actions_addclosefrom_np(fa, from);
+}
+
 int plat_restart(void) {
     // the arguments, NUL-separated, from /proc/self/cmdline
     static char args[16384];
@@ -1695,7 +1703,7 @@ int plat_restart(void) {
     snprintf(wait, sizeof wait, "%d.%llu", (int)getpid(), process_start((int)getpid()));
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
-    posix_spawn_file_actions_addclosefrom_np(&fa, 3);
+    spawn_close_from(&fa, 3);
     posix_spawnattr_t at;
     posix_spawnattr_init(&at);
     sigset_t none, all;
@@ -1716,7 +1724,7 @@ int plat_restart(void) {
 int plat_spawn(const char *const *argv, const char *cwd) {
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
-    posix_spawn_file_actions_addclosefrom_np(&fa, 3);
+    spawn_close_from(&fa, 3);
     posix_spawn_file_actions_addchdir_np(&fa, cwd);
     posix_spawnattr_t at;
     posix_spawnattr_init(&at);
