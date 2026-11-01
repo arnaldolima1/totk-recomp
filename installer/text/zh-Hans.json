@@ -100,6 +100,7 @@
  "warn.xbox_prompts_failed": "无法准备 Xbox 按键提示（退出代码 {code}）；游戏将继续使用 Switch 按键提示。详情：{log}",
  "warn.ps_prompts_failed": "无法准备 PlayStation 按键提示（退出代码 {code}）；游戏将继续使用 Switch 按键提示。详情：{log}",
  "warn.achievements_failed": "无法准备成就（退出代码 {code}）；游戏将在没有成就的情况下运行。详情：{log}",
+ "warn.link_figure_failed": "无法准备多人游戏中显示好友的人物（退出代码 {code}）；好友将仅显示为轮廓。详情：{log}",
  "warn.shaders_skipped": "显卡驱动在编译部分着色器时崩溃，因此有 {count} 个着色器未被预先准备。游戏会在首次需要时编译它们，驱动在那时也可能崩溃；更新驱动可能会解决。详情：{log}",
  "warn.kernel_old": "Linux {version} 缺少游戏依赖的写入跟踪功能（需要 6.7 或更新版本）；游戏可能运行得很慢。更新系统即可解决。",
 

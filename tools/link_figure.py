@@ -3,9 +3,14 @@ outfit, posed with the arms down, as one textured triangle mesh. Made from the p
 stays in the profile (never in this repository).
 
     python tools/link_figure.py <models dir> <romfs dir> <out.bin> [preview.png]
+    python tools/link_figure.py --mcsharp <mcsharp-cli> --work <dir> <romfs dir> <out.bin>
 
 <models dir> holds the decompressed BFRES of the parts (<name>.bfres or <name>.bfres/<name>.bfres), decompressed from
-the RomFS's Model/<name>.bfres.mc by a MeshCodec decoder; the textures come from the RomFS's TexToGo/<name>.txtg.
+the RomFS's Model/<name>.bfres.mc by a MeshCodec decoder, and Player_Animation.anim.bfres; the textures come from the
+RomFS's TexToGo/<name>.txtg. With --mcsharp the tool makes that folder itself in <dir> (prepare): the parts through
+McSharp's command line (BladesawStudios/McSharp, MIT; the release ships it in bin/mcsharp), the animations from
+Model/Player_Animation.anim.bfres.zs with the RomFS's zstd dictionaries (Pack/ZsDic.pack.zs). The installer runs this
+form (installer/steps.py, prepare) and keeps the result as profile/link-figure.bin.
 
 Output (little-endian): b'LNKF', u32 version 3, u32 vertex count, u32 triangle count, u32 atlas side, u32 ASTC
 picture count; per vertex 3 floats (metres, model space: x right, y up, z forward); per triangle 3 u32 indices; per
@@ -362,7 +367,57 @@ def preview(path, verts, tris, classes):
     img.save(path)
 
 
+def sarc_members(data):
+    """name -> bytes of every member of a SARC archive."""
+    assert data[:4] == b'SARC' and data[6:8] == b'\xff\xfe', 'not a little-endian SARC'
+    header, start = struct.unpack_from('<H', data, 4)[0], struct.unpack_from('<I', data, 12)[0]
+    count = struct.unpack_from('<H', data, header + 6)[0]
+    names = header + 12 + count * 16 + 8
+    out = {}
+    for i in range(count):
+        _, attribute, lo, hi = struct.unpack_from('<4I', data, header + 12 + i * 16)
+        at = names + (attribute & 0xffffff) * 4
+        out[data[at:data.index(0, at)].decode()] = data[start + lo:start + hi]
+    return out
+
+
+def prepare(romfs, mcsharp, work):
+    """The models folder build and main read, made in work from the player's own RomFS: each part's
+    Model/<name>.bfres.mc through McSharp's decoder, and the animations unpacked from their zstd frame."""
+    import subprocess
+    work.mkdir(parents=True, exist_ok=True)
+    for name, _ in PARTS:
+        data = romfs.read(f'Model/{name}.bfres.mc')
+        if data is None:
+            raise FileNotFoundError(f'Model/{name}.bfres.mc is not in the RomFS')
+        (work / f'{name}.bfres.mc').write_bytes(data)
+    r = subprocess.run([str(mcsharp), str(work), str(work)], capture_output=True, text=True,
+                       creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    if r.returncode:
+        raise RuntimeError(f'mcsharp exit {r.returncode}: {r.stdout[-800:]} {r.stderr[-800:]}')
+    dicts = {}
+    for blob in sarc_members(txtg.unzstd(romfs.read('Pack/ZsDic.pack.zs'))).values():
+        if blob[:4] == b'\x37\xa4\x30\xec':   # a zstd dictionary: its id follows the magic
+            dicts[struct.unpack_from('<I', blob, 4)[0]] = txtg.zstd_dict(blob)
+    frame = romfs.read('Model/Player_Animation.anim.bfres.zs')
+    if frame is None:
+        raise FileNotFoundError('Model/Player_Animation.anim.bfres.zs is not in the RomFS')
+    # the frame header names its dictionary: a 1-, 2- or 4-byte id after the descriptor (and window byte)
+    fhd = frame[4]
+    did_size = (0, 1, 2, 4)[fhd & 3]
+    at = 5 + (0 if fhd & 0x20 else 1)
+    did = int.from_bytes(frame[at:at + did_size], 'little') if did_size else 0
+    (work / 'Player_Animation.anim.bfres').write_bytes(txtg.unzstd(frame, dicts.get(did)))
+    return work
+
+
 def main(argv):
+    if len(argv) > 1 and argv[1] == '--mcsharp':   # --mcsharp <exe> --work <dir> <romfs dir> <out.bin>
+        if len(argv) < 7 or argv[3] != '--work':
+            sys.exit(__doc__)
+        romfs = RomFS(argv[5])
+        models = prepare(romfs, Path(argv[2]), Path(argv[4]))
+        argv = [argv[0], str(models), argv[5], argv[6]]
     skel, verts, weights, tris, classes, uvs, texs = build(Path(argv[1]))
     romfs = RomFS(argv[2])
     names = sorted({x for x in texs if x})

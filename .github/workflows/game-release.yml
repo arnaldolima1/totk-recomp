@@ -61,6 +61,13 @@ jobs:
           git clone -q --filter=blob:none https://github.com/ly05010419/MacNativeGames.git refs/MacNativeGames
           git -C refs/MacNativeGames checkout -q b75be8cfa704df3701e86130c8ced268e79d6b11
 
+      # McSharp at the commit tools/fetch_refs.sh pins: make_release.py build_mcsharp publishes its MeshCodec decoder
+      # into bin/mcsharp for the friends' figures (installer/steps.py link_figure)
+      - name: refs/McSharp
+        run: |
+          git clone -q --filter=blob:none https://github.com/BladesawStudios/McSharp.git refs/McSharp
+          git -C refs/McSharp checkout -q c837ee41217fd5b330ea31cc21448cf4985320f8
+
       - run: python tools/build_hactool.py
 
       - run: python tools/build_xlate.py

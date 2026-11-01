@@ -38,3 +38,4 @@ fetch nxnative       https://github.com/seedds/nxnative.git          d5b380b3a80
 fetch SwitchRecomp   https://github.com/bgyss/SwitchRecomp.git       0f99e1c5c1e78fdc8e01e58a0f8dc8622e82976b
 fetch deko3d           https://github.com/devkitPro/deko3d.git         373bfd43d8b2d805fa2eb7d406dbb823032df958
 fetch SavageWindRecomp https://github.com/Revivedx/SavageWindRecomp.git 575ad88e02f9a89a9a885d90039d48af33c982f4
+fetch McSharp          https://github.com/BladesawStudios/McSharp.git  c837ee41217fd5b330ea31cc21448cf4985320f8

@@ -66,9 +66,13 @@ loads the saves 1.4.3 wrote.
    `totk.exe --prepare-shaders`) in the install folder, then fold the shader cache's loose files (four per shader, about
    117,000) into `shader-cache/shader-cache.pack` (`tools/pack_shader_cache.py`). totk.exe reads the pack first and
    writes the translations it makes in play as loose files; running the tool again with the game closed folds those in.
-   The patches are written three times: `romfs-patches`, and `romfs-patches-xbox` and `romfs-patches-xbox-label`
+   The patches are written four times: `romfs-patches`, `romfs-patches-xbox` and `romfs-patches-xbox-label`
    (`--prompts`: Xbox button prompts for `prompts = xbox`, the first for `pad_layout = nintendo`, the second for `xbox`
-   and `auto`). The two Xbox folders are optional: when one cannot be made, the setup warns and finishes.
+   and `auto`), and `romfs-patches-ps` (`--prompts playstation`, for `prompts = playstation`); unchanged sets are kept
+   (`build-cache` stamps). The prompt folders are optional: when one cannot be made, the setup warns and finishes.
+   The step also compiles the achievements (`tools/achievements.py defaults`) and builds `profile/link-figure.bin`, the
+   Link friends show as in multiplayer (`tools/link_figure.py` with the release's `bin/mcsharp/mcsharp-cli.exe`, a
+   self-contained build of McSharp, MIT); both are optional and warn when they fail.
    When the graphics driver crashes while building the shaders, `prepare_shaders.py` runs that part again without the
    variants it was building ([building.md](building.md), step 6), and the setup finishes with a warning that names how
    many were left out.
@@ -139,7 +143,7 @@ recomp/, tools/       the lifter and the build, extraction and shader scripts th
 llvm/                 llvm-mingw, x86_64-only subset (Apache-2.0 with LLVM exception; mingw-w64 parts permissive)
 runtime/              libtotkrt.a, libtotkrt-v2.a and the headers the generated code and modules.c/romfs.c/patches.c
                       include
-bin/                  totk_xlate.exe, hactool.exe, SDL3.dll, libopus-0.dll, ninja.exe
+bin/                  totk_xlate.exe, hactool.exe, SDL3.dll, libopus-0.dll, ninja.exe, mcsharp/mcsharp-cli.exe
 data/                 shader_list.tsv (MacNativeGames, MIT)
 THIRD_PARTY_NOTICES.md
 totk.ini.example, VERSION  the default ini; the release string (the repository's VERSION plus the commit)

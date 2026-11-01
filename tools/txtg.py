@@ -12,7 +12,23 @@ the surfaces, each one zstd frame of the Tegra X1 block-linear image.
 import struct
 import sys
 
-import zstandard
+try:   # Python 3.14 (the release's own Python): the standard library's zstd; else the zstandard package
+    from compression import zstd as _zstd
+
+    def unzstd(frame, zdict=None):
+        return _zstd.decompress(frame, zstd_dict=zdict)
+
+    def zstd_dict(data):
+        return _zstd.ZstdDict(data)
+except ImportError:
+    import zstandard as _zstd
+
+    def unzstd(frame, zdict=None):
+        d = _zstd.ZstdDecompressor(dict_data=zdict) if zdict is not None else _zstd.ZstdDecompressor()
+        return d.stream_reader(frame).read()
+
+    def zstd_dict(data):
+        return _zstd.ZstdCompressionDict(data)
 
 # Format code -> (kind, block width, block height, bytes per block)
 def format_of(code, setting2):
@@ -138,7 +154,7 @@ def read_txtg(data, max_side=512):
         if layer or mip != want:
             continue
         mw, mh = max(1, w >> mip), max(1, h >> mip)
-        raw = zstandard.ZstdDecompressor().stream_reader(frame).read()
+        raw = unzstd(frame)
         wb, hb = (mw + bw - 1) // bw, (mh + bh - 1) // bh
         lin = deswizzle(raw, wb, hb, bpb, base_hb)
         if kind == 'astc':

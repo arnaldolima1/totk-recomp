@@ -1069,6 +1069,7 @@ class Prepare(Step):
         code, log = run_tool(ctx, 'prepare-achievements', layout.tools / 'achievements.py', ['defaults', dest])
         if code:
             rep.warning('warn.achievements_failed', code=code, log=str(log))
+        link_figure(ctx)
         editor_shortcuts(ctx)
 
         shader_list = layout.shader_list
@@ -1104,6 +1105,25 @@ class Prepare(Step):
         if code:
             raise InstallError('prepare.pack_failed', code=code, log=str(log))
         return {'xlate_sha256': file_sha256(xlate)}
+
+
+def link_figure(ctx):
+    """profile/link-figure.bin: the Link the game draws for each friend in a multiplayer room (runtime/link_figure.c),
+    built from this install's RomFS by tools/link_figure.py with McSharp's MeshCodec decoder (bin/mcsharp, MIT). The
+    temporary models (about 40 MB) stay in the temp folder. Optional: without it friends show as outlines, so the setup
+    warns and goes on."""
+    layout, dest, rep = ctx.layout, ctx.dest, ctx.reporter
+    names = ['bin/mcsharp/mcsharp-cli' + EXE, 'build/mcsharp/mcsharp-cli' + EXE]   # a release, a checkout
+    mcsharp = next((layout.root / n for n in names if (layout.root / n).is_file()), None)
+    if not mcsharp:
+        rep.log('link figure: no MeshCodec decoder (bin/mcsharp) in this release; friends show as outlines')
+        return
+    work = ctx.temp / 'link-figure'
+    code, log = run_tool(ctx, 'prepare-figure', layout.tools / 'link_figure.py',
+                         ['--mcsharp', mcsharp, '--work', work, dest / 'romfs', dest / 'profile' / 'link-figure.bin'])
+    shutil.rmtree(work, ignore_errors=True)
+    if code:
+        rep.warning('warn.link_figure_failed', code=code, log=str(log))
 
 
 def editor_shortcuts(ctx):

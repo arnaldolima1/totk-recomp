@@ -326,6 +326,28 @@ def build_bin(out):
     shutil.copy2(unpack('ninja') / 'ninja.exe', b / 'ninja.exe')
 
 
+MCSHARP_COMMIT = 'c837ee41217fd5b330ea31cc21448cf4985320f8'   # tools/fetch_refs.sh
+
+
+def build_mcsharp(out):
+    """bin/mcsharp/mcsharp-cli.exe: the MeshCodec decoder the installer runs to unpack Link's models for the friends'
+    figures (installer/steps.py link_figure, tools/link_figure.py). Built from refs/McSharp (BladesawStudios, MIT) at
+    its pinned commit, self-contained in one file, so players need no .NET. The sources are copied to build/ first:
+    refs/ stays read-only, and dotnet writes its obj/ and bin/ beside the project."""
+    src = MAIN_ROOT / 'refs' / 'McSharp'
+    head = subprocess.run(['git', '-C', src, 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
+    if head != MCSHARP_COMMIT:
+        sys.exit(f'refs/McSharp is at {head or "nothing"}, not {MCSHARP_COMMIT}: run tools/fetch_refs.sh')
+    work = MAIN_ROOT / 'build' / 'release-check' / 'mcsharp'
+    shutil.rmtree(work, ignore_errors=True)
+    copy_tree(src, work, lambda r: r.startswith('.git'))
+    run(['dotnet', 'publish', work / 'src' / 'McSharp.Cli' / 'McSharp.Cli.csproj', '-c', 'Release', '-r', 'win-x64',
+         '--self-contained', 'true', '-p:PublishSingleFile=true', '-p:EnableCompressionInSingleFile=true',
+         '-p:DebugType=None', '-p:GenerateDocumentationFile=false', '-o', out / 'bin' / 'mcsharp'])
+    if not (out / 'bin' / 'mcsharp' / 'mcsharp-cli.exe').is_file():
+        sys.exit('dotnet publish wrote no mcsharp-cli.exe')
+
+
 def build_deps(out):
     """runtime/deps: the headers and import libraries build_game.py --deps expects (include/, lib/)."""
     d = out / 'runtime' / 'deps'
@@ -361,6 +383,7 @@ def collect_licenses(out):
         (ROOT / 'runtime' / 'shaders' / 'ffx' / 'LICENSE.txt', 'FidelityFX-FSR-LICENSE.txt'),
         (MAIN_ROOT / 'toolchain' / 'hactool' / 'LICENSE', 'hactool-LICENSE.txt'),
         (MAIN_ROOT / 'refs' / 'MacNativeGames' / 'LICENSE', 'MacNativeGames-LICENSE.txt'),
+        (MAIN_ROOT / 'refs' / 'McSharp' / 'LICENSE', 'McSharp-LICENSE.txt'),
     ]
     for src, name in pairs:
         shutil.copy2(src, lic / name)
@@ -369,6 +392,28 @@ def collect_licenses(out):
             (lic / name).write_bytes(t.extractfile(member).read())
     for name in ('LICENSE.TXT',):
         shutil.copy2(out / 'llvm' / name, lic / 'llvm-mingw-LICENSE.txt')
+    # inside bin/mcsharp: the NuGet package BladesawStudios.ZstdSharp 0.8.8.1 declares MIT and this copyright but
+    # carries no licence file, so the notice is the MIT text with it
+    (lic / 'ZstdSharp-LICENSE.txt').write_text(ZSTDSHARP_LICENSE, encoding='utf-8')
+
+
+ZSTDSHARP_LICENSE = """MIT License
+
+Copyright (c) 2021-2026 Oleg Stepanischev
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit
+persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+"""
 
 
 # ---- runtime/, recomp/, tools/, data/ ---------------------------------------------------------------------------------
@@ -600,6 +645,7 @@ def main():
     build_python(out)
     llvm = build_llvm(out)
     build_bin(out)
+    build_mcsharp(out)
     build_deps(out)
     runtime_lib(out, llvm, args.stub_layout)
     build_sources(out)
