@@ -326,7 +326,7 @@ class CleanupTest(unittest.TestCase):
         self.expected = {'romfs': {'size': len(image), 'sha256': digest}}
         self.ctx = SimpleNamespace(reporter=Reporter(out=io.StringIO(), log_path=base / 'x.log'), dest=self.dest,
                                    temp=temp, lang='en-US', state={},
-                                   layout=SimpleNamespace(ini_example=ROOT / 'totk.ini.example',
+                                   layout=SimpleNamespace(ini_example=ROOT / 'totk.ini.example', dev=False,
                                                           python=base / 'python' / 'python.exe', root=base / 'release'))
         self.saved = steps.expected_update
         steps.expected_update = lambda ctx: self.expected
@@ -353,8 +353,8 @@ class CleanupTest(unittest.TestCase):
         self.assertTrue((self.ctx.temp / 'gen').is_dir() and (self.ctx.temp / 'build').is_dir())
         self.assertFalse((self.ctx.temp / 'check').exists())
         lines = (self.dest / 'build-cache' / 'rebuild.txt').read_text(encoding='utf-8').splitlines()
-        self.assertEqual(lines[1:], ['-m', 'installer.gui', '--root', str(self.ctx.layout.root), '--rebuild',
-                                     str(self.dest)])
+        self.assertEqual(lines[1:], ['-c', steps.REBUILD_BOOT, str(self.ctx.layout.root), '--root',
+                                     str(self.ctx.layout.root), '--rebuild', str(self.dest)])
 
     def test_emptied_romfs_fails(self):
         for p in (self.dest / 'romfs').iterdir():

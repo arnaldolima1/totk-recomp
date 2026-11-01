@@ -325,7 +325,10 @@ class App:
             self.fit()
             return
         self.form_error.configure(text='')
-        command = form.command(self.layout.python, root=self.layout.root if self.layout.dev else None,
+        # in a repository the Python running this window: the tools' embeddable Python there has no ._pth entry for
+        # the repository, so `-m installer` would not find the package
+        python = Path(sys.executable) if self.layout.dev else self.layout.python
+        command = form.command(python, root=self.layout.root if self.layout.dev else None,
                                temp=self.run_args.get('temp'), verify_hashes=self.run_args.get('verify', False))
         self.begin(command, self.layout.root)
 

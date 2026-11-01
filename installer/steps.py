@@ -1031,14 +1031,22 @@ class Cleanup(Step):
         return {}
 
 
+# Puts the release folder (the argument after -c) on sys.path and runs installer.gui with the rest. `-m installer.gui`
+# finds the package only through the release Python's ._pth: the Linux release's Python and the dev-mode embeddable one
+# lack that entry, and totk.exe starts the command in the install folder.
+REBUILD_BOOT = ('import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); '
+                "runpy.run_module('installer.gui', run_name='__main__', alter_sys=True)")
+
+
 def rebuild_command(ctx):
     """The command that starts the setup window in its rebuild mode on this install folder (installer/gui.py
-    --rebuild): pythonw beside the setup's Python on Windows, so no console opens."""
+    --rebuild): pythonw beside the setup's Python on Windows, so no console opens. In a repository that is the Python
+    running this setup: the tools' embeddable Python there has no tkinter."""
     layout = ctx.layout
-    python = layout.python
+    python = Path(sys.executable) if layout.dev else layout.python
     if os.name == 'nt' and python.with_name('pythonw.exe').is_file():
         python = python.with_name('pythonw.exe')
-    return [str(python), '-m', 'installer.gui', '--root', str(layout.root), '--rebuild', str(ctx.dest)]
+    return [str(python), '-c', REBUILD_BOOT, str(layout.root), '--root', str(layout.root), '--rebuild', str(ctx.dest)]
 
 
 def write_rebuild_command(ctx):
