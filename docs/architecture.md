@@ -74,8 +74,8 @@ Every guest thread is a host thread. TotK assumes Horizon's scheduler: three app
 - Spin waits. Loops that only another thread can end (857 in 1.4.3, 864 in 1.2.1, found by `tools/spin_waits.py`, the
   nxnative search) send their back-edges through `rt_spin_gate`, which pauses the core once per pass and hands it to a
   waiter after 50 us of polling (`TOTK_SPIN`, `TOTK_SPIN_HANDOFF_US`).
-- `TOTK_FREE_CORES=1` in the environment turns the gate off, for experiments; totk.ini cannot. Without it the game
-  fails at start: its job workers all report core 0 and share per-core memory.
+- `free_cores = 1` (`TOTK_FREE_CORES=1`) turns the gate off, for experiments only: the game crashes or hangs, usually
+  at start, because its job workers all report core 0 and share per-core memory (#212).
 
 ### 4. Graphics
 
