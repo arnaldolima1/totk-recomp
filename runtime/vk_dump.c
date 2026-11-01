@@ -14,7 +14,7 @@
 // swizzle. Copies and texture clears are logged as "copy/clear after pass N". TOTK_DUMP_LOG=<from> also logs the
 // frames from..frame-1 to passes.txt, with PNGs only of targets up to 64K texels. TOTK_DUMP_BUF=<addr>:<size>[:...]
 // snapshots one GPU buffer range after every logged pass (buf_<pass>.bin and bufs.txt, see buf_snap).
-// PNGs are opaque (alpha dropped). Integer formats are scaled by the image maximum, depth by its min..max range, SNORM
+// PNGs are opaque (alpha dropped; TOTK_DUMP_ALPHA=1 also writes a target's alpha as <name>_a.png, grey). Integer formats are scaled by the image maximum, depth by its min..max range, SNORM
 // as x/2+1/2, UNORM and sRGB bytes written as stored. Caps: MAX_PASSES passes copied, PNG_CAP bytes of PNGs.
 // TOTK_DUMP_TEX=<id>|<w>x<h>[,...]: those texture slots, or 2D textures of that size, are copied where first sampled,
 // whatever their format.
@@ -48,7 +48,7 @@ static uint64_t dump_frame, log_from;   // log_from: TOTK_DUMP_LOG, first frame 
 static char dir[400];
 static FILE *passes_f, *images_f;
 static int seq, finished, copied;      // copied: passes and dispatches of the dump frame whose images were copied
-static int skip_runs, dump_ubo;        // TOTK_DUMP_SKIP_RUNS, TOTK_DUMP_UBO
+static int skip_runs, dump_ubo, dump_alpha;   // TOTK_DUMP_SKIP_RUNS, TOTK_DUMP_UBO, TOTK_DUMP_ALPHA
 static uint32_t want_tex[16][2];       // TOTK_DUMP_TEX: slot id and 0, or width and height
 static int nwant_tex;
 static uint64_t last_targets;          // targets_sig of the last render pass; 0 after a dispatch
@@ -255,6 +255,17 @@ static void write_images(const Job *j) {
         }
         char path[600];
         snprintf(path, sizeof path, "%s/%s%s.png", dir, j->name, pass ? "_tm" : "");
+        rt_write_png(path, out, pw, ph);
+    }
+    if (dump_alpha && j->f->nc == 4 && mode != M_FLOAT && mode != M_DEPTH) {   // TOTK_DUMP_ALPHA: the alpha as grey
+        for (uint64_t i = 0; i < n; i++) {
+            float x = px[4 * i + 3];
+            if (mode == M_SNORM) x = x * .5f + .5f;
+            else if (mode == M_INT) x *= scale;
+            out[4 * i] = out[4 * i + 1] = out[4 * i + 2] = u8(x), out[4 * i + 3] = 255;
+        }
+        char path[600];
+        snprintf(path, sizeof path, "%s/%s_a.png", dir, j->name);
         rt_write_png(path, out, pw, ph);
     }
     uint64_t all = distinct(j, 0, j->h), top = distinct(j, 0, j->h / 4 ? j->h / 4 : 1);
@@ -871,6 +882,8 @@ void vk_dump_init(void) {
     skip_runs = sr && *sr && *sr != '0';
     const char *du = cfg_get("TOTK_DUMP_UBO");
     dump_ubo = du && *du && *du != '0';
+    const char *da = cfg_get("TOTK_DUMP_ALPHA");
+    dump_alpha = da && *da && *da != '0';
     const char *wt = cfg_get("TOTK_DUMP_TEX");
     for (char *q = (char *)wt; q && *q && nwant_tex < 16; q += *q == ',') {
         uint32_t *w = want_tex[nwant_tex++];

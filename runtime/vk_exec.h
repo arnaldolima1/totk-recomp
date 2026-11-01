@@ -166,6 +166,25 @@ void vk_dump_present(uint64_t frame);    // vk_be_present: waits for the dump fr
 #define VK_C0_BYTES 0x800u
 void vk_c0_fill(uint8_t bank[VK_C0_BYTES], int stage, const p_bind_buf ssbo[16], const p_bind_buf ubo[16],
                 const uint32_t dispatch[3], uint32_t base_instance);
+// vk_occl.c: the G-buffer pass arms a depth test of the overlay's world points (vk_exec_draw.c cam_take); the next pass
+// on another depth target copies the sampled depths out first (vk_exec_pass_begin).
+void vk_occl_arm(const VkExec *ex, const float cam[84]);
+void vk_occl_before_pass(VkExec *ex);
+// vk_figure.c: friends' Link figures drawn into the G-buffer when it is complete (called by vk_occl.c).
+void vk_figure_arm(const VkExec *ex, const float cam[84], const float vp[6]);
+void vk_figure_draw(VkExec *ex);
+void vk_figure_before_dispatch(VkExec *ex);   // draws once the characters have been drawn (tiles seen)
+void vk_figure_shadow_arm(const VkExec *ex, const float cam[84]);   // the nearest shadow cascade's first pass
+void vk_figure_before_pass(VkExec *ex);   // a pass begins: the cascade is done when it is on another target
+// The character tile buffer (guest address and size) and the tile constants of this frame's G-buffer; asked for while a
+// figure draw is armed and none was seen yet.
+int vk_figure_wants_tiles(void);
+void vk_figure_tiles(uint64_t addr, uint64_t size, const float c4[4]);
+// Host-visible memory of the current command buffer, freed with it (vk_exec_draw.c scratch); usable as a vertex,
+// index, uniform or storage buffer and as a transfer source.
+uint8_t *vk_exec_scratch(VkExec *ex, uint64_t size, VkBuffer *buf, VkDeviceSize *off);
+VkImageView vk_exec_attach_view(VkExec *ex, const VkExecTarget *t);   // a render target's attachment view
+void vk_exec_state_lost(VkExec *ex);   // after commands of our own: the next draw binds everything again
 
 // Handler hooks. vk_exec.c defines both WEAK: they stop with rt_fatal naming the op.
 // vk_exec_draw.c: OP_DRAW, OP_DRAW_IDX, OP_DISPATCH, OP_BIND_* (program, state, vattr, vstream, vbuf, ubo, ssbo, tex,

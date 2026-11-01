@@ -13,6 +13,7 @@
 // The in-game menu (ui/menu.h) draws over the game image in the present's command buffer, after the blit. The window's
 // size and fullscreen state are the settings TOTK_WINDOW_SIZE and TOTK_FULLSCREEN, which the back end applies at start
 // and whenever a cfg_set changes them (window_settings_live -> gfx_window_apply_settings).
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +23,7 @@
 #include "fs.h"
 #include "gfx.h"
 #include "gfx_wsys.h"
+#include "host.h"
 #include "nvn_api.h"
 #include "ui/menu.h"
 #include "vk.h"
@@ -534,6 +536,74 @@ void gfx_fit_rect(int cw, int ch, int dw, int dh, int out[4]) {
     out[0] = (dw - out[2]) / 2, out[1] = (dh - out[3]) / 2;
 }
 
+// Where the last presented picture went: the game image (w x h), the part of it shown (crop) and where that landed in
+// the swapchain image (to, of sw x sh).
+typedef struct { int w, h, crop[4], to[4], sw, sh; } ShownRect;
+static PlatMutex g_shown_lock = PLAT_MUTEX_INIT;
+static ShownRect g_shown;
+
+int gfx_world_to_screen(const float world[3], float out[2], float *dist) {
+    float cam[84];
+    if (!vk_camera_get(cam)) return 0;
+    const float *vp = cam + 12, eye[3] = {cam[47], cam[51], cam[55]};
+    float clip[4];
+    for (int r = 0; r < 4; r++) clip[r] = vp[r * 4] * world[0] + vp[r * 4 + 1] * world[1] + vp[r * 4 + 2] * world[2] + vp[r * 4 + 3];
+    if (clip[3] <= 0.01f) return 0;   // behind the camera
+    plat_mutex_lock(&g_shown_lock);
+    ShownRect s = g_shown;
+    plat_mutex_unlock(&g_shown_lock);
+    if (s.w <= 0 || s.crop[2] <= 0 || s.sw <= 0) return 0;
+    // the camera's picture covers the whole game image: x right, y up in clip space
+    float gx = (clip[0] / clip[3] * 0.5f + 0.5f) * (float)s.w, gy = (0.5f - clip[1] / clip[3] * 0.5f) * (float)s.h;
+    out[0] = ((float)s.to[0] + (gx - (float)s.crop[0]) / (float)s.crop[2] * (float)s.to[2]) / (float)s.sw;
+    out[1] = ((float)s.to[1] + (gy - (float)s.crop[1]) / (float)s.crop[3] * (float)s.to[3]) / (float)s.sh;
+    if (dist) *dist = sqrtf((world[0] - eye[0]) * (world[0] - eye[0]) + (world[1] - eye[1]) * (world[1] - eye[1]) +
+                            (world[2] - eye[2]) * (world[2] - eye[2]));
+    return 1;
+}
+
+int gfx_view(float view_proj[16], float eye[3], float map[4]) {
+    float cam[84];
+    if (!vk_camera_get(cam)) return 0;
+    plat_mutex_lock(&g_shown_lock);
+    ShownRect s = g_shown;
+    plat_mutex_unlock(&g_shown_lock);
+    if (s.w <= 0 || s.crop[2] <= 0 || s.crop[3] <= 0 || s.sw <= 0 || s.sh <= 0) return 0;
+    memcpy(view_proj, cam + 12, 16 * sizeof(float));
+    eye[0] = cam[47], eye[1] = cam[51], eye[2] = cam[55];
+    // gfx_world_to_screen's mapping, linear in NDC: x = map[0] + map[1] * ndc_x, y = map[2] + map[3] * ndc_y
+    float kx = (float)s.w / (float)s.crop[2] * (float)s.to[2] / (float)s.sw;
+    float ky = (float)s.h / (float)s.crop[3] * (float)s.to[3] / (float)s.sh;
+    map[0] = ((float)s.to[0] + (0.5f * (float)s.w - (float)s.crop[0]) / (float)s.crop[2] * (float)s.to[2]) / (float)s.sw;
+    map[1] = 0.5f * kx;
+    map[2] = ((float)s.to[1] + (0.5f * (float)s.h - (float)s.crop[1]) / (float)s.crop[3] * (float)s.to[3]) / (float)s.sh;
+    map[3] = -0.5f * ky;
+    return 1;
+}
+
+int gfx_camera_ground_axes(float right[2], float fwd[2]) {
+    float cam[84];
+    if (!vk_camera_get(cam)) return 0;
+    // the view's first row is the camera's right in the world, its third the camera's back: both laid on the ground
+    float rl = hypotf(cam[0], cam[2]), fl = hypotf(cam[8], cam[10]);
+    if (rl < 1e-4f || fl < 1e-4f) return 0;   // looking straight up or down
+    right[0] = cam[0] / rl, right[1] = cam[2] / rl;
+    fwd[0] = -cam[8] / fl, fwd[1] = -cam[10] / fl;
+    return 1;
+}
+
+int gfx_hud_to_screen(float from_right, float from_bottom, float out[2], float *height) {
+    plat_mutex_lock(&g_shown_lock);
+    ShownRect s = g_shown;
+    plat_mutex_unlock(&g_shown_lock);
+    if (s.w <= 0 || s.h <= 0 || s.crop[2] <= 0 || s.crop[3] <= 0 || s.sw <= 0 || s.sh <= 0) return 0;
+    float gx = (float)s.w - from_right * (float)s.h, gy = (float)s.h - from_bottom * (float)s.h;
+    out[0] = ((float)s.to[0] + (gx - (float)s.crop[0]) / (float)s.crop[2] * (float)s.to[2]) / (float)s.sw;
+    out[1] = ((float)s.to[1] + (gy - (float)s.crop[1]) / (float)s.crop[3] * (float)s.to[3]) / (float)s.sh;
+    if (height) *height = (float)s.h / (float)s.crop[3] * (float)s.to[3];
+    return 1;
+}
+
 static void present_image(VkImage src, VkImageLayout layout, VkFormat fmt, int w, int h, const int crop[4], int defer) {
     int general = layout == VK_IMAGE_LAYOUT_GENERAL;
     gfx_window_start();
@@ -597,6 +667,9 @@ static void present_image(VkImage src, VkImageLayout layout, VkFormat fmt, int w
     const int rect[4] = {cx, cy, cw, ch};
     int to[4];   // where the picture goes in the swapchain image: {x, y, w, h}
     gfx_fit_rect(cw, ch, (int)g_sc_ext.width, (int)g_sc_ext.height, to);
+    plat_mutex_lock(&g_shown_lock);   // for gfx_world_to_screen
+    g_shown = (ShownRect){w, h, {cx, cy, cw, ch}, {to[0], to[1], to[2], to[3]}, (int)g_sc_ext.width, (int)g_sc_ext.height};
+    plat_mutex_unlock(&g_shown_lock);
     if (to[2] != (int)g_sc_ext.width || to[3] != (int)g_sc_ext.height) {   // black bars beside or above and below it
         VkClearColorValue black = {.float32 = {0, 0, 0, 1}};
         VkImageSubresourceRange all = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};

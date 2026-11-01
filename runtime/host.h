@@ -275,9 +275,43 @@ void frame_step_init(void);                                // after rt_patches_i
 int frame_step_realtime(void);                             // the real-time step is on: presents ignore the interval
 uint64_t frame_step_cap_ns(void);                          // with the real-time step: the shortest frame in ns
 double frame_step_limit_hz(void);                         // the frame rate the limit gives (overlay); 0 unknown
+// Friends' Link figures drawn into the game's G-buffer (vk_figure.c): the overlay hands over each figure's animation
+// state, place, velocity, facing and hair colour once a frame; gfx_figures_wanted says whether that path draws them
+// (else the overlay does).
+typedef struct {
+    int anim, prev_anim;             // link_figure.h LF_*: playing, and blending out of
+    float frame, prev_frame, fps;    // their frames, and the frames a second both advance by
+    float blend;                     // 0..1: how far into anim (it rises by 4 a second)
+    float feet[3], vel[3], yaw;      // world metres, metres a second, radians (ui/menu.cpp draw_link_mesh)
+    float hair[3];                   // sRGB 0..1
+} GfxFigure;
+int gfx_figures_wanted(void);
+void gfx_figures_set(const GfxFigure *f, int n);
 int game_player_pos(float xyz[3]);                         // the player's position (x east, y up, z south, metres) while
                                                            // a world is loaded, 1 when read; guest reads that cannot
                                                            // fault, any thread (frame_rate.c player_pos)
+int gfx_world_to_screen(const float world[3], float out[2], float *dist);   // a world position (metres) on the window
+                                                           // as fractions of its width and height, from the game's
+                                                           // camera of the latest frame; dist: metres from the camera.
+                                                           // 0 behind the camera or without one (gfx_present.c)
+int gfx_view(float view_proj[16], float eye[3], float map[4]);   // the game camera's row-major view-projection and
+                                                           // position, and the window mapping of NDC: x = map[0] +
+                                                           // map[1] * ndc_x, y = map[2] + map[3] * ndc_y (fractions);
+                                                           // 0 without a camera (gfx_present.c)
+int gfx_camera_ground_axes(float right[2], float fwd[2]);  // the game camera's right and forward on the ground (x, z),
+                                                           // unit length; 0 without a camera (gfx_present.c)
+int gfx_hud_to_screen(float from_right, float from_bottom, float out[2], float *height);   // a point of the game image
+                                                           // given from its bottom right corner in image heights, as
+                                                           // fractions of the window; height: window pixels one image
+                                                           // height spans (gfx_present.c)
+int gfx_occlusion(const float (*pts)[3], int n, float *visible);   // the overlay's world points for the next depth
+                                                           // test; visible gets the last results by index: 1 seen, 0
+                                                           // behind the scene, -1 unknown (vk_occl.c)
+void gfx_depth_want(const float ndc_rect[4]);             // a rectangle of the scene depth to copy next frame (NDC
+                                                           // x0, y0, x1, y1, y up) for gfx_depth_at (vk_occl.c)
+int gfx_depth_begin(void);                                 // holds the last copied rectangle (1 when one is fresh);
+float gfx_depth_at(float ndc_x, float ndc_y);              // the scene's distance along the view axis there, -1 outside;
+void gfx_depth_end(void);                                  // always pair gfx_depth_begin with gfx_depth_end
 int64_t frame_step_world_us(void);                         // game time since the loaded save's first frame, -1 before
                                                            // (TOTK_FPS_LIMIT, live)
 uint64_t frame_step_ticks(void);                           // game time since the first present in 60 Hz ticks (input scripts)

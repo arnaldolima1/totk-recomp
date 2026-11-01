@@ -41,8 +41,11 @@ enum { ACH_STAT_SHRINES, ACH_STAT_LIGHTROOTS, ACH_STAT_TOWERS, ACH_STAT_KOROKS, 
 typedef struct {
     int v[ACH_STATS];
     int achievements;   // unlocked
+    int awake;          // 1 once Link woke on the Great Sky Island (the prologue is over), 0 before, -1 no save read
 } AchStats;
 unsigned ach_stats(AchStats *out);   // returns a count that grows with every evaluation (0: no save read yet)
+unsigned ach_look(char out[3][64]);   // the armor pieces worn at the last save read (head, upper, lower; "" none);
+                                      // the result grows when they change (0: none read yet)
 int ach_take_net_unlock(void);       // the next unlock to tell the room (an index for ach_get), -1 when none
 int ach_find(const char *id);        // the index of an achievement id, -1 when this install has none
 

@@ -39,6 +39,10 @@ static const char *const stat_names[ACH_STATS] = {"shrines", "lightroots", "towe
 static Ach stats[ACH_STATS];
 static int stat_found[ACH_STATS];
 static unsigned stats_gen;
+static int awake = -1;   // AchStats.awake, from the newest save
+// SageOfSky_IsOpenShutterInWakeUpRoom (murmur3, as tools/achievements.py hashes flag names): the shutter of the room
+// where Link wakes on the Great Sky Island opens; before it the save holds only the prologue.
+#define FLAG_AWAKE 0x2c2ac169u
 
 static HashList *lists;
 static int nlists;
@@ -495,6 +499,37 @@ static void announce(const int *fresh, int nfresh) {
     }
 }
 
+// ---- what the player wears (ach_look), for the friends' figures (net_mp.c LOOK lines): the armor pieces the save's
+// Pouch.Armor.EquipIndexes.Head / .Upper / .Bottom (int arrays, item 0 the index, -1 none) point at in
+// Pouch.Armor.Content.Name (names as the TotK savegame editor's hash list gives them, checked against GameDataList).
+enum { H_ARMOR_NAMES = 0x754e8549u, H_EQUIP_HEAD = 0xc88d0a1eu, H_EQUIP_UPPER = 0x632017b5u, H_EQUIP_BOTTOM = 0x94ce9bbfu };
+static char look[3][64];
+static unsigned look_gen;
+
+static void read_look(const Save *s, char out[3][64]) {
+    static const uint32_t slots[3] = {H_EQUIP_HEAD, H_EQUIP_UPPER, H_EQUIP_BOTTOM};
+    uint32_t off, n;
+    int t;
+    memset(out, 0, 3 * 64);
+    if (!save_find(s, H_ARMOR_NAMES, &off, &t) || t != T_STRING64_ARRAY || (uint64_t)off + 4 > s->size) return;
+    uint32_t names = rd32(s->d + off);
+    for (int k = 0; k < 3; k++) {
+        const uint8_t *p = int_array(s, slots[k], &n);
+        int32_t i = p && n ? (int32_t)rd32(p) : -1;
+        if (i < 0 || (uint32_t)i >= names || (uint64_t)off + 4 + 64ull * ((uint64_t)i + 1) > s->size) continue;
+        memcpy(out[k], s->d + off + 4 + 64 * (uint32_t)i, 63);
+        if (strncmp(out[k], "Armor_", 6)) out[k][0] = 0;
+    }
+}
+
+unsigned ach_look(char out[3][64]) {
+    plat_mutex_lock(&lock);
+    memcpy(out, look, sizeof look);
+    unsigned g = look_gen;
+    plat_mutex_unlock(&lock);
+    return g;
+}
+
 static void evaluate(const char *save_dir, int trusted) {
     char path[1200];
     if (!newest_progress(save_dir, path, sizeof path)) return;
@@ -511,12 +546,18 @@ static void evaluate(const char *save_dir, int trusted) {
         vals[i] = achs[i].kind == K_ALL || achs[i].kind == K_MP || achs[i].kind < 0 ? 0 : value_of(&achs[i], &s);
     double stat_vals[ACH_STATS];
     for (int k = 0; k < ACH_STATS; k++) stat_vals[k] = stat_found[k] ? value_of(&stats[k], &s) / stats[k].unit : 0;
+    char worn[3][64];
+    read_look(&s, worn);
+    uint32_t av;
+    int at, woke = save_find(&s, FLAG_AWAKE, &av, &at) && at == T_BOOL && av == 1;
     save_free(&s);
 
     plat_mutex_lock(&lock);
+    if (memcmp(worn, look, sizeof look)) memcpy(look, worn, sizeof look), look_gen++;
     int fresh[1024], nfresh = 0, others = 0, others_done = 0, changed = 0, blocked = 0;
     int64_t now = (int64_t)time(NULL);
     for (int k = 0; k < ACH_STATS; k++) stats[k].cur = stat_vals[k];
+    awake = woke;
     stats_gen++;
     for (int i = 0; i < n; i++) {
         Ach *a = &achs[i];
@@ -636,6 +677,7 @@ unsigned ach_stats(AchStats *out) {
     int done = 0;
     for (int i = 0; i < nach; i++) done += achs[i].unlocked;
     out->achievements = done;
+    out->awake = awake;
     unsigned gen = stats_gen;
     plat_mutex_unlock(&lock);
     return gen;

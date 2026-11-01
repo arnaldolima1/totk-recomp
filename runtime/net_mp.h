@@ -21,6 +21,7 @@ typedef struct {
     int stats[MP_STATS];
     int has_pos;            // a position came from the room in the last few seconds
     float pos[3];           // x east, y up, z south (metres; game_player_pos)
+    char look[3][48];       // the armor pieces the player wears (head, upper, lower; "" none), from LOOK lines
 } MpPlayer;
 
 // A shared marker: a point a player marked (the mark key), one per player, for MP_MARK_MS.

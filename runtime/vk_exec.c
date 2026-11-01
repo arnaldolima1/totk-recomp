@@ -568,8 +568,12 @@ static void barrier_to(VkExec *ex, const VkImage *want, const VkImageAspectFlags
 
 void vk_exec_barrier(VkExec *ex) { barrier_to(ex, NULL, NULL, 0); }
 
+VkImageView vk_exec_attach_view(VkExec *ex, const VkExecTarget *t) { return view_of(ex, t); }
+
 void vk_exec_pass_begin(VkExec *ex) {
     if (ex->in_pass) return;
+    vk_figure_before_pass(ex);   // friends' shadows, once the nearest shadow cascade is drawn
+    vk_occl_before_pass(ex);   // the G-buffer depth is complete once a pass on another depth target begins
     resolve_rt(ex);
     // Learned targets (VkTexImage.fb_learned) are attached in the feedback layout
     VkImage want[9];

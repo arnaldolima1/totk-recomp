@@ -10,7 +10,9 @@
 // SavageWindRecomp's runtime/ui/menu.mm (https://github.com/Revivedx/SavageWindRecomp @
 // 575ad88e02f9a89a9a885d90039d48af33c982f4, MIT, Copyright (c) 2026 Revivedx and the Savage Wind Recomp contributors,
 // Copyright (c) 2026 Peiikai); the pages are rows of option_rows.cpp.
+#include <algorithm>
 #include <atomic>
+#include <vector>
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
@@ -37,6 +39,7 @@ static int g_font_bad;
 
 extern "C" {
 #include "achievements.h"
+#include "link_figure.h"
 #include "net_mp.h"
 #include "voice.h"
 #include "amiibo.h"
@@ -61,6 +64,26 @@ extern const int rt_game_version;
 int romfs_prompts_ready(const char *layout);
 // host.h (frame_rate.c): game time since the loaded save's first frame, -1 before; achievement notices wait for it.
 int64_t frame_step_world_us(void);
+// host.h (gfx_present.c): a world position on the window from the game's camera; the friends drawn in the world.
+int gfx_world_to_screen(const float world[3], float out[2], float *dist);
+int gfx_camera_ground_axes(float right[2], float fwd[2]);
+int gfx_hud_to_screen(float from_right, float from_bottom, float out[2], float *height);
+int gfx_view(float view_proj[16], float eye[3], float map[4]);
+void gfx_depth_want(const float ndc_rect[4]);
+int gfx_depth_begin(void);
+float gfx_depth_at(float ndc_x, float ndc_y);
+void gfx_depth_end(void);
+int gfx_occlusion(const float (*pts)[3], int n, float *visible);
+// host.h (vk_figure.c): friends' figures drawn into the game's G-buffer.
+typedef struct {
+    int anim, prev_anim;             // link_figure.h LF_*: playing, and blending out of
+    float frame, prev_frame, fps;    // their frames, and the frames a second both advance by
+    float blend;                     // 0..1: how far into anim (it rises by 4 a second)
+    float feet[3], vel[3], yaw;      // world metres, metres a second, radians (ui/menu.cpp draw_link_mesh)
+    float hair[3];                   // sRGB 0..1
+} GfxFigure;
+int gfx_figures_wanted(void);
+void gfx_figures_set(const GfxFigure *f, int n);
 // audren.h (audio_mixer.c): the achievement chime over the game's audio.
 void audio_chime(int platinum, float volume);
 const char *romfs_prompts_active(void);
@@ -391,6 +414,11 @@ static void ach_icons_fill(ImFontAtlas *fa, const int *rect) {
     }
 }
 
+// Link's texture atlas for the friends' figures (link_figure.c) rides in the font atlas as one more custom rectangle,
+// like the icons: g_fig_uv0/1 is its place there, g_fig_tex 0 until it is packed.
+static ImVec2 g_fig_uv0, g_fig_uv1;
+static bool g_fig_tex;
+
 static int fonts_up(float scale) {
     enum { N = sizeof kCjk / sizeof *kCjk };
     ImFontAtlas *fa = ImGui::GetIO().Fonts;
@@ -423,8 +451,26 @@ static int fonts_up(float scale) {
     }
     static int ach_rect[kAchMax];
     ach_icons_add(fa, ach_rect);
+    const LinkFigure *lf = link_figure();
+    int fig_rect = lf ? fa->AddCustomRectRegular((int)lf->atlas_side, (int)lf->atlas_side) : -1;
+    // the atlas width follows the glyphs alone (1024 or less here): wide enough for Link's atlas next to them
+    fa->TexDesiredWidth = lf ? (int)lf->atlas_side * 2 : 0;
     fa->Build();
     ach_icons_fill(fa, ach_rect);
+    g_fig_tex = false;
+    if (fig_rect >= 0) {
+        unsigned char *px;
+        int tw, th;
+        fa->GetTexDataAsRGBA32(&px, &tw, &th);
+        const ImFontAtlasCustomRect *r = fa->GetCustomRectByIndex(fig_rect);
+        if (r && r->IsPacked()) {
+            for (uint32_t y = 0; y < lf->atlas_side; y++)
+                memcpy(px + ((size_t)(r->Y + y) * tw + r->X) * 4, lf->atlas + (size_t)y * lf->atlas_side * 4, lf->atlas_side * 4);
+            fa->CalcCustomRectUV(r, &g_fig_uv0, &g_fig_uv1);
+            g_fig_tex = true;
+        }
+        rt_log("menu: Link's texture atlas %s the font atlas (%dx%d)", g_fig_tex ? "packed into" : "did not fit", tw, th);
+    }
     vk_queue_lock();   // the upload submits on the queue and waits for it
     int ok = ImGui_ImplVulkan_CreateFontsTexture();
     vk_queue_unlock();
@@ -1535,10 +1581,9 @@ static void mp_subtabs(float scale, int unread) {
     ImGui::Dummy(ImVec2(1, 6 * scale));
 }
 
-// ---- the friends' radar (net_mp.c positions): north up, as the game's map, at the top right under the frame rate.
-// Friends are dots with their initial, hollow with an arrow when they are in another layer (sky, surface, depths);
-// markers are diamonds. The scale follows the farthest friend, 100 m to 3 km; one beyond it sits on the rim. Under it,
-// a line per friend: name, distance and layer, green while they talk; then "Talking" while this game sends its voice.
+// ---- friends on the map and in the world (net_mp.c positions): figures in the world (world_tags), dots on the game's
+// minimap (minimap_dots), and at the top right under the frame rate a line per friend: name, distance and layer, green
+// while they talk; then "Talking" while this game sends its voice.
 static const UiTextId kLayerName[3] = {UI_MENU_MP_LAYER_SURFACE, UI_MENU_MP_LAYER_SKY, UI_MENU_MP_LAYER_DEPTHS};
 
 static void mp_distance(float d, char *out, size_t cap) {
@@ -1561,13 +1606,462 @@ static bool radar_active(void) {
     return v.nmarkers > 0 || voice_active();
 }
 
+// A friend's figure: a Link-like silhouette of our own drawing (hair with pointed ears, tunic in the friend's colour
+// with a belt, arms, legs and boots, a sword and shield on the back), seen from the front, its feet at feet and tall
+// pixels high; alpha is its opacity. Sizes are fractions of the height; y runs up from the feet.
+static void draw_figure(ImDrawList *dl, ImVec2 feet, float tall, ImVec4 col, float alpha) {
+    auto P = [&](float x, float y) { return ImVec2(feet.x + x * tall, feet.y - y * tall); };
+    auto C = [&](ImVec4 c, float k) {   // the colour scaled toward black (k < 1) or white (k > 1)
+        ImVec4 o = k <= 1 ? ImVec4(c.x * k, c.y * k, c.z * k, 1)
+                          : ImVec4(c.x + (1 - c.x) * (k - 1), c.y + (1 - c.y) * (k - 1), c.z + (1 - c.z) * (k - 1), 1);
+        return ui_col(o, alpha);
+    };
+    const ImVec4 skin(0.93f, 0.80f, 0.66f, 1), hair(0.86f, 0.70f, 0.36f, 1), steel(0.80f, 0.84f, 0.88f, 1);
+    float px = tall;   // pixels per unit
+    // on the back: the shield, then the sword across it
+    dl->AddEllipseFilled(P(-0.02f, 0.60f), ImVec2(0.115f * px, 0.13f * px), C(col, 0.45f));
+    dl->AddLine(P(0.15f, 0.80f), P(-0.13f, 0.38f), C(steel, 1.0f), fmaxf(1.0f, 0.022f * px));
+    dl->AddLine(P(0.09f, 0.66f), P(0.16f, 0.71f), C(hair, 0.7f), fmaxf(1.0f, 0.03f * px));   // the guard
+    // legs and boots
+    for (int s = -1; s <= 1; s += 2) {
+        dl->AddRectFilled(P(s < 0 ? -0.075f : 0.015f, 0.42f), P(s < 0 ? -0.015f : 0.075f, 0.10f), C(col, 0.55f), 0.02f * px);
+        dl->AddRectFilled(P(s < 0 ? -0.082f : 0.010f, 0.13f), P(s < 0 ? -0.010f : 0.082f, 0.0f), C(col, 0.30f), 0.02f * px);
+    }
+    // tunic: the chest, then the skirt flaring under the belt
+    dl->AddQuadFilled(P(-0.11f, 0.71f), P(0.11f, 0.71f), P(0.12f, 0.44f), P(-0.12f, 0.44f), C(col, 1.0f));
+    dl->AddQuadFilled(P(-0.12f, 0.45f), P(0.12f, 0.45f), P(0.15f, 0.30f), P(-0.15f, 0.30f), C(col, 0.85f));
+    dl->AddRectFilled(P(-0.122f, 0.475f), P(0.122f, 0.44f), C(col, 0.35f));
+    // arms with hands
+    for (int s = -1; s <= 1; s += 2) {
+        dl->AddLine(P(s * 0.115f, 0.69f), P(s * 0.165f, 0.47f), C(col, 0.8f), fmaxf(1.5f, 0.05f * px));
+        dl->AddCircleFilled(P(s * 0.168f, 0.455f), 0.028f * px, C(skin, 1.0f));
+    }
+    // neck, ears, face, hair
+    dl->AddRectFilled(P(-0.025f, 0.76f), P(0.025f, 0.70f), C(skin, 0.9f));
+    for (int s = -1; s <= 1; s += 2)
+        dl->AddTriangleFilled(P(s * 0.055f, 0.855f), P(s * 0.06f, 0.81f), P(s * 0.165f, 0.885f), C(skin, 0.95f));
+    dl->AddCircleFilled(P(0, 0.83f), 0.072f * px, C(skin, 1.0f));
+    dl->PathArcTo(P(0, 0.835f), 0.08f * px, IM_PI, 2 * IM_PI);   // the hair over the top of the head
+    dl->PathFillConvex(C(hair, 1.0f));
+    for (int s = -1; s <= 1; s += 2)   // locks down the sides of the face
+        dl->AddQuadFilled(P(s * 0.08f, 0.84f), P(s * 0.045f, 0.84f), P(s * 0.055f, 0.77f), P(s * 0.08f, 0.78f), C(hair, 0.9f));
+}
+
+// A friend as Link's mesh (link_figure.c), standing at feet and turned yaw radians (the figure's forward, +z, towards
+// x = sin yaw, z = cos yaw): each vertex through the game's camera, the triangles from far to near, each shaded by its
+// facing to a light from above and in front. The hair takes the friend's colour, so each Link is told apart at a
+// glance; alpha is the opacity. Triangles of less than a quarter pixel are left out, which thins a far figure.
+// The NDC rectangle around every figure drawn this frame (x0, y0, x1, y1): the depth to copy for the next one.
+static float g_fig_rect[4];
+static bool g_fig_any;
+
+static bool draw_link_mesh(ImDrawList *dl, const LinkFigure *lf, const float *pv, const float feet[3], float yaw, ImVec4 col,
+                           float alpha, float W, float H) {
+    float vp[16], eye[3], map[4];
+    if (!gfx_view(vp, eye, map)) return false;
+    static std::vector<float> sx, sy, sw, nx, ny;
+    static std::vector<std::pair<float, uint32_t>> order;
+    sx.resize(lf->nverts), sy.resize(lf->nverts), sw.resize(lf->nverts), nx.resize(lf->nverts), ny.resize(lf->nverts);
+    float cy = cosf(yaw), syaw = sinf(yaw);
+    for (uint32_t i = 0; i < lf->nverts; i++) {
+        const float *m = pv + 3 * i;   // the posed vertex
+        float w[3] = {feet[0] + cy * m[0] + syaw * m[2], feet[1] + m[1], feet[2] - syaw * m[0] + cy * m[2]};
+        float c[4];
+        for (int r = 0; r < 4; r++) c[r] = vp[4 * r] * w[0] + vp[4 * r + 1] * w[1] + vp[4 * r + 2] * w[2] + vp[4 * r + 3];
+        sw[i] = c[3];
+        if (c[3] <= 0.05f) continue;
+        nx[i] = c[0] / c[3], ny[i] = c[1] / c[3];
+        sx[i] = (map[0] + map[1] * nx[i]) * W, sy[i] = (map[2] + map[3] * ny[i]) * H;
+        if (!g_fig_any) g_fig_rect[0] = g_fig_rect[2] = nx[i], g_fig_rect[1] = g_fig_rect[3] = ny[i], g_fig_any = true;
+        g_fig_rect[0] = fminf(g_fig_rect[0], nx[i]), g_fig_rect[1] = fminf(g_fig_rect[1], ny[i]);
+        g_fig_rect[2] = fmaxf(g_fig_rect[2], nx[i]), g_fig_rect[3] = fmaxf(g_fig_rect[3], ny[i]);
+    }
+    // A soft shadow on the ground under the feet, which sets the figure on the world: two rings, darker inside.
+    for (int ring = 0; ring < 2; ring++) {
+        float rad = ring ? 0.28f : 0.45f, a = ring ? 0.22f : 0.16f;
+        ImVec2 poly[24];
+        int np_ = 0;
+        for (int k = 0; k < 24; k++) {
+            float ang = (float)k / 24 * 6.2831853f;
+            float w[3] = {feet[0] + rad * cosf(ang), feet[1] + 0.02f, feet[2] + rad * sinf(ang)}, c[4];
+            for (int r = 0; r < 4; r++) c[r] = vp[4 * r] * w[0] + vp[4 * r + 1] * w[1] + vp[4 * r + 2] * w[2] + vp[4 * r + 3];
+            if (c[3] <= 0.05f) break;
+            poly[np_++] = ImVec2((map[0] + map[1] * c[0] / c[3]) * W, (map[2] + map[3] * c[1] / c[3]) * H);
+        }
+        if (np_ == 24) dl->AddConvexPolyFilled(poly, 24, ui_col(ImVec4(0, 0, 0, 1), a * alpha));
+    }
+    order.clear();
+    // Each triangle against the scene's depth at its centre (last frame's copy, gfx_depth_want): left out when the
+    // game's scene (the player's Link, a tree, a rock) is nearer there by more than a few centimetres.
+    int depth = gfx_depth_begin();
+    for (uint32_t tri = 0; tri < lf->ntris; tri++) {
+        const uint32_t *ix = lf->tris + 3 * tri;
+        if (sw[ix[0]] <= 0.05f || sw[ix[1]] <= 0.05f || sw[ix[2]] <= 0.05f) continue;
+        float area = (sx[ix[1]] - sx[ix[0]]) * (sy[ix[2]] - sy[ix[0]]) - (sx[ix[2]] - sx[ix[0]]) * (sy[ix[1]] - sy[ix[0]]);
+        if (fabsf(area) < 0.5f) continue;
+        float dist = (sw[ix[0]] + sw[ix[1]] + sw[ix[2]]) / 3;
+        if (depth) {
+            float scene = gfx_depth_at((nx[ix[0]] + nx[ix[1]] + nx[ix[2]]) / 3, (ny[ix[0]] + ny[ix[1]] + ny[ix[2]]) / 3);
+            if (scene > 0 && scene < dist - 0.06f - 0.01f * dist) continue;
+        }
+        order.push_back({-dist, tri});
+    }
+    gfx_depth_end();
+    if (order.empty()) return true;
+    std::sort(order.begin(), order.end());
+    ImVec4 base[LF_CLASSES] = {
+        ImVec4(0.91f, 0.74f, 0.60f, 1),   // skin
+        ImVec4(col.x * 0.9f + 0.08f, col.y * 0.9f + 0.08f, col.z * 0.9f + 0.08f, 1),   // hair: the friend's colour
+        ImVec4(0.24f, 0.52f, 0.27f, 1),   // tunic: the Hylian green
+        ImVec4(0.78f, 0.70f, 0.55f, 1),   // trousers
+        ImVec4(0.45f, 0.30f, 0.19f, 1),   // leather
+        ImVec4(0.92f, 0.92f, 0.92f, 1),   // eye
+        ImVec4(0.15f, 0.12f, 0.12f, 1),   // dark
+        ImVec4(0.60f, 0.66f, 0.72f, 1),   // metal
+        ImVec4(0.35f, 0.78f, 0.63f, 1),   // rauru
+    };
+    // The light: from above, from the camera's side and a little from its left, so the side the player sees is lit
+    // the way the game lights a character in daylight. Half-Lambert (the dark side keeps some light) on smooth vertex
+    // normals, which are the posed faces' normals summed at each vertex.
+    float rgt[2] = {1, 0}, fwd[2] = {0, 1};
+    gfx_camera_ground_axes(rgt, fwd);
+    float light[3] = {-fwd[0] * 0.55f - rgt[0] * 0.3f, 0.78f, -fwd[1] * 0.55f - rgt[1] * 0.3f};
+    float ll = sqrtf(light[0] * light[0] + light[1] * light[1] + light[2] * light[2]);
+    for (float &x : light) x /= ll;
+    static std::vector<float> vn, lit;
+    vn.assign(3ull * lf->nverts, 0.0f);
+    lit.resize(lf->nverts);
+    for (uint32_t tri = 0; tri < lf->ntris; tri++) {
+        const uint32_t *ix = lf->tris + 3 * tri;
+        const float *a = pv + 3 * ix[0], *b = pv + 3 * ix[1], *c3 = pv + 3 * ix[2];
+        float u[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]}, w3[3] = {c3[0] - a[0], c3[1] - a[1], c3[2] - a[2]};
+        float n[3] = {u[1] * w3[2] - u[2] * w3[1], u[2] * w3[0] - u[0] * w3[2], u[0] * w3[1] - u[1] * w3[0]};
+        for (int k = 0; k < 3; k++)
+            for (int q = 0; q < 3; q++) vn[3 * ix[k] + q] += n[q] * (float)lf->winding;   // area-weighted, outward
+    }
+    for (uint32_t i = 0; i < lf->nverts; i++) {
+        float *n = &vn[3 * i];
+        float nl = sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+        if (nl < 1e-12f) { lit[i] = 0.8f; continue; }
+        float wn[3] = {(cy * n[0] + syaw * n[2]) / nl, n[1] / nl, (-syaw * n[0] + cy * n[2]) / nl};   // to the world
+        float hl = (wn[0] * light[0] + wn[1] * light[1] + wn[2] * light[2]) * 0.5f + 0.5f;
+        lit[i] = fminf(1.0f, 0.50f + 0.62f * hl * hl);
+    }
+    ImDrawListFlags flags = dl->Flags;   // no anti-aliased fringe: it shows as light seams between the triangles
+    dl->Flags &= ~ImDrawListFlags_AntiAliasedFill;
+    // Textured through the font atlas (g_fig_uv0/1, the background list's own texture); untextured triangles (the
+    // hair, and any part whose texture was not found) take the atlas's white corner and their class colour.
+    ImVec2 uv0 = g_fig_uv0, uvd(g_fig_uv1.x - g_fig_uv0.x, g_fig_uv1.y - g_fig_uv0.y);
+    ImVec2 white = g_fig_tex ? ImVec2(uv0.x + uvd.x * (4.0f / lf->atlas_side), uv0.y + uvd.y * (4.0f / lf->atlas_side))
+                             : ImGui::GetIO().Fonts->TexUvWhitePixel;
+    dl->PrimReserve((int)order.size() * 3, (int)order.size() * 3);
+    for (const auto &o : order) {
+        uint32_t tri = o.second;
+        const uint32_t *ix = lf->tris + 3 * tri;
+        uint8_t cls = lf->cls[tri] & 0x7f;
+        bool textured = g_fig_tex && !(lf->cls[tri] & LF_UNTEXTURED);
+        ImVec4 c = textured ? ImVec4(1, 1, 1, 1) : base[cls < LF_CLASSES ? cls : LF_LEATHER];
+        if (textured && cls == LF_HAIR)   // the hair texture's shading in the friend's colour (its blond brightened back)
+            c = ImVec4(fminf(1.0f, base[LF_HAIR].x * 1.6f), fminf(1.0f, base[LF_HAIR].y * 1.6f), fminf(1.0f, base[LF_HAIR].z * 1.6f), 1);
+        const float *uv = lf->uvs + 6 * tri;
+        for (int k = 0; k < 3; k++) {
+            float sh = lit[ix[k]];
+            ImVec2 tuv = textured ? ImVec2(uv0.x + uvd.x * uv[2 * k], uv0.y + uvd.y * uv[2 * k + 1]) : white;
+            dl->PrimVtx(ImVec2(sx[ix[k]], sy[ix[k]]), tuv, ui_col(ImVec4(c.x * sh, c.y * sh, c.z * sh, 1), alpha));
+        }
+    }
+    dl->Flags = flags;
+    return true;
+}
+
+// Each friend's figure state, by name: the way they face (where they last walked, kept while they stand), their ground
+// speed (smoothed), and the animation playing (link_figure.h LF_*: standing, walking, running, dashing, picked by the
+// speed) with its frame; a change of animation blends from the old one over a quarter second.
+struct FigureState {
+    char name[MP_NAME_MAX];
+    float pos[3], yaw, speed;
+    uint64_t at_ms, anim_ms;   // last position update; last animation step
+    int anim, prev_anim, want;
+    float frame, prev_frame, blend;   // blend 1: only anim
+    float want_s;                     // how long the speed has asked for want
+    float fps;                        // frames a second the animations advance by
+    float vel[3];                     // the drawn place's velocity (m/s, smoothed)
+};
+
+static FigureState *figure_state(const char *name, const float pos[3]) {
+    static FigureState seen[MP_MAX_PLAYERS];
+    int k = -1, free_k = 0;
+    for (int i = 0; i < MP_MAX_PLAYERS; i++) {
+        if (!strcmp(seen[i].name, name)) k = i;
+        if (!seen[i].name[0]) free_k = i;
+    }
+    uint64_t now = plat_now_ms();
+    if (k < 0) {
+        k = free_k;
+        memset(&seen[k], 0, sizeof seen[k]);
+        snprintf(seen[k].name, sizeof seen[k].name, "%s", name);
+        memcpy(seen[k].pos, pos, sizeof seen[k].pos);
+        seen[k].at_ms = now, seen[k].blend = 1;
+    }
+    FigureState *s = &seen[k];
+    float dt = (float)(now - s->at_ms) / 1000.0f;
+    if (dt <= 0) return s;
+    if (dt > 0.5f) dt = 0.5f;
+    float dx = pos[0] - s->pos[0], dz = pos[2] - s->pos[2], d = sqrtf(dx * dx + dz * dz);
+    float v = d / dt;
+    if (v > 40) v = 0;   // a jump (fast travel)
+    s->speed += (v - s->speed) * fminf(1.0f, dt * 2.0f);   // positions come in steps (200 ms): a slow average
+    if (d > 0.02f) s->yaw = atan2f(dx, dz);
+    float kv = fminf(1.0f, dt * 8.0f);
+    for (int c = 0; c < 3; c++) s->vel[c] += ((pos[c] - s->pos[c]) / dt - s->vel[c]) * kv;
+    memcpy(s->pos, pos, sizeof s->pos);
+    s->at_ms = now;
+    return s;
+}
+
+// Advances a friend's animation for dt seconds: the animation by speed (between the made-for speeds of the next two),
+// played at the rate that matches the friend's speed, so the feet keep pace.
+static void figure_animate(FigureState *s, const LinkFigure *lf, float dt) {
+    // the animation for the speed, with a margin around each threshold so a speed near one does not flip between two
+    static const float up[3] = {0.45f, 2.9f, 4.5f}, down[3] = {0.25f, 2.5f, 4.1f};
+    int want = s->anim;
+    while (want < LF_DASH && s->speed > up[want]) want++;
+    while (want > LF_WAIT && s->speed < down[want - 1]) want--;
+    if (want >= lf->nanims) want = lf->nanims - 1;
+    // and only once it has held for 0.3 s
+    if (want != s->want) s->want = want, s->want_s = 0;
+    else s->want_s += dt;
+    if (want != s->anim && s->want_s >= 0.3f) {
+        float phase = s->frame / (float)lf->anims[s->anim].frames;   // the stride's place, kept between moving gaits
+        s->prev_anim = s->anim, s->prev_frame = s->frame, s->blend = 0;
+        s->anim = want;
+        s->frame = (s->anim != LF_WAIT && s->prev_anim != LF_WAIT) ? (phase - floorf(phase)) * (float)lf->anims[want].frames : 0;
+    }
+    float rate = 1;
+    float made = lf->anims[s->anim].speed;
+    if (made > 0.1f) rate = fminf(1.6f, fmaxf(0.6f, s->speed / made));
+    s->fps = 30.0f * rate;
+    s->frame += dt * 30.0f * rate;
+    s->prev_frame += dt * 30.0f * rate;
+    s->blend = fminf(1.0f, s->blend + dt * 4.0f);
+}
+
+// ---- friends in the world: a figure where each friend stands (draw_figure), with name and distance above, and a
+// marker as a diamond over its spot; drawn with the game's camera of the latest frame (gfx_world_to_screen). Behind the
+// scene (vk_occl.c tests three points of each figure against the game's depth) a figure fades to a faint outline of
+// itself while its name stays, so a friend behind a hill can still be found. The figure is 1.8 m tall at the friend's
+// feet; the distances are the radar's, along the ground from this player.
+static void world_tags(const MenuTarget *t, const MpView &v, float scale, bool (*talking)(const char *, void *), void *ctx) {
+    ImDrawList *dl = ImGui::GetBackgroundDrawList();   // under the menu's own windows and notices
+    ImFont *font = ImGui::GetFont();
+    float W = (float)t->width, H = (float)t->height, fs = ImGui::GetFontSize() * 0.8f;
+    float pts[MP_MAX_PLAYERS * 3][3], vis[MP_MAX_PLAYERS * 3];
+    int np = 0;
+    for (int i = 0; i < v.nplayers && np + 3 <= MP_MAX_PLAYERS * 3; i++) {   // feet, chest and head of each friend
+        const MpPlayer &p = v.players[i];
+        if (!p.has_pos || !strcmp(p.name, v.me)) continue;
+        static const float heights[3] = {0.3f, 1.0f, 1.6f};
+        for (float h : heights) pts[np][0] = p.pos[0], pts[np][1] = p.pos[1] + h, pts[np][2] = p.pos[2], np++;
+    }
+    gfx_occlusion(pts, np, vis);
+    g_fig_any = false;
+    int k = 0;
+    // Drawn by the game's renderer (vk_figure.c) when it can: the poses go there, the overlay keeps the names.
+    const bool gbuf = gfx_figures_wanted() != 0;
+    GfxFigure gfig[MP_MAX_PLAYERS];
+    int ngfig = 0;
+    for (int i = 0; i < v.nplayers; i++) {
+        const MpPlayer &p = v.players[i];
+        if (!p.has_pos || !strcmp(p.name, v.me)) continue;
+        float seen = 0, known = 0;
+        for (int j = 0; j < 3 && k + j < np; j++)
+            if (vis[k + j] >= 0) seen += vis[k + j], known++;
+        k += 3;
+        float shown = known ? seen / known : 1;   // unknown (no test yet, off the depth target): drawn as seen
+        float head[3] = {p.pos[0], p.pos[1] + 1.8f, p.pos[2]}, f[2], h[2], dist;
+        if (!gfx_world_to_screen(p.pos, f, &dist) || !gfx_world_to_screen(head, h, NULL)) continue;
+        ImVec2 feet(f[0] * W, f[1] * H), top(h[0] * W, h[1] * H);
+        float tall = feet.y - top.y;
+        if (tall < 10 * scale) tall = 10 * scale, top.y = feet.y - tall;   // far away: a small figure stays visible
+        if (feet.x < -50 || feet.x > W + 50 || top.y > H + 50 || feet.y < -50) continue;   // off screen: the minimap shows them
+        ImVec4 col = mp_name_col(p.name);
+        float a = dist < 15 ? 0.3f + 0.025f * dist : 0.68f;   // fainter up close, not to hide the view
+        a = 0.12f + (a - 0.12f) * shown;                     // behind the scene: a faint figure
+        const LinkFigure *lf = link_figure();
+        FigureState *fs_ = figure_state(p.name, p.pos);
+        bool drawn = false;
+        if (lf) {
+            static std::vector<float> pose, pose2;
+            uint64_t now = plat_now_ms();
+            float dt = fs_->anim_ms ? fminf(0.1f, (float)(now - fs_->anim_ms) / 1000.0f) : 0;
+            fs_->anim_ms = now;
+            figure_animate(fs_, lf, dt);
+            if (gbuf && ngfig < MP_MAX_PLAYERS) {   // posed by the renderer at the moment it draws
+                GfxFigure &g = gfig[ngfig];
+                g.anim = fs_->anim, g.prev_anim = fs_->prev_anim;
+                g.frame = fs_->frame, g.prev_frame = fs_->prev_frame, g.fps = fs_->fps, g.blend = fs_->blend;
+                memcpy(g.feet, p.pos, sizeof g.feet);
+                memcpy(g.vel, fs_->vel, sizeof g.vel);
+                g.yaw = fs_->yaw;
+                g.hair[0] = col.x * 0.9f + 0.08f, g.hair[1] = col.y * 0.9f + 0.08f, g.hair[2] = col.z * 0.9f + 0.08f;
+                ngfig++;
+                drawn = true;
+            } else {
+                pose.resize(3ull * lf->nverts), pose2.resize(3ull * lf->nverts);
+                link_figure_pose(lf, fs_->anim, fs_->frame, pose.data());
+                if (fs_->blend < 1) {   // blend out of the previous animation
+                    link_figure_pose(lf, fs_->prev_anim, fs_->prev_frame, pose2.data());
+                    for (size_t q = 0; q < pose.size(); q++) pose[q] = pose2[q] + (pose[q] - pose2[q]) * fs_->blend;
+                }
+                drawn = draw_link_mesh(dl, lf, pose.data(), p.pos, fs_->yaw, col, 1.0f, W, H);
+            }
+        }
+        if (!drawn) draw_figure(dl, feet, tall, col, a);
+        if (talking(p.name, ctx)) dl->AddCircle(ImVec2(top.x, top.y + tall * 0.17f), tall * 0.12f + 3 * scale, ui_col(kUiZonai, 0.9f), 20, 2 * scale);
+        char label[96], d[32];
+        mp_distance(hypotf(p.pos[0] - v.me_pos[0], p.pos[2] - v.me_pos[2]), d, sizeof d);   // as the list measures it
+        snprintf(label, sizeof label, "%s  %s", p.name, d);
+        ImVec2 ls = font->CalcTextSizeA(fs, FLT_MAX, 0, label);
+        ImVec2 lp(top.x - ls.x / 2, top.y - ls.y - 6 * scale);
+        dl->AddRectFilled(ImVec2(lp.x - 6 * scale, lp.y - 2 * scale), ImVec2(lp.x + ls.x + 6 * scale, lp.y + ls.y + 2 * scale),
+                          ui_col(kUiPanel, 0.7f), 4 * scale);
+        dl->AddText(font, fs, lp, ui_col(col), label);
+    }
+    if (gbuf) gfx_figures_set(gfig, ngfig);
+    if (g_fig_any) {   // the depth around the figures, for the next frame (a margin for their movement)
+        float r[4] = {g_fig_rect[0] - 0.05f, g_fig_rect[1] - 0.05f, g_fig_rect[2] + 0.05f, g_fig_rect[3] + 0.05f};
+        gfx_depth_want(r);
+    }
+    for (int i = 0; i < v.nmarkers; i++) {
+        float above[3] = {v.markers[i].pos[0], v.markers[i].pos[1] + 2.5f, v.markers[i].pos[2]}, m[2], dist;
+        if (!gfx_world_to_screen(above, m, &dist)) continue;
+        ImVec2 q(m[0] * W, m[1] * H);
+        if (q.x < 0 || q.x > W || q.y < 0 || q.y > H) continue;
+        float k = 9 * scale;
+        ImU32 col = ui_col(mp_name_col(v.markers[i].name));
+        dl->AddQuadFilled(ImVec2(q.x, q.y - k), ImVec2(q.x + k, q.y), ImVec2(q.x, q.y + k), ImVec2(q.x - k, q.y), col);
+        dl->AddQuad(ImVec2(q.x, q.y - k), ImVec2(q.x + k, q.y), ImVec2(q.x, q.y + k), ImVec2(q.x - k, q.y),
+                    ui_col(ImVec4(0, 0, 0, 1), 0.7f), 1.5f * scale);
+        char d[32];
+        mp_distance(hypotf(v.markers[i].pos[0] - v.me_pos[0], v.markers[i].pos[2] - v.me_pos[2]), d, sizeof d);
+        ImVec2 ds = font->CalcTextSizeA(fs * 0.85f, FLT_MAX, 0, d);
+        dl->AddText(font, fs * 0.85f, ImVec2(q.x - ds.x / 2, q.y + k + 2 * scale), ui_col(kUiCream), d);
+    }
+}
+
+// ---- friends on the game's own minimap (bottom right): a dot with their initial, in their colour, hollow with an arrow
+// in another layer; markers as diamonds; a friend beyond the map's edge sits on its rim. The minimap turns with the
+// camera (forward is up) and shows about 1 m per pixel of a 1440-row picture; its centre is 0.1819 and 0.1667 picture
+// heights from the picture's right and bottom edges and its radius 0.1097 (measured on 1.4.3 at 2560x1440: walking
+// 10.5 m and 11.2 m moved the map 11 pixels each time).
+enum { MINI_M_PER_HEIGHT = 1440 };
+static const float kMiniRight = 0.1819f, kMiniBottom = 0.1667f, kMiniRadius = 0.1097f;
+
+static void minimap_dots(const MenuTarget *t, const MpView &v, float scale, bool (*talking)(const char *, void *), void *ctx) {
+    float c01[2], hpx, rx[2], fw[2];
+    if (!gfx_hud_to_screen(kMiniRight, kMiniBottom, c01, &hpx) || !gfx_camera_ground_axes(rx, fw)) return;
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    ImFont *font = ImGui::GetFont();
+    float fs = ImGui::GetFontSize() * 0.66f, R = kMiniRadius * hpx, ppm = hpx / MINI_M_PER_HEIGHT;
+    ImVec2 c(c01[0] * (float)t->width, c01[1] * (float)t->height);
+    auto place = [&](const float *pos, bool *edge) {
+        float dx = pos[0] - v.me_pos[0], dz = pos[2] - v.me_pos[2];
+        float mx = (dx * rx[0] + dz * rx[1]) * ppm, my = -(dx * fw[0] + dz * fw[1]) * ppm, d = hypotf(mx, my);
+        float lim = R - 7 * scale;
+        *edge = d > lim;
+        if (*edge) mx *= lim / d, my *= lim / d;
+        return ImVec2(c.x + mx, c.y + my);
+    };
+    for (int i = 0; i < v.nmarkers; i++) {   // markers under the players
+        bool edge;
+        ImVec2 m = place(v.markers[i].pos, &edge);
+        float k = 6 * scale;
+        dl->AddQuadFilled(ImVec2(m.x, m.y - k), ImVec2(m.x + k, m.y), ImVec2(m.x, m.y + k), ImVec2(m.x - k, m.y),
+                          ui_col(mp_name_col(v.markers[i].name)));
+        dl->AddQuad(ImVec2(m.x, m.y - k), ImVec2(m.x + k, m.y), ImVec2(m.x, m.y + k), ImVec2(m.x - k, m.y),
+                    ui_col(ImVec4(0, 0, 0, 1), 0.7f), 1.2f * scale);
+    }
+    int my_layer = mp_layer(v.me_pos[1]);
+    for (int i = 0; i < v.nplayers; i++) {
+        const MpPlayer &p = v.players[i];
+        if (!p.has_pos || !strcmp(p.name, v.me)) continue;
+        bool edge;
+        ImVec2 q = place(p.pos, &edge);
+        float r = 7 * scale;
+        ImVec4 col = mp_name_col(p.name);
+        int layer = mp_layer(p.pos[1]);
+        if (talking(p.name, ctx)) dl->AddCircle(q, r + 3 * scale, ui_col(kUiZonai), 0, 2 * scale);
+        dl->AddCircleFilled(q, r + 1.5f * scale, ui_col(ImVec4(0, 0, 0, 1), 0.6f));   // readable over a light map
+        if (layer == my_layer) dl->AddCircleFilled(q, r, ui_col(col));
+        else dl->AddCircle(q, r, ui_col(col), 0, 2.2f * scale);
+        char ini[8];
+        mp_initial(p.name, ini);
+        ImVec2 is = font->CalcTextSizeA(fs, FLT_MAX, 0, ini);
+        dl->AddText(font, fs, ImVec2(q.x - is.x / 2, q.y - is.y / 2),
+                    ui_col(layer == my_layer ? ImVec4(0.05f, 0.07f, 0.07f, 1) : col), ini);
+        if (layer != my_layer) {   // above or below this player: a small arrow beside the dot
+            bool up = (layer == MP_LAYER_SKY) || (layer == MP_LAYER_SURFACE && my_layer == MP_LAYER_DEPTHS);
+            float ax = q.x + r + 4 * scale, k = 4 * scale;
+            if (up) dl->AddTriangleFilled(ImVec2(ax, q.y - k), ImVec2(ax - k, q.y + k * 0.6f), ImVec2(ax + k, q.y + k * 0.6f), ui_col(col));
+            else dl->AddTriangleFilled(ImVec2(ax, q.y + k), ImVec2(ax - k, q.y - k * 0.6f), ImVec2(ax + k, q.y - k * 0.6f), ui_col(col));
+        }
+    }
+}
+
+// Friends' positions arrive every 200 ms while they move. Between two, each friend keeps going at the velocity of the
+// last two (for at most a quarter second, so a stop does not overshoot), and the drawn place follows that guess with a
+// short lag (a tenth of a second), so a running friend moves evenly instead of in steps. A jump of over 50 m (fast
+// travel) or a second without news snaps.
+static void smooth_positions(MpView &v) {
+    static struct {
+        char name[MP_NAME_MAX];
+        float got[3], vel[3], shown[3];   // the last received place, the velocity, the drawn place
+        uint64_t got_ms, at;
+    } held[MP_MAX_PLAYERS];
+    uint64_t now = plat_now_ms();
+    for (int i = 0; i < v.nplayers; i++) {
+        MpPlayer &p = v.players[i];
+        if (!p.has_pos || !strcmp(p.name, v.me)) continue;
+        int k = -1, old = 0;
+        for (int j = 0; j < MP_MAX_PLAYERS; j++) {
+            if (!strcmp(held[j].name, p.name)) k = j;
+            if (held[j].at < held[old].at) old = j;
+        }
+        auto *h = k >= 0 ? &held[k] : NULL;
+        if (!h || now - h->at > 1000 ||
+            hypotf(p.pos[0] - h->got[0], p.pos[2] - h->got[2]) + fabsf(p.pos[1] - h->got[1]) > 50) {
+            h = &held[k < 0 ? old : k];
+            snprintf(h->name, sizeof h->name, "%s", p.name);
+            memcpy(h->got, p.pos, sizeof p.pos), memcpy(h->shown, p.pos, sizeof p.pos);
+            memset(h->vel, 0, sizeof h->vel);
+            h->got_ms = h->at = now;
+            continue;
+        }
+        if (memcmp(p.pos, h->got, sizeof p.pos)) {   // a new place: the velocity since the last one
+            float span = (float)(now - h->got_ms) / 1000.0f;
+            for (int c = 0; c < 3; c++) h->vel[c] = span > 0.05f ? (p.pos[c] - h->got[c]) / fminf(span, 0.5f) : 0;
+            memcpy(h->got, p.pos, sizeof p.pos);
+            h->got_ms = now;
+        }
+        float ahead = fminf(0.25f, (float)(now - h->got_ms) / 1000.0f);
+        float a = 1 - expf(-(float)(now - h->at) / 100.0f);
+        for (int c = 0; c < 3; c++) {
+            float guess = h->got[c] + h->vel[c] * ahead;
+            h->shown[c] += (guess - h->shown[c]) * a;
+        }
+        memcpy(p.pos, h->shown, sizeof p.pos);
+        h->at = now;
+    }
+}
+
 static void radar_draw(const MenuTarget *t, float scale) {
     if (full_menu()) return;
     MpView v;
     mp_view(&v);
+    smooth_positions(v);
     ImDrawList *dl = ImGui::GetForegroundDrawList();
     ImFont *font = ImGui::GetFont();
-    float fs = ImGui::GetFontSize() * 0.78f, R = 78 * scale, margin = 18 * scale;
+    float fs = ImGui::GetFontSize() * 0.78f, margin = 18 * scale;
     float right = (float)t->width - margin, y = 64 * scale;
     char speak[VOICE_SPEAKERS][VOICE_NAME_MAX];
     int nspeak = voice_speakers(speak, VOICE_SPEAKERS);
@@ -1576,78 +2070,9 @@ static void radar_draw(const MenuTarget *t, float scale) {
             if (!strcmp(speak[i], name)) return true;
         return false;
     };
-    int friends = 0;
-    float far = 0;
     if (radar_on(v))
-        for (int i = 0; i < v.nplayers; i++) {
-            const MpPlayer &p = v.players[i];
-            if (!p.has_pos || !strcmp(p.name, v.me)) continue;
-            friends++;
-            far = fmaxf(far, hypotf(p.pos[0] - v.me_pos[0], p.pos[2] - v.me_pos[2]));
-        }
-    if (radar_on(v) && (friends || v.nmarkers)) {
-        for (int i = 0; i < v.nmarkers; i++)
-            far = fmaxf(far, hypotf(v.markers[i].pos[0] - v.me_pos[0], v.markers[i].pos[2] - v.me_pos[2]));
-        float range = far * 1.15f;
-        static const float steps[] = {100, 250, 500, 1000, 2000, 3000};
-        float shown = steps[5];
-        for (float s : steps)
-            if (range <= s) { shown = s; break; }
-        ImVec2 c(right - R, y + R);
-        dl->AddCircleFilled(c, R, ui_col(kUiPanel, 0.78f), 48);
-        dl->AddCircle(c, R, ui_col(kUiGold, 0.55f), 48, 1.4f * scale);
-        dl->AddCircle(c, R * 0.5f, ui_col(kUiMuted, 0.25f), 48, 1.0f * scale);
-        dl->AddLine(ImVec2(c.x - R, c.y), ImVec2(c.x + R, c.y), ui_col(kUiMuted, 0.18f), 1.0f * scale);
-        dl->AddLine(ImVec2(c.x, c.y - R), ImVec2(c.x, c.y + R), ui_col(kUiMuted, 0.18f), 1.0f * scale);
-        ImVec2 ns = font->CalcTextSizeA(fs, FLT_MAX, 0, "N");
-        dl->AddText(font, fs, ImVec2(c.x - ns.x / 2, c.y - R + 3 * scale), ui_col(kUiGoldHi), "N");
-        char scale_text[32];
-        mp_distance(shown, scale_text, sizeof scale_text);
-        ImVec2 ss = font->CalcTextSizeA(fs * 0.85f, FLT_MAX, 0, scale_text);
-        dl->AddText(font, fs * 0.85f, ImVec2(c.x - ss.x / 2, c.y + R - ss.y - 3 * scale), ui_col(kUiMuted), scale_text);
-        auto place = [&](const float *pos, bool *edge) {   // x east, z south: screen right and down
-            float dx = (pos[0] - v.me_pos[0]) / shown * R, dy = (pos[2] - v.me_pos[2]) / shown * R, d = hypotf(dx, dy);
-            float lim = R - 9 * scale;
-            *edge = d > lim;
-            if (*edge) dx *= lim / d, dy *= lim / d;
-            return ImVec2(c.x + dx, c.y + dy);
-        };
-        for (int i = 0; i < v.nmarkers; i++) {   // markers under the players
-            bool edge;
-            ImVec2 m = place(v.markers[i].pos, &edge);
-            float k = 6 * scale;
-            ImU32 col = ui_col(mp_name_col(v.markers[i].name));
-            dl->AddQuadFilled(ImVec2(m.x, m.y - k), ImVec2(m.x + k, m.y), ImVec2(m.x, m.y + k), ImVec2(m.x - k, m.y), col);
-            dl->AddQuad(ImVec2(m.x, m.y - k), ImVec2(m.x + k, m.y), ImVec2(m.x, m.y + k), ImVec2(m.x - k, m.y),
-                        ui_col(ImVec4(0, 0, 0, 1), 0.7f), 1.2f * scale);
-        }
-        int my_layer = mp_layer(v.me_pos[1]);
-        for (int i = 0; i < v.nplayers; i++) {
-            const MpPlayer &p = v.players[i];
-            if (!p.has_pos || !strcmp(p.name, v.me)) continue;
-            bool edge;
-            ImVec2 q = place(p.pos, &edge);
-            float r = 8 * scale;
-            ImVec4 col = mp_name_col(p.name);
-            int layer = mp_layer(p.pos[1]);
-            if (talking(p.name)) dl->AddCircle(q, r + 3 * scale, ui_col(kUiZonai), 0, 2 * scale);
-            if (layer == my_layer) dl->AddCircleFilled(q, r, ui_col(col));
-            else dl->AddCircle(q, r, ui_col(col), 0, 2.2f * scale);
-            char ini[8];
-            mp_initial(p.name, ini);
-            ImVec2 is = font->CalcTextSizeA(fs * 0.85f, FLT_MAX, 0, ini);
-            dl->AddText(font, fs * 0.85f, ImVec2(q.x - is.x / 2, q.y - is.y / 2),
-                        ui_col(layer == my_layer ? ImVec4(0.05f, 0.07f, 0.07f, 1) : col), ini);
-            if (layer != my_layer) {   // above or below this player: a small arrow beside the dot
-                bool up = (layer == MP_LAYER_SKY) || (layer == MP_LAYER_SURFACE && my_layer == MP_LAYER_DEPTHS);
-                float ax = q.x + r + 4 * scale, k = 4 * scale;
-                if (up) dl->AddTriangleFilled(ImVec2(ax, q.y - k), ImVec2(ax - k, q.y + k * 0.6f), ImVec2(ax + k, q.y + k * 0.6f), ui_col(col));
-                else dl->AddTriangleFilled(ImVec2(ax, q.y + k), ImVec2(ax - k, q.y - k * 0.6f), ImVec2(ax + k, q.y - k * 0.6f), ui_col(col));
-            }
-        }
-        dl->AddCircleFilled(c, 4 * scale, ui_col(kUiCream));   // this player
-        y += R * 2 + 8 * scale;
-    }
+        world_tags(t, v, scale, [](const char *name, void *ctx) { return (*(decltype(talking) *)ctx)(name); }, &talking);
+    if (radar_on(v)) minimap_dots(t, v, scale, [](const char *name, void *ctx) { return (*(decltype(talking) *)ctx)(name); }, &talking);
     // the list: friends with their distance and layer (or just who talks, without positions)
     float lh = fs + 10 * scale;
     for (int i = 0; i < v.nplayers; i++) {

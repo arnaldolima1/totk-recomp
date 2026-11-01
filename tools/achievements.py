@@ -346,7 +346,7 @@ DEFAULTS = [
      _p('mp_tiers', 12)),
     ('mp_encontro', 'Encontro em Hyrule', 'Encontre um amigo no mundo: fiquem a menos de 30 metros um do outro.',
      'rare', 'map', _p('mp_meet', 1)),
-    ('mp_guia', 'Guia de Hyrule', 'Coloque 20 marcadores no radar dos amigos.', 'rare', 'flag', _p('mp_marks', 20)),
+    ('mp_guia', 'Guia de Hyrule', 'Coloque 20 marcadores no radar dos amigos, cada um a 50 m do anterior.', 'rare', 'flag', _p('mp_marks', 20)),
     ('mp_lendas', 'Lendas Unidas', 'Conclua os 24 níveis de desafios do grupo.', 'legendary', 'triforce',
      _p('mp_tiers', 24)),
     ('platina', 'Lenda de Hyrule', 'Desbloqueie todas as outras conquistas (as de multijogador ficam de fora).',

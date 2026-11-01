@@ -197,6 +197,13 @@ static void cb_done(void *arg) {   // completion thread
 
 void vk_exec_draw_new_cb(void) { memset(&B, 0, sizeof B); }
 
+// Commands recorded outside the replay (vk_figure.c) bound their own pipeline, descriptors, vertex buffers and dynamic
+// state: the next draw records all of its own again.
+void vk_exec_state_lost(VkExec *ex) {
+    ex->dirty = VK_EXEC_DIRTY_ALL;
+    memset(&B, 0, sizeof B);
+}
+
 static CbRes *cb_res(VkExec *ex) {
     if (cur && cur_fence == ex->fence) return cur;
     cur = calloc(1, sizeof *cur);
@@ -247,6 +254,8 @@ static uint8_t *scratch(VkExec *ex, uint64_t size, VkBuffer *buf, VkDeviceSize *
     c->used += size;
     return p;
 }
+
+uint8_t *vk_exec_scratch(VkExec *ex, uint64_t size, VkBuffer *buf, VkDeviceSize *off) { return scratch(ex, size, buf, off); }
 
 static void note_written(VkExec *ex, uint64_t addr, uint64_t size) {
     CbRes *r = cb_res(ex);
@@ -2003,6 +2012,101 @@ static int pipe_memo_on(void) {
 }
 
 // Pass, shaders, pipeline, fixed state and resources for a draw. 0: the draw is skipped.
+// ---- the game's camera (vk_camera_get), for drawing at world positions over the picture (the friends' markers in
+// ui/menu.cpp). The G-buffer pass is the first pass of a frame with a D32F depth the size of its first colour target, at
+// least 640 wide, and three or more colour targets; its first draw has the 2368-byte camera block at vertex uniform 1:
+// view (floats 0..11), view-projection (12..27, row-major), projection, inverse view (44..55: the position is 47, 51,
+// 55), near and far (56, 57), aspect (62), vertical field of view in radians (70). Layout from MacNativeGames
+// nvn_mtl.m mfx_take_camera and totk_mfx.m mfx_note_camera (MIT, Copyright (c) 2026 MacNativeGames contributors).
+static PlatMutex cam_lock = PLAT_MUTEX_INIT;
+static float cam_block[84];
+static uint64_t cam_at_ms, cam_frame = UINT64_MAX;
+static uint32_t cam_pass;
+
+static void cam_take(VkExec *ex) {
+    if (ex->pass_serial == cam_pass) return;   // the first draw of each pass only
+    cam_pass = ex->pass_serial;
+    uint64_t frame = __atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED);
+    if (frame == cam_frame) return;            // one camera a frame: the G-buffer pass comes first
+    const VkExecTarget *d = &ex->depth, *c = &ex->color[0];
+    if (!d->image || !c->image || (d->format != VK_FORMAT_D32_SFLOAT && d->format != VK_FORMAT_D32_SFLOAT_S8_UINT) ||
+        c->width != d->width || c->height != d->height || c->width < 640)
+        return;
+    int nc = 0;
+    for (uint32_t i = 0; i < ex->pass_ncolor && i < 8; i++) nc += ex->color[i].image != VK_NULL_HANDLE;
+    const p_bind_buf *u = &ex->ubo[NVN_STAGE_VS][1];
+    if (nc < 3 || !u->addr || u->size != 2368) return;
+    float cam[84];
+    VkMemSpan sp;
+    if (!upd_read(ex, u->addr, cam, sizeof cam)) {   // the bytes this draw sees: pending inline updates, else memory
+        if (!vk_mem_resolve(u->addr, sizeof cam, &sp)) return;
+        memcpy(cam, (const void *)(uintptr_t)u->addr, sizeof cam);
+    }
+    if (!(cam[56] > 0 && cam[57] > cam[56] && cam[62] > 0 && cam[70] > 0)) return;   // near, far, aspect, field of view
+    cam_frame = frame;
+    vk_occl_arm(ex, cam);
+    plat_mutex_lock(&cam_lock);
+    memcpy(cam_block, cam, sizeof cam);
+    cam_at_ms = plat_now_ms();
+    plat_mutex_unlock(&cam_lock);
+}
+
+// The nearest cascade of the sun's shadow map: a depth-only pass on layer 0 of a 16-bit depth array with the camera
+// block (2368 bytes) in vertex uniform slot 1, its view and orthographic projection those of the cascade. Armed for
+// the friends' figures to cast shadows (vk_figure.c).
+static uint32_t shadow_pass;
+static void shadow_take(VkExec *ex) {
+    if (ex->pass_serial == shadow_pass) return;
+    shadow_pass = ex->pass_serial;
+    const VkExecTarget *d = &ex->depth;
+    if (!d->image || d->format != VK_FORMAT_D16_UNORM || d->base_layer != 0 || d->width < 512 || d->width != d->height)
+        return;
+    for (uint32_t i = 0; i < ex->pass_ncolor && i < 8; i++)
+        if (ex->color[i].image) return;
+    const p_bind_buf *u = &ex->ubo[NVN_STAGE_VS][1];
+    if (!u->addr || u->size != 2368) return;
+    float cam[84];
+    if (!upd_read(ex, u->addr, cam, sizeof cam)) {
+        VkMemSpan sp;
+        if (!vk_mem_resolve(u->addr, sizeof cam, &sp)) return;
+        memcpy(cam, (const void *)(uintptr_t)u->addr, sizeof cam);
+    }
+    vk_figure_shadow_arm(ex, cam);
+}
+
+int vk_camera_get(float block[84]) {
+    plat_mutex_lock(&cam_lock);
+    int ok = cam_at_ms && plat_now_ms() - cam_at_ms < 500;   // no G-buffer pass lately: menus, loading screens
+    if (ok) memcpy(block, cam_block, sizeof cam_block);
+    plat_mutex_unlock(&cam_lock);
+    return ok;
+}
+
+
+// A G-buffer draw whose fragment shader writes a storage buffer (the first in a frame is a character shader, which
+// marks its screen tiles there; the lighting treats marked tiles as holding a character): where that buffer is and
+// the tile constants (the shader's c4, the camera block, vec4 146), for the friends' figures to mark theirs (vk_figure.c).
+static void tiles_note(VkExec *ex, const VkPipeInfo *info) {
+    for (uint32_t i = 0; i < info->n_bindings; i++) {
+        const VkPipeBinding *bd = &info->bindings[i];
+        const GfxShaderRes *r = bd->res;
+        if (!r || bd->kind != GFX_RES_SSBO || bd->stage != GFX_STAGE_FS || !(r->flags & 1) || r->cbuf_slot != 0) continue;
+        int off = (int)r->handle * 4 - 0x510;   // the fragment stage's slot table in c0: 16 bytes a slot
+        if (off < 0 || off >= 16 * 16 || off % 16) continue;
+        const p_bind_buf *s = &ex->ssbo[NVN_STAGE_FS][off / 16], *u = &ex->ubo[NVN_STAGE_FS][1];   // the shader's c4: user blocks start at c3
+        if (!s->addr || !u->addr || u->size < 147 * 16) return;
+        float c4[4];
+        if (!upd_read(ex, u->addr + 146 * 16, c4, sizeof c4)) {
+            VkMemSpan sp;
+            if (!vk_mem_resolve(u->addr + 146 * 16, sizeof c4, &sp)) return;
+            memcpy(c4, (const void *)(uintptr_t)(u->addr + 146 * 16), sizeof c4);
+        }
+        vk_figure_tiles(s->addr, s->size, c4);
+        return;
+    }
+}
+
+
 static int prepare_draw(VkExec *ex, int prim, int32_t count, int restart) {
     if (ex->render_disabled) return 0;
     cb_res(ex);
@@ -2015,6 +2119,8 @@ static int prepare_draw(VkExec *ex, int prim, int32_t count, int restart) {
     }
     if (!ex->in_pass) ex->dirty |= VK_EXEC_DIRTY_VIEWPORT | VK_EXEC_DIRTY_SCISSOR;
     vk_exec_pass_begin(ex);
+    cam_take(ex);
+    shadow_take(ex);
     VkRect2D sc = vk_exec_scissor(ex);
     if (!sc.extent.width || !sc.extent.height) return 0;
     if (!ex->prog) return warn_once(W_PROGRAM, "a draw without a bound program is skipped"), 0;
@@ -2121,6 +2227,7 @@ static int prepare_draw(VkExec *ex, int prim, int32_t count, int restart) {
     record_fixed(ex);
     repeat_stats(ex, info);
     bind_resources(ex, info);
+    if (vk_figure_wants_tiles()) tiles_note(ex, info);
     if (fbl & ex->fb_dirty) feedback_barrier(ex);
     feedback_written(ex, &s);
     bind_vertex_buffers(ex);
@@ -2252,6 +2359,7 @@ static void op_draw_idx_ind(VkExec *ex, const p_draw_idx_ind *d) {
 static void op_dispatch(VkExec *ex, const p_dispatch *d) {
     if (d->x <= 0 || d->y <= 0 || d->z <= 0) return;
     if (!ex->prog) return warn_once(W_PROGRAM, "a dispatch without a bound program is skipped");
+    vk_figure_before_dispatch(ex);   // the G-buffer's readers may be compute shaders (shadows): figures first
     cb_res(ex);
     dummies_init();
     int present;
@@ -2278,6 +2386,7 @@ static void op_dispatch_ind(VkExec *ex, const p_dispatch_ind *d) {
     VkMemSpan ip;
     if (!vk_mem_resolve(d->ind, sizeof(VkDispatchIndirectCommand), &ip) || ip.offset % 4)
         return warn_once(W_INDIRECT, "indirect dispatch arguments at %#llx are not backed or not aligned: skipped", (unsigned long long)d->ind);
+    vk_figure_before_dispatch(ex);
     cb_res(ex);
     dummies_init();
     int present;

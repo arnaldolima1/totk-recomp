@@ -178,8 +178,11 @@ static int player_pos(float xyz[3]) {
         uint64_t data = read_ptr(links + (uint64_t)i * 0x70 + 8), actor = data ? read_ptr(data + 0x40) : 0;
         uint64_t name = actor ? read_ptr(actor + 0x218) : 0;
         char text[7];
+        // While a save loads the Player actor is already listed but still at the origin (0, 0, 0); a player
+        // standing within a metre of the map's exact centre is rare enough to count as no position yet too.
         if (name && read_guest(name, text, 7) && !memcmp(text, "Player", 7))
-            return read_guest(actor + 0x2b4, xyz, 12) && isfinite(xyz[0]) && isfinite(xyz[2]);
+            return read_guest(actor + 0x2b4, xyz, 12) && isfinite(xyz[0]) && isfinite(xyz[2]) &&
+                   fabsf(xyz[0]) + fabsf(xyz[2]) > 1.0f;
     }
     return 0;
 }
@@ -200,13 +203,15 @@ static void speed_report(uint64_t now, double step, int interval) {
         probe = e && !strcmp(e, "1");
     }
     double wall = (double)(now - win_t0) * 1e-9;
-    char pos[160] = "";
+    char pos[256] = "";
     float p[3];
     if (probe && player_pos(p)) {
         double d = last_pos_ns ? hypot(p[0] - last_pos[0], p[2] - last_pos[2]) : 0,
                s = last_pos_ns ? (double)(now - last_pos_ns) * 1e-9 : 0;
-        snprintf(pos, sizeof pos, "; player %.1f %.1f %.1f, %.2f m in %.3f s = %.2f m/s", p[0], p[1], p[2], d, s,
-                 s > 0 ? d / s : 0);
+        float scr[2], cd = 0;   // where the camera puts the player on the window (gfx_world_to_screen's check)
+        int on = gfx_world_to_screen(p, scr, &cd);
+        snprintf(pos, sizeof pos, "; player %.1f %.1f %.1f, %.2f m in %.3f s = %.2f m/s; on screen %s%.3f %.3f, %.1f m from the camera",
+                 p[0], p[1], p[2], d, s, s > 0 ? d / s : 0, on ? "" : "(no camera) ", on ? scr[0] : 0, on ? scr[1] : 0, cd);
         memcpy(last_pos, p, sizeof p);
         last_pos_ns = now;
     }

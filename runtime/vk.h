@@ -135,6 +135,9 @@ void vk_queue_unlock(void);
 // The rectangle {x, y, w, h} of a dw x dh swapchain image a cw x ch picture is presented in (gfx_present.c,
 // TOTK_ASPECT); the rest is black.
 void gfx_fit_rect(int cw, int ch, int dw, int dh, int out[4]);
+// The game's camera block of the latest frame (vk_exec_draw.c cam_take, which lists its fields); 0 when no G-buffer
+// pass ran in the last half second. Any thread.
+int vk_camera_get(float block[84]);
 void vk_present_capture(int on);
 int vk_present_captured(const uint8_t **px, int *w, int *h, VkFormat *fmt);
 

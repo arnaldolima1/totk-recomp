@@ -9,7 +9,8 @@ What it does (runtime/net_mp.c is the game's side; docs/multiplayer.md the proto
 - relays chat messages and achievement unlocks to everyone;
 - keeps a scoreboard and the room's group challenges: six tracks of four tiers the players reach together (shrines
   done by the whole room, say), each tier announced to everyone when it is reached;
-- relays voice frames to everyone but their sender.
+- relays voice frames to everyone but their sender;
+- relays positions, markers and what each player wears (LOOK), and hands a newcomer the last of each.
 
 The protocol is UTF-8 text over TCP, one message per line, fields separated by tabs (a tab or a line break inside a
 field is sent as a space). Nothing is encrypted: it is for friends, not for strangers on the internet.
@@ -58,6 +59,7 @@ class Player:
         self.joined = time.time()
         self.last = time.time()
         self.pos = None   # the last POS line's fields (x, y, z)
+        self.look = None  # the last LOOK line's fields (head, upper, lower armor names)
 
 
 class Room:
@@ -177,6 +179,9 @@ async def handle(room, reader, writer):
                 for q in room.players:   # where everyone stands and their markers, for the newcomer
                     if q is not p and q.name and q.pos:
                         await room.send(p, line('POS', q.name, *q.pos))
+                for q in room.players:   # and what everyone wears, for their figures
+                    if q is not p and q.name and q.look:
+                        await room.send(p, line('LOOK', q.name, *q.look))
                 for who, (mark, at) in room.marks.items():
                     if time.time() - at < 15 * 60:
                         await room.send(p, line('MARK', who, *mark))
@@ -198,6 +203,10 @@ async def handle(room, reader, writer):
                 except ValueError:
                     continue
                 await room.broadcast(line('POS', p.name, *p.pos), skip=p)
+            elif kind == 'LOOK' and len(f) >= 4 and p.name:   # the armor a player wears, to everyone else
+                p.look = tuple(v if v.startswith('Armor_') and v.replace('_', '').isalnum() else '' for v in
+                               (clean(x)[:47] for x in f[1:4]))
+                await room.broadcast(line('LOOK', p.name, *p.look), skip=p)
             elif kind == 'MARK' and len(f) >= 4 and p.name:   # a marker, to everyone (its player sees it too)
                 try:
                     mark = tuple(f'{float(v):.1f}' for v in f[1:4])

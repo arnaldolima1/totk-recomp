@@ -92,8 +92,18 @@ to, its resident actors (component 13), the one named `Player`, its position at 
 documents for each version). x is east, y up, z south, in metres, as the game's map shows them (it prints -z). The
 game sends it in `POS` lines and keeps its friends' by name for six seconds.
 
-The radar (`runtime/ui/menu.cpp` `radar_draw`, setting `mp_radar`) is north up, as the map: friends are dots with their
-initial, hollow with an arrow when in another layer, and markers are diamonds. The layer comes from the height (`mp_layer`:
+Friends show on the game's own minimap and in the world (`runtime/ui/menu.cpp` `radar_draw`, setting `mp_radar`).
+The overlay takes the game's camera from the G-buffer pass (`runtime/vk_exec_draw.c` `cam_take`: the 2368-byte block
+at vertex uniform 1, whose layout MacNativeGames documents) and projects world positions on the window
+(`runtime/gfx_present.c` `gfx_world_to_screen`). In the world a friend is a see-through Link-like figure of our own drawing
+(`draw_figure`) with name and distance (`world_tags`); behind the scene it fades to a faint outline and keeps its name.
+The depth test (`runtime/vk_occl.c`) copies the G-buffer depth under three points of each figure (feet, chest, head)
+once that pass is done, reads it back when the submission completes, and compares the scene's distance with the
+friend's; it runs only while friends are drawn (`TOTK_SPEED_PROBE=1` logs it, with the player's own chest as a check); on the minimap (`minimap_dots`) a dot with their initial, hollow with an arrow when in another layer, and
+markers are diamonds. The minimap turns with the camera and shows about 1 m per pixel of a 1440-row picture, its centre
+0.1819 and 0.1667 picture heights from the right and bottom edges (measured by walking a known distance on 1.4.3). A
+list at the top right gives each friend's distance and layer. Positions glide between the 200 ms updates
+(`smooth_positions`). The layer comes from the height (`mp_layer`:
 sky over 900 m, depths under -200 m). The mark key (`mp_mark_key`, G) sends a `MARK`; each player has one, for 15
 minutes. The player cards show each friend's layer and distance. Two multiplayer achievements count meetings (within
 30 m in the same layer) and markers.

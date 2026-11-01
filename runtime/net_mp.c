@@ -28,6 +28,7 @@ typedef int Sock;
 #include "cfg.h"
 #include "host.h"
 #include "platform/platform.h"
+#include "ui_text.h"
 #include "voice.h"
 
 #define PROTOCOL "1"
@@ -47,6 +48,8 @@ static char me[MP_NAME_MAX];   // this game's name as the room keeps it (room_na
 // Friends' positions by name (POS lines), merged into the roster's players by mp_view.
 enum { POS_STALE_MS = 6000, POS_EVERY_MS = 200 };
 static struct { char name[MP_NAME_MAX]; float pos[3]; uint64_t at_ms; } friend_pos[MP_MAX_PLAYERS];
+// Friends' armor by name (LOOK lines: what each wore at their last save), merged into the roster by mp_view.
+static struct { char name[MP_NAME_MAX]; char look[3][48]; } friend_look[MP_MAX_PLAYERS];
 static volatile int32_t mark_pending;   // mp_mark asked; the connection's thread sends it
 
 static int64_t now_unix(void) { return (int64_t)time(NULL); }
@@ -209,6 +212,20 @@ static void on_line(char *line, Sock s) {
         plat_mutex_unlock(&lock);
         return;
     }
+    if (!strcmp(f[0], "LOOK") && n >= 5) {   // LOOK player head upper lower: the armor pieces, "" for none
+        plat_mutex_lock(&lock);
+        int slot = -1, free_slot = -1;
+        for (int i = 0; i < MP_MAX_PLAYERS; i++) {
+            if (!strcmp(friend_look[i].name, f[1])) slot = i;
+            if (!friend_look[i].name[0] && free_slot < 0) free_slot = i;
+        }
+        if (slot < 0) slot = free_slot >= 0 ? free_slot : 0;
+        field(friend_look[slot].name, sizeof friend_look[0].name, f[1]);
+        for (int k = 0; k < 3; k++)
+            field(friend_look[slot].look[k], sizeof friend_look[0].look[k], strncmp(f[2 + k], "Armor_", 6) ? "" : f[2 + k]);
+        plat_mutex_unlock(&lock);
+        return;
+    }
     if (!strcmp(f[0], "MARK") && n >= 5) {   // MARK player x y z: one marker per player, the newest kept
         plat_mutex_lock(&lock);
         int slot = -1;
@@ -221,6 +238,9 @@ static void on_line(char *line, Sock s) {
             for (int k = 0; k < 3; k++) m->pos[k] = (float)atof(f[2 + k]);
             m->at_ms = plat_now_ms();
         }
+        // this game's own marker, back from the room: it sits at the radar's centre under the player's dot, so a
+        // notice says it went out
+        if (!strcmp(f[1], me)) add_line(MP_LINE_EVENT, "", ui_text(UI_MENU_MP_MARK_PLACED), "", "", 1);
         plat_mutex_unlock(&lock);
         return;
     }
@@ -315,7 +335,7 @@ static void session(const char *server) {
     snprintf(view.me, sizeof view.me, "%s", me);
     plat_mutex_unlock(&lock);
     rt_log("mp: connected to %s as %s", server, name);
-    unsigned sent_gen = 0, ver = cfg_version();
+    unsigned sent_gen = 0, sent_look = 0, ver = cfg_version();
     char settings[512], now_settings[512];
     conn_settings(settings, sizeof settings);
     uint64_t last_ping = plat_now_ms(), minute_at = 0, pos_at = 0;
@@ -370,6 +390,13 @@ static void session(const char *server) {
             const char *status[] = {"STATUS", "", v[0], v[1], v[2], v[3], v[4], v[5]};
             alive = send_line(s, 8, status);
             sent_gen = gen;
+        }
+        char worn[3][64];   // the armor worn at the last save read, for the friends' figures of it
+        unsigned look_gen = ach_look(worn);
+        if (alive && look_gen && look_gen != sent_look) {
+            const char *line[] = {"LOOK", worn[0], worn[1], worn[2]};
+            alive = send_line(s, 4, line);
+            sent_look = look_gen;
         }
         for (int idx; alive && (idx = ach_take_net_unlock()) >= 0;) {
             AchView a;
@@ -440,7 +467,15 @@ static void session(const char *server) {
                 snprintf(x, sizeof x, "%.1f", p[0]), snprintf(y, sizeof y, "%.1f", p[1]), snprintf(z, sizeof z, "%.1f", p[2]);
                 const char *mark[] = {"MARK", x, y, z};
                 alive = send_line(s, 4, mark);
-                ach_mp_add("marks", 1);
+                // the Guia de Hyrule achievement counts markers at least 50 m from the last one it counted, so
+                // pressing the key over and over in one spot does not earn it
+                static float counted[3];
+                static int have_counted;
+                if (!have_counted || hypotf(p[0] - counted[0], p[2] - counted[2]) >= 50 || fabsf(p[1] - counted[1]) >= 50) {
+                    ach_mp_add("marks", 1);
+                    memcpy(counted, p, sizeof counted);
+                    have_counted = 1;
+                }
             }
         }
         if (alive && plat_now_ms() - last_ping > PING_MS) {
@@ -519,6 +554,9 @@ void mp_view(MpView *out) {
                 p->has_pos = 1;
             }
         if (!strcmp(p->name, me) && view.me_has_pos) memcpy(p->pos, view.me_pos, sizeof p->pos), p->has_pos = 1;
+        memset(p->look, 0, sizeof p->look);
+        for (int k = 0; k < MP_MAX_PLAYERS; k++)
+            if (friend_look[k].name[0] && !strcmp(friend_look[k].name, p->name)) memcpy(p->look, friend_look[k].look, sizeof p->look);
     }
     int w = 0;   // markers past their time, or of players gone, drop out
     for (int i = 0; i < out->nmarkers; i++) {

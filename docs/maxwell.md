@@ -229,3 +229,26 @@ Grep-level look on 2026-10-22, statuses updated 2026-10-26; "saw" is what the gr
 - Ryujinx TotK/BotW PRs and issues (GitHub repo gone; mirrors blocked or 404 on 2026-10-22).
 - yuzu progress reports 2023-08 to 2024-02 and suyu/sudachi trackers (behaviour only).
 - switchbrew wiki NVN and GPU pages.
+
+## 9. G-buffer (TotK 1.4.3)
+
+What the friends' figures (`runtime/vk_figure.c`) write to look like the game's own characters, read from the translated
+SPIR-V of TotK's character fragment shaders and checked against frame dumps (`TOTK_DUMP`, `TOTK_DUMP_ALPHA=1`).
+
+- Targets, full render size: t0 RGBA8, t1 RGBA8 sRGB, t3 RGBA8, t5 R11G11B10F, depth D32F (t2 and t4 unbound). The
+  first G-buffer pass of a frame carries the camera block (vertex uniform slot 1, 2368 bytes) that
+  `vk_exec_draw.c` `cam_take` reads.
+- t0: (8 to 12, material id low byte, 0, material id high byte) / 255. Characters: id 0x1fd (253, 1).
+- t1: albedo, alpha 4 / 255.
+- t3: the view-space normal (z towards the camera) folded into two channels: `abs(n.xy) * sqrt((0.5 - 0.5 n.z) /
+  dot(n.xy, n.xy))`; then `224 | 8 | (n.x > 0 ? 2 : 0) | (n.y > 0 ? 1 : 0)` (the top bits come from a material map);
+  then a byte the lighting reads per material (254 on skin, low on cloth; the low two bits 2 on characters).
+- Character tiles: a character shader also sets a word per 64x64 screen tile it covers in a fragment storage buffer,
+  at byte `452 + 16 * (tile y * stride + tile x)`; the tile scales and the stride (integer bits) are the camera block's
+  vec4 146. Pixels of a character outside marked tiles are lit as scenery: square patches of different light.
+- The deferred lighting and shadow compute shaders run after the last G-buffer pass and the culling dispatches between
+  the G-buffer passes; anything added after the first of them misses their shadows.
+- Sun shadows: a 16-bit depth array of 1024x1024 layers (cascades), drawn after the G-buffer passes and before the
+  lighting. Each depth-only pass carries a camera block in vertex uniform slot 1 whose view-projection (floats 12..27,
+  orthographic) is the cascade's; layer 0 is the nearest cascade, around the player. The viewport's depth range is
+  `VkExec.depth_range` (OP_DEPTH_RANGE), not the viewport's own near and far.
