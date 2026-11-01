@@ -3,7 +3,7 @@
 //
 // F1 opens and closes the menu, Esc opens it (with the menu open, Esc goes to the menu, which closes). Esc also releases
 // the cursor (input_sdl.c sees the event first; closing the menu gives the capture back). While the menu is open, its
-// keys, the mouse and focus changes go to it; the game reads the keyboard through input_sdl.c and gets nothing while
+// keys, the typed text, the mouse and focus changes go to it; the game reads the keyboard through input_sdl.c and gets nothing while
 // the menu is open (input_menu). Mouse positions come in window units and go to the menu in pixels.
 #include <SDL3/SDL.h>
 
@@ -33,10 +33,26 @@ static ImGuiKey key_of(SDL_Scancode sc) {
     case SDL_SCANCODE_PAGEDOWN: return ImGuiKey_PageDown;
     case SDL_SCANCODE_LSHIFT: case SDL_SCANCODE_RSHIFT: return ImGuiKey_LeftShift;
     case SDL_SCANCODE_LCTRL: case SDL_SCANCODE_RCTRL: return ImGuiKey_LeftCtrl;
+    case SDL_SCANCODE_LALT: case SDL_SCANCODE_RALT: return ImGuiKey_LeftAlt;
     case SDL_SCANCODE_Q: return ImGuiKey_Q;   // previous tab
     case SDL_SCANCODE_E: return ImGuiKey_E;   // next tab
+    // the text fields' Ctrl shortcuts: select all, copy, paste, cut, undo
+    case SDL_SCANCODE_A: return ImGuiKey_A;
+    case SDL_SCANCODE_C: return ImGuiKey_C;
+    case SDL_SCANCODE_V: return ImGuiKey_V;
+    case SDL_SCANCODE_X: return ImGuiKey_X;
+    case SDL_SCANCODE_Z: return ImGuiKey_Z;
     default: return ImGuiKey_None;
     }
+}
+
+// SDL sends text only while text input is on, and on the Steam Deck turning it on shows the on-screen keyboard: it is on
+// while a text field of the menu has the keyboard.
+extern "C" void menu_sdl_text_sync(SDL_Window *w) {
+    static int on;
+    int want = menu_is_open() && menu_wants_text();
+    if (!w || want == on) return;
+    if (want ? SDL_StartTextInput(w) : SDL_StopTextInput(w)) on = want;
 }
 
 extern "C" void menu_sdl_event(const SDL_Event *e) {
@@ -57,6 +73,9 @@ extern "C" void menu_sdl_event(const SDL_Event *e) {
     case SDL_EVENT_KEY_UP:
         if (!menu_is_open()) return;
         if (ImGuiKey k = key_of(e->key.scancode)) menu_event_key(k, e->type == SDL_EVENT_KEY_DOWN);
+        return;
+    case SDL_EVENT_TEXT_INPUT:
+        if (menu_is_open()) menu_event_text(e->text.text);
         return;
     case SDL_EVENT_MOUSE_MOTION:
         if (menu_is_open()) menu_event_mouse_pos(e->motion.x * d, e->motion.y * d);

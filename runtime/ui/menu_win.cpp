@@ -3,7 +3,7 @@
 //
 // F1 opens and closes the menu, Esc opens it (with the menu open, Esc goes to the menu, which closes). Esc also releases
 // the cursor (input_window_msg runs first; closing the menu gives the capture back). While the menu is open, its keys,
-// the mouse and focus changes go to it; the game polls the keyboard on its own (input_win.c) and gets nothing while the
+// the typed characters, the mouse and focus changes go to it; the game polls the keyboard on its own (input_win.c) and gets nothing while the
 // menu is open (input_menu).
 #include <windows.h>
 #include <windowsx.h>
@@ -34,8 +34,15 @@ static ImGuiKey key_of(WPARAM vk) {
     case VK_NEXT: return ImGuiKey_PageDown;
     case VK_SHIFT: return ImGuiKey_LeftShift;
     case VK_CONTROL: return ImGuiKey_LeftCtrl;
+    case VK_MENU: return ImGuiKey_LeftAlt;   // with Ctrl: AltGr, which types characters
     case 'Q': return ImGuiKey_Q;   // previous tab
     case 'E': return ImGuiKey_E;   // next tab
+    // the text fields' Ctrl shortcuts: select all, copy, paste, cut, undo
+    case 'A': return ImGuiKey_A;
+    case 'C': return ImGuiKey_C;
+    case 'V': return ImGuiKey_V;
+    case 'X': return ImGuiKey_X;
+    case 'Z': return ImGuiKey_Z;
     default: return ImGuiKey_None;
     }
 }
@@ -63,6 +70,9 @@ extern "C" int menu_window_msg(HWND h, UINT m, WPARAM w, LPARAM l, LRESULT *res)
         if (!menu_is_open()) return 0;
         if (ImGuiKey k = key_of(w)) menu_event_key(k, m == WM_KEYDOWN || m == WM_SYSKEYDOWN);
         return 0;   // F11 and the system keys keep working
+    case WM_CHAR:   // the typed text, for the menu's text fields (the window loop translates key messages)
+        if (menu_is_open()) menu_event_char16((unsigned)w);
+        return 0;
     case WM_MOUSEMOVE:
         if (menu_is_open()) menu_event_mouse_pos((float)GET_X_LPARAM(l), (float)GET_Y_LPARAM(l));
         return 0;

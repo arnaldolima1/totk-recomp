@@ -19,6 +19,7 @@ void input_sdl_idle(void);                // no event for a while: a cursor chan
 
 // ui/menu_sdl.cpp
 void menu_sdl_event(const SDL_Event *e);  // every event, after input_sdl_event
+void menu_sdl_text_sync(SDL_Window *w);   // each turn of the event loop: text input on while a menu field is typed in
 
 #ifdef __cplusplus
 }

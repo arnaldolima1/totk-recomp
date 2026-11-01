@@ -33,6 +33,9 @@ void menu_event_mouse_pos(float x, float y);
 void menu_event_mouse_button(int button, int down);   // 0 left, 1 right, 2 middle
 void menu_event_wheel(float dx, float dy);
 void menu_event_focus(int focused);
+void menu_event_char16(unsigned unit);    // a typed character as a UTF-16 unit (WM_CHAR); surrogate pairs come in two
+void menu_event_text(const char *utf8);   // typed text (SDL_EVENT_TEXT_INPUT)
+int menu_wants_text(void);                // a text field of the menu has the keyboard
 
 // ---- the overlay, drawn into the swapchain image after the game image (gfx_present.c, present lock held)
 typedef struct {

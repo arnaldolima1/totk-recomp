@@ -105,7 +105,7 @@ extern "C" void menu_toggle(void) {
 }
 
 // ---- events from the window adapter, queued while the menu is open; the present path hands them to ImGui
-enum { EV_KEY, EV_POS, EV_BUTTON, EV_WHEEL, EV_FOCUS, EV_MAX = 256 };
+enum { EV_KEY, EV_POS, EV_BUTTON, EV_WHEEL, EV_FOCUS, EV_CHAR, EV_CHAR16, EV_MAX = 256 };
 struct Ev { int type, a, b; float x, y; };
 static PlatMutex ev_lock = PLAT_MUTEX_INIT;
 static Ev ev_q[EV_MAX];
@@ -124,6 +124,25 @@ extern "C" void menu_event_mouse_pos(float x, float y) { push({EV_POS, 0, 0, x, 
 extern "C" void menu_event_mouse_button(int button, int down) { push({EV_BUTTON, button, down, 0, 0}); }
 extern "C" void menu_event_wheel(float dx, float dy) { push({EV_WHEEL, 0, 0, dx, dy}); }
 extern "C" void menu_event_focus(int focused) { push({EV_FOCUS, focused, 0, 0, 0}); }
+extern "C" void menu_event_char16(unsigned unit) {
+    if (unit >= 0x20 && unit != 0x7f) push({EV_CHAR16, (int)unit, 0, 0, 0});
+}
+// UTF-8 text (SDL's text input) to code points; a malformed byte is dropped.
+extern "C" void menu_event_text(const char *utf8) {
+    const unsigned char *s = (const unsigned char *)utf8;
+    while (*s) {
+        unsigned c = *s, n = c < 0x80 ? 0 : c >= 0xf0 ? 3 : c >= 0xe0 ? 2 : c >= 0xc0 ? 1 : 4;
+        if (n == 4) { s++; continue; }
+        if (n) c &= 0x3f >> n;
+        s++;
+        for (unsigned i = 0; i < n && (*s & 0xc0) == 0x80; i++, s++) c = c << 6 | (*s & 0x3f);
+        if (c >= 0x20 && c != 0x7f) push({EV_CHAR, (int)c, 0, 0, 0});
+    }
+}
+
+// Set after each laid-out frame: a text field has the keyboard (the SDL adapter turns text input on for it).
+static std::atomic<int> g_wants_text;
+extern "C" int menu_wants_text(void) { return g_wants_text.load(std::memory_order_relaxed); }
 
 static void drain_events(ImGuiIO &io) {
     Ev q[EV_MAX];
@@ -135,7 +154,16 @@ static void drain_events(ImGuiIO &io) {
     for (int i = 0; i < n; i++) {
         const Ev &e = q[i];
         switch (e.type) {
-        case EV_KEY: io.AddKeyEvent((ImGuiKey)e.a, e.b != 0); break;
+        case EV_KEY:
+            io.AddKeyEvent((ImGuiKey)e.a, e.b != 0);
+            // ImGui reads Ctrl, Shift and Alt from its modifier keys, not from the left/right ones: text fields need
+            // them for Ctrl+V and the like, and AltGr (Ctrl+Alt) for the characters it types on ABNT2 and other layouts
+            if (e.a == ImGuiKey_LeftCtrl) io.AddKeyEvent(ImGuiMod_Ctrl, e.b != 0);
+            if (e.a == ImGuiKey_LeftShift) io.AddKeyEvent(ImGuiMod_Shift, e.b != 0);
+            if (e.a == ImGuiKey_LeftAlt) io.AddKeyEvent(ImGuiMod_Alt, e.b != 0);
+            break;
+        case EV_CHAR: io.AddInputCharacter((unsigned)e.a); break;
+        case EV_CHAR16: io.AddInputCharacterUTF16((ImWchar16)e.a); break;
         case EV_POS: io.AddMousePosEvent(e.x, e.y); break;
         case EV_BUTTON: io.AddMouseButtonEvent(e.a, e.b != 0); break;
         case EV_WHEEL: io.AddMouseWheelEvent(e.x, e.y); break;
@@ -2065,6 +2093,7 @@ extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const cha
     }
     ImGui_ImplVulkan_NewFrame();
     ImGui::NewFrame();
+    g_wants_text.store(open && io.WantTextInput, std::memory_order_relaxed);
     if (open) layout_menu(t->width, t->height, scale);
     perf_draw(t, scale);
     toast_draw(t, scale);
