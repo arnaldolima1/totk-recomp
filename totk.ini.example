@@ -149,7 +149,7 @@
 # Anisotropic filtering of surface textures: game (the level the game asks for, as on the Switch) or 2, 4, 8, 16. Keeps
 # ground, roads and walls seen at a shallow angle sharp into the distance. Only filtered, mipmapped textures that tile
 # are raised; shadow maps, data maps and screen-sized buffers keep the game's setting. Read at start.
-# aniso = 16
+# aniso = game
 # Colour adjustment of the picture, HUD included, before it is scaled to the window: brightness (-30 to 30, added in %),
 # contrast and saturation (70 to 150 and 50 to 200 %), gamma (0.8 to 1.2, below 1 brightens dark tones). At 0, 100,
 # 100 and 1 nothing runs. color_preset is the menu's profile (default, vivid, clarity, custom), which sets the four.
