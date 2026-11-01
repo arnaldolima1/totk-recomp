@@ -18,6 +18,12 @@ Added on top of the original, merged with each of its releases:
 - Smoother mouse camera, borderless window and a notice while shaders compile
 - Faster updates: the setup keeps the compiled game code and reuses what did not change
 
+| The launcher's settings | Mods |
+|---|---|
+| ![Launcher settings: quality presets, window and game resolution, upscaling](docs/images/launcher-settings.jpg) | ![Launcher mods: an emulator-layout mod, checked and merged](docs/images/launcher-mods.jpg) |
+| **About and credits** | **Achievements in the game's menu** |
+| ![Launcher About: the original project and the projects it builds on](docs/images/launcher-about.jpg) | ![The Achievements tab of the in-game menu with an unlock notice](docs/images/ingame-achievements.jpg) |
+
 > [!IMPORTANT]
 > **No game files are included.** You need your own legally obtained copy of *Tears of the Kingdom*, dumped from your own console: the base game and the 1.2.1 or 1.4.3 update. Instructions for obtaining those files will not be provided.
 >
