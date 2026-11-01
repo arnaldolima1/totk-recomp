@@ -24,11 +24,12 @@ from . import state as statefile
 from .events import render
 
 TEXT = Path(__file__).resolve().parent / 'text'
-UI_LANGUAGES = ('en', 'ru')
+UI_LANGUAGES = ('en', 'ru', 'pt-BR')
 STEP_ORDER = ('check', 'extract', 'lift', 'compile', 'prepare', 'cleanup')
 # message parameter -> catalog id prefix of the names that replace its raw values
 PARAM_NAMES = {'lang': 'lang.', 'known': 'lang.', 'step': 'step.', 'input': 'param.input.'}
 LANG_RU = 0x19   # primary language id of Russian in a Windows LANGID
+LANG_PT_BR = 0x0416   # Portuguese (Brazil), the whole LANGID: Portugal's Portuguese stays English
 
 
 def load_texts(lang):
@@ -76,15 +77,16 @@ def flat(value):
 
 
 def windows_ui_language():
-    """'ru' when the display language (Windows; elsewhere LC_ALL, LC_MESSAGES or LANG) is Russian, else 'en'."""
+    """'ru' when the display language (Windows; elsewhere LC_ALL, LC_MESSAGES or LANG) is Russian, 'pt-BR' when it is
+    Brazilian Portuguese (LANGID 0x0416, or a pt_BR locale), else 'en'."""
     if os.name != 'nt':
-        loc = os.environ.get('LC_ALL') or os.environ.get('LC_MESSAGES') or os.environ.get('LANG') or ''
-        return 'ru' if loc.lower().startswith('ru') else 'en'
+        loc = (os.environ.get('LC_ALL') or os.environ.get('LC_MESSAGES') or os.environ.get('LANG') or '').lower()
+        return 'ru' if loc.startswith('ru') else 'pt-BR' if loc.startswith(('pt_br', 'pt-br')) else 'en'
     try:
         langid = ctypes.windll.kernel32.GetUserDefaultUILanguage()
     except (AttributeError, OSError):
         return 'en'
-    return 'ru' if langid & 0x3ff == LANG_RU else 'en'
+    return 'ru' if langid & 0x3ff == LANG_RU else 'pt-BR' if langid == LANG_PT_BR else 'en'
 
 
 def default_game_language(ui):
