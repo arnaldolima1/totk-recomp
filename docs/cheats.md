@@ -1,24 +1,23 @@
 # Cheats
 
-The port reads Atmosphère cheat files, the format Switch homebrew and the emulators use. The setup installs a cheat file for 1.2.1 and for 1.4.3, all cheats off: open the menu (F1) and switch them on the Cheats tab. The switches are saved under `[cheats]` in `totk.ini`.
+The port reads Atmosphère cheat files, the format Switch homebrew and the emulators use. It ships no cheat files: a cheat file goes into a mod in the `mods` folder next to `totk.exe`, like any other mod ([tester-guide.md](tester-guide.md), "Mods"). Open the menu (F1) and switch the cheats on the Cheats tab. The switches are saved under `[cheats]` in `totk.ini`.
 
-The two files are from [MyNXCheats](https://github.com/Arch9SK7/MyNXCheats) by Skyla Kikari (Arch9SK7) and stay in `tools/data/cheats/` with that credit at the top. The 1.2.1 file has not been tried in game.
+## Adding a cheat file
 
-## Adding your own cheat file
-
-A file of your own replaces the one the setup installed. The setup never overwrites a file you changed.
-
-1. Find the cheat file for your update. It is named after the first 8 bytes of the game's build id:
+1. Find the cheat file for your update. Cheat sites and collections name it after the first 8 bytes of the game's build id:
 
    | Update | File |
    |---|---|
    | 1.2.1 | `9B4E43650501A4D4.txt` |
    | 1.4.3 | `277178B7DBA1B6D4.txt` |
 
-   The Cheats tab of the menu names the file the installed game reads, and `logs\totk.log` says `cheats: no cheats\<id>.txt` when it is missing.
-2. Put it in a `cheats` folder next to `totk.exe`: `cheats\277178B7DBA1B6D4.txt`.
-3. Run `TotK-Setup.exe` again on the same folder. It builds the cheats that change the game's code into the game (about three minutes); saves and settings are kept. A file with only data cheats works without this step.
-4. Switch the cheats on the Cheats tab of the menu.
+   The Cheats tab names the file the installed game reads when no mod holds one, and `logs\totk.log` says `cheats: no enabled mod holds cheats/<id>.txt`.
+2. Put it in the `cheats` folder of a mod: `mods\My cheats\cheats\277178B7DBA1B6D4.txt`. A download laid out for the Switch's SD card or an emulator works as it is: unpack it into a folder of its own under `mods`, and the port finds `atmosphere\contents\0100F2C0115B6000\cheats`, `contents\0100F2C0115B6000\cheats` or `0100F2C0115B6000\cheats` inside it. The file name's case does not matter.
+3. Start the game. Cheats that write the game's memory work now.
+4. Cheats that change the game's code are greyed out with "run the setup again" until you run `TotK-Setup.exe` again on the same folder. It builds the code cheats of every mod into the game; saves and settings are kept.
+5. Switch the cheats on the Cheats tab of the menu.
+
+The Cheats tab lists the cheats grouped by mod, in the order of the Mods tab. A mod switched off on the Mods tab, or one the port cannot use, contributes no cheats; the change applies at the next start. The Mods tab says how many cheats each mod brought.
 
 ## The file format
 
@@ -40,7 +39,7 @@ Standard Atmosphère: a `[name]` line starts a cheat, `{name}` a master cheat th
 
 The words above are placeholders: `XXXXXXXX` an offset, `YYYYYYYY` a value.
 
-Each cheat's switch is `cheat_<hash> = 1`, where the hash is FNV-1a 32 of the cheat's name. Two files that use the same names, for example one per update, share their switches.
+Each cheat's switch is `cheat_<hash> = 1`, where the hash is FNV-1a 32 of `<mod folder name>/<cheat name>`. A name repeated in one file gets `#2`, `#3` and so on. Renaming a mod's folder resets its cheats' switches to off.
 
 ## How cheats run
 
@@ -54,7 +53,7 @@ The game's code is compiled ahead of time, so a cheat cannot write new instructi
 | master | `{name}` with code writes | A patch set that is always on. |
 | restore | Writes back only the game's original instructions | Not needed: switching a cheat off restores them. Greyed out. |
 
-A cheat whose code writes call or jump into a code cave the cheat writes itself (into main's zero padding) gets the cave inlined at the call site. A code cheat added to the file or edited after the setup ran is greyed out until the setup runs again; a data cheat runs at once.
+A cheat whose code writes call or jump into a code cave the cheat writes itself (into main's zero padding) gets the cave inlined at the call site. The setup builds the code cheats of every mod in the `mods` folder, switched on or off, so switching a mod on later needs only a restart. A code cheat added or edited after the setup ran is greyed out until the setup runs again; a data cheat runs at the next start.
 
 Not supported, and shown greyed out with the reason:
 
@@ -63,4 +62,4 @@ Not supported, and shown greyed out with the reason:
 - code writes mixed with other opcodes, except the button pattern above;
 - code writes that change the CPU flags differently from the game's instruction, or code caves with branches or pc-relative instructions.
 
-`cheats\<build id>.status`, written by the setup, records which cheats were built and how; the log line `cheats: ...` sums it up at start.
+`build-cache\cheats.status` next to `totk.exe`, written by the setup, records which cheats were built and how; the log line `cheats: ...` sums them up at start. When the code cheats cannot be built, the setup warns and installs the game without them.

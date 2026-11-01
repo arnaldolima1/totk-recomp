@@ -120,7 +120,6 @@ static const char *problem_name(ModProblem p) {
     case MOD_EMPTY: return "empty";
     case MOD_PLUGIN: return "has a code module (subsdk or main), not supported; the whole mod stays off";
     case MOD_EXEFS_LATER: return "ExeFS patches need a game code rebuild, not applied; the whole mod stays off";
-    case MOD_CHEATS_LATER: return "cheats only, not loaded yet";
     case MOD_BAD_NAME: return "its folder name holds '|', which the order list uses; rename the folder";
     default: return "ok";
     }
@@ -151,12 +150,11 @@ static int scan_cb(const char *name, int kind, uint64_t size, void *ctx) {
     if (m->exefs[0]) plat_fs_list(m->exefs, exefs_cb, &m->kind);
     if (m->cheats[0]) plat_fs_list(m->cheats, cheats_cb, &m->kind);
     // a mod whose code part the port cannot use is off as a whole: its RomFS files may expect that code
-    m->problem = strchr(m->name, '|')    ? MOD_BAD_NAME
-               : m->kind & MOD_SUBSDK    ? MOD_PLUGIN
-               : m->kind & MOD_EXEFS     ? MOD_EXEFS_LATER
-               : m->kind & MOD_ROMFS     ? MOD_OK
-               : m->kind & MOD_CHEATS    ? MOD_CHEATS_LATER
-                                         : MOD_EMPTY;
+    m->problem = strchr(m->name, '|')               ? MOD_BAD_NAME
+               : m->kind & MOD_SUBSDK               ? MOD_PLUGIN
+               : m->kind & MOD_EXEFS                ? MOD_EXEFS_LATER
+               : m->kind & (MOD_ROMFS | MOD_CHEATS) ? MOD_OK
+                                                    : MOD_EMPTY;
     m->enabled = !listed(disabled, m->name);
     nmods++;
     return 1;

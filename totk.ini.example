@@ -296,8 +296,9 @@
 # shared_fonts =
 
 [cheats]
-# One line per cheat of cheats\<build id>.txt next to totk.exe (docs/cheats.md); the Cheats tab of the menu writes
-# them. cheat_<hash> = 1 switches a cheat on, the hash being FNV-1a 32 of its name. Default: every cheat off.
+# One line per cheat of the mods' cheat files, mods\<mod>\cheats\<build id>.txt (docs/cheats.md); the Cheats tab of
+# the menu writes them. cheat_<hash> = 1 switches a cheat on, the hash being FNV-1a 32 of "<mod folder>/<cheat name>".
+# Default: every cheat off.
 # cheat_0123abcd = 1
 
 [diagnostics]

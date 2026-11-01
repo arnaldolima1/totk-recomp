@@ -1,18 +1,23 @@
-"""Cheat file to code patch sets: the code cheats of an Atmosphere cheat file become patch sets of the lifted game.
+"""Cheat files to code patch sets: the code cheats of the mods' Atmosphere cheat files become patch sets of the lifted
+game.
 
 Lifted code cannot be written to while the game runs, so a cheat that writes instructions into main's .text is turned
 into `site` lines (recomp/patches.py) when the game is lifted; the runtime (runtime/cheats.c) switches each cheat's set
 from the in-game menu. A cheat that only writes data (heap, main's data, pointer chains, button conditions) needs no
 patch: runtime/cheats.c runs it in its cheat VM.
 
-  python tools/cheats.py --exefs <dir> --cheats <BUILD_ID>.txt --patches <patch file> --out <patch file> --status <file>
+  python tools/cheats.py --exefs <dir> --mods <mods folder> --patches <patch file> --out <patch file> --status <file>
 
---out gets the --patches file followed by one set per convertible cheat (`cheat_<hash>`, switch TOTK_CHEAT_<HASH>,
-default off) and its sites. --status gets one line per cheat of the file, in file order, tab separated:
+The cheat files are <mod>/cheats/<build id>.txt in each folder of --mods (or the Atmosphere places of that folder,
+as runtime/mods.c finds them; the name's case does not matter), the build id the first 8 bytes of main's. Every mod's
+file is built, switched on or off: the runtime decides which run. --out gets the --patches file followed by one set
+per convertible cheat (`cheat_<hash>`, switch TOTK_CHEAT_<HASH>, default off) and its sites. --status gets one line
+per cheat, mods by name, cheats in file order, tab separated:
 
   <name hash> <content hash> <kind> <buttons> <note>
 
-name hash: FNV-1a 32 of the UTF-8 name (a repeated name: name + "#2", "#3" ...), 8 upper-case hex digits; content
+name hash: FNV-1a 32 of "<mod folder name>/<cheat name>" in UTF-8 (a name repeated in one file: name + "#2", "#3" ...),
+8 upper-case hex digits, so two mods' cheats of one name are apart; content
 hash: the same over the cheat's words, so the runtime sees an edited cheat that was not rebuilt. kind:
   code       instruction writes, a patch set
   key        instruction writes while buttons are held (8 mask / writes / 21 else / the original words / 20): a patch
@@ -64,8 +69,8 @@ class Cheat:
         self.sites = {}   # {offset: [words]}
 
 
-def parse(text):
-    """Cheats in file order; words that are not 8 hex digits are skipped."""
+def parse(text, mod):
+    """Cheats in file order, keyed under the mod folder name; words that are not 8 hex digits are skipped."""
     out = []
     for no, raw in enumerate(text.splitlines(), 1):
         s = raw.strip()
@@ -81,7 +86,26 @@ def parse(text):
     seen = {}
     for c in out:
         n = seen[c.name] = seen.get(c.name, 0) + 1
-        c.key = fnv((c.name if n == 1 else f'{c.name}#{n}').encode())
+        c.key = fnv((f'{mod}/' + (c.name if n == 1 else f'{c.name}#{n}')).encode())
+    return out
+
+
+TITLE = '0100F2C0115B6000'
+
+
+def cheat_files(mods, bid):
+    """[(mod folder name, cheat file)] of the folders of mods, by name: <mod>/cheats/<bid>.txt or its Atmosphere places
+    (runtime/mods.c find_root), the file name in any case."""
+    out = []
+    for mod in sorted((d for d in mods.iterdir() if d.is_dir()), key=lambda d: d.name) if mods.is_dir() else []:
+        for where in ('cheats', f'atmosphere/contents/{TITLE}/cheats', f'contents/{TITLE}/cheats', f'{TITLE}/cheats'):
+            folder = mod / where
+            if folder.is_dir():
+                f = next((p for p in sorted(folder.iterdir()) if p.is_file() and p.name.lower() == f'{bid}.txt'.lower()),
+                         None)
+                if f:
+                    out.append((mod.name, f))
+                break
     return out
 
 
@@ -311,7 +335,7 @@ def classify(main, c):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--exefs', type=Path, required=True)
-    ap.add_argument('--cheats', type=Path, required=True)
+    ap.add_argument('--mods', type=Path, required=True, help='the mods folder next to totk.exe')
     ap.add_argument('--patches', type=Path, required=True, help='the game version\'s patch file')
     ap.add_argument('--out', type=Path, required=True, help='the patch file with the cheats added')
     ap.add_argument('--status', type=Path, required=True)
@@ -319,7 +343,8 @@ def main():
     sys.stdout.reconfigure(errors='replace')   # cheat names in a console without their characters
     m = Main(args.exefs / 'main')
     text = args.patches.read_text()
-    cheats = parse(args.cheats.read_text(encoding='utf-8-sig', errors='replace')) if args.cheats.is_file() else []
+    files = cheat_files(args.mods, build_id(args.exefs / 'main'))
+    cheats = [c for mod, f in files for c in parse(f.read_text(encoding='utf-8-sig', errors='replace'), mod)]
     sets, sites, status = [], [], []
     for c in cheats:
         classify(m, c)
@@ -334,14 +359,14 @@ def main():
         status.append(f'{c.key}\t{content}\t{c.kind}\t{c.buttons:X}\t{note}')
         print(f'cheats: {c.kind:11} {c.name}' + (f' ({note})' if note else ''))
     if sets:
-        text += (f'\n# Cheats of {args.cheats.name} (tools/cheats.py)\n' + '\n'.join(sets) + '\n'
-                 + '\n'.join(sites) + '\n')
+        text += ('\n# Cheats of the mods folder (tools/cheats.py)\n' + '\n'.join(sets) + '\n' + '\n'.join(sites) + '\n')
     args.out.write_text(text)
+    args.status.parent.mkdir(parents=True, exist_ok=True)
     args.status.write_text('\n'.join(status) + ('\n' if status else ''), encoding='utf-8')
     kinds = {}
     for c in cheats:
         kinds[c.kind] = kinds.get(c.kind, 0) + 1
-    print(f'cheats: {len(cheats)} in {args.cheats.name}: '
+    print(f'cheats: {len(cheats)} in {len(files)} files ({", ".join(mod for mod, _ in files) or "none"}): '
           + ', '.join(f'{n} {k}' for k, n in sorted(kinds.items())) + f'; {len(sites)} sites')
 
 

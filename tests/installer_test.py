@@ -221,9 +221,10 @@ class LiftKeyTest(unittest.TestCase):
     def key(self):
         return steps.Lift().key(self.ctx)
 
-    def add_cheats(self, name, text):
-        (self.dest / 'cheats').mkdir(exist_ok=True)
-        (self.dest / 'cheats' / name).write_text(text)
+    def add_cheats(self, name, text, mod='Cheats', where='cheats'):
+        folder = self.dest / 'mods' / mod / where
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / name).write_text(text)
 
     def test_extracting_main_keeps_the_key(self):
         before = self.key()
@@ -237,21 +238,19 @@ class LiftKeyTest(unittest.TestCase):
         added = self.key()
         self.assertNotEqual(added, before)
         self.add_cheats('277178B7DBA1B6D4.txt', '[b]')
-        self.assertNotEqual(self.key(), added)
+        edited = self.key()
+        self.assertNotEqual(edited, added)
+        self.add_cheats('277178B7DBA1B6D4.txt', '[c]', mod='Other', where='atmosphere/contents/0100F2C0115B6000/cheats')
+        self.assertNotEqual(self.key(), edited)
 
-    def test_installed_bundled_file_keeps_the_key(self):
-        (self.dest / 'no-tools' / 'data' / 'cheats').mkdir(parents=True)
-        (self.dest / 'no-tools' / 'data' / 'cheats' / '277178B7DBA1B6D4.txt').write_text('[a]')
-        before = self.key()
-        self.add_cheats('277178B7DBA1B6D4.txt', '[a]')
-        self.assertEqual(self.key(), before)
-        self.add_cheats('277178B7DBA1B6D4.txt', '[edited by the player]')
-        self.assertNotEqual(self.key(), before)
-
-    def test_status_file_keeps_the_key(self):
+    def test_status_and_other_files_keep_the_key(self):
         self.add_cheats('277178B7DBA1B6D4.txt', '[a]')
         before = self.key()
-        self.add_cheats('277178B7DBA1B6D4.status', 'written by lift')
+        (self.dest / 'build-cache').mkdir()
+        (self.dest / 'build-cache' / 'cheats.status').write_text('written by lift')
+        self.add_cheats('readme.md', 'not a cheat file')
+        (self.dest / 'mods' / 'Cheats' / 'romfs').mkdir()
+        (self.dest / 'mods' / 'Cheats' / 'romfs' / 'a.txt').write_text('a RomFS file')
         self.assertEqual(self.key(), before)
 
 

@@ -1,5 +1,6 @@
-// The Cheats tab of the in-game menu: the cheats of cheats\<build id>.txt (cheats.c), a row per cheat in file order and
-// a heading per group label; a cheat that cannot be switched here is greyed out with the reason.
+// The Cheats tab of the in-game menu: the cheats of the mods' cheat files (cheats.c), a heading per mod in the Mods
+// tab's order, then a row per cheat in file order and a line per group label of the file; a cheat that cannot be
+// switched here is greyed out with the reason.
 #include <stdio.h>
 #include <string.h>
 
@@ -16,22 +17,24 @@ extern "C" void tab_cheats(float scale) {
     static char line[512], desc[768], buttons[192];
     int n = cheats_count();
     if (!n) {
-        snprintf(line, sizeof line, menu_text(UI_MENU_CHEATS_NONE),
-                 cheats_file()[0] ? cheats_file() : "cheats\\<build id>.txt");
+        snprintf(line, sizeof line, menu_text(UI_MENU_CHEATS_NONE), cheats_file()[0] ? cheats_file() : "<build id>.txt");
         opt_text_str(line);
         opt_end();
         return;
     }
-    int listed = 0;
-    for (int i = 0; i < n; i++) listed += cheats_info(i)->kind != CHEAT_HEADING;
-    snprintf(line, sizeof line, menu_text(UI_MENU_CHEATS_FILE), cheats_file(), listed);
-    opt_text_str(line);
     for (int i = 0; i < n; i++) {
         const CheatInfo *c = cheats_info(i);
+        if (!i || strcmp(c->mod, cheats_info(i - 1)->mod)) {
+            int listed = 0;
+            for (int j = i; j < n && !strcmp(cheats_info(j)->mod, c->mod); j++)
+                listed += cheats_info(j)->kind != CHEAT_HEADING;
+            snprintf(line, sizeof line, menu_text(UI_MENU_CHEATS_MOD), c->mod, listed);
+            opt_group_text(line);
+        }
         UiTextId text = UI_MENU_CHEAT_CODE_DESC;
         switch (c->kind) {
         case CHEAT_HEADING:
-            if (!strstr(c->name, "TID=")) opt_group_text(c->name);   // the file's title line only names the game
+            if (!strstr(c->name, "TID=")) opt_text_str(c->name);   // the file's title line only names the game
             continue;
         case CHEAT_CODE: break;
         case CHEAT_KEY: text = UI_MENU_CHEAT_KEY_DESC; break;

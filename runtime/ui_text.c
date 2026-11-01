@@ -173,7 +173,8 @@ static const char *const text_en[UI_TEXT_COUNT] = {
                             "load code modules, so the whole mod stays off.",
     [UI_MENU_MODS_EXEFS_LATER] = "This mod patches the game code (exefs). Code patches are not supported yet, so the "
                                  "whole mod stays off.",
-    [UI_MENU_MODS_CHEATS_LATER] = "This mod holds only cheat files. Cheats are not supported yet.",
+    [UI_MENU_MODS_CHEATS] = "Cheats: %d. Switch them on the Cheats tab.",
+    [UI_MENU_MODS_CHEATS_FILE] = "Cheats for this game version are read at start from cheats\\%s in this mod.",
     [UI_MENU_MODS_BAD_NAME] = "The folder name contains |, which the mod list uses between names. Rename the folder.",
     [UI_MENU_MODS_OTHER_VERSION] = "%u of its files are made for another game version and are left out. Look for a "
                                    "version of this mod made for your game version.",
@@ -414,6 +415,24 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_OV_FMT_FSR] = "AMD FSR 1, sharpness %d%%", [UI_MENU_OV_SCALE_NONE] = "none (1:1)",
     [UI_MENU_OV_SCALE_BILINEAR] = "bilinear",
     [UI_MENU_OV_SCALE_DOWN] = "bilinear (FSR only enlarges)",
+    [UI_MENU_TAB_CHEATS] = "Cheats",
+    [UI_MENU_CHEATS_NONE] = "No cheats for this game version. A mod's cheats are an Atmosphere cheat file in its "
+                            "cheats folder, named after the game's build: mods\\<mod>\\cheats\\%s. Restart the game to "
+                            "read them. Cheats that change the game's code also need the setup run again on this "
+                            "folder.",
+    [UI_MENU_CHEATS_MOD] = "%s: %d cheats",
+    [UI_MENU_CHEAT_CODE_DESC] = "Changes the game's code. Switches at once.",
+    [UI_MENU_CHEAT_KEY_DESC] = "Changes the game's code while you hold %s. Switches at once.",
+    [UI_MENU_CHEAT_DATA_DESC] = "Writes the game's memory every frame while it is on.",
+    [UI_MENU_CHEAT_MASTER] = "always on",
+    [UI_MENU_CHEAT_MASTER_DESC] = "The file's master code: it is always on.",
+    [UI_MENU_CHEAT_RESTORE] = "not needed",
+    [UI_MENU_CHEAT_RESTORE_DESC] = "It only writes the game's own code back. Switching a cheat off already does that.",
+    [UI_MENU_CHEAT_REBUILD] = "run the setup again",
+    [UI_MENU_CHEAT_REBUILD_DESC] = "This cheat changes the game's code and is new or edited since the game was built. "
+                                   "Run the setup again on this folder to build it (about three minutes).",
+    [UI_MENU_CHEAT_UNSUPPORTED] = "not supported",
+    [UI_MENU_CHEAT_UNSUPPORTED_DESC] = "This cheat cannot be used with this version of the game:",
 };
 
 static const char *const text_ru[UI_TEXT_COUNT] = {
@@ -565,7 +584,8 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
                             "модули кода, поэтому мод выключен целиком.",
     [UI_MENU_MODS_EXEFS_LATER] = "Этот мод меняет код игры (exefs). Патчи кода пока не поддерживаются, поэтому мод "
                                  "выключен целиком.",
-    [UI_MENU_MODS_CHEATS_LATER] = "В этом моде только файлы читов. Читы пока не поддерживаются.",
+    [UI_MENU_MODS_CHEATS] = "Читов: %d. Они включаются на вкладке «Читы».",
+    [UI_MENU_MODS_CHEATS_FILE] = "Читы для этой версии игры читаются при запуске из cheats\\%s в этом моде.",
     [UI_MENU_MODS_BAD_NAME] = "В имени папки есть символ |, которым список модов разделяет имена. Переименуйте папку.",
     [UI_MENU_MODS_OTHER_VERSION] = "Файлов для другой версии игры: %u, они пропущены. Поищите версию этого мода для "
                                    "вашей версии игры.",
@@ -811,6 +831,23 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_OV_FMT_FSR] = "AMD FSR 1, резкость %d%%", [UI_MENU_OV_SCALE_NONE] = "нет (1:1)",
     [UI_MENU_OV_SCALE_BILINEAR] = "билинейное",
     [UI_MENU_OV_SCALE_DOWN] = "билинейное (FSR только увеличивает)",
+    [UI_MENU_TAB_CHEATS] = "Читы",
+    [UI_MENU_CHEATS_NONE] = "Для этой версии игры читов нет. Читы мода — это файл читов Atmosphere в его папке cheats "
+                            "с именем по сборке игры: mods\\<мод>\\cheats\\%s. Перезапустите игру, чтобы они "
+                            "прочитались. Для читов, меняющих код игры, ещё раз запустите установщик для этой папки.",
+    [UI_MENU_CHEATS_MOD] = "%s — читов: %d",
+    [UI_MENU_CHEAT_CODE_DESC] = "Меняет код игры. Включается и выключается сразу.",
+    [UI_MENU_CHEAT_KEY_DESC] = "Меняет код игры, пока вы держите %s. Включается и выключается сразу.",
+    [UI_MENU_CHEAT_DATA_DESC] = "Пока включён, записывает память игры каждый кадр.",
+    [UI_MENU_CHEAT_MASTER] = "всегда вкл.",
+    [UI_MENU_CHEAT_MASTER_DESC] = "Главный код файла: включён всегда.",
+    [UI_MENU_CHEAT_RESTORE] = "не нужен",
+    [UI_MENU_CHEAT_RESTORE_DESC] = "Он только возвращает исходный код игры. Выключение чита уже делает это.",
+    [UI_MENU_CHEAT_REBUILD] = "запустите установщик",
+    [UI_MENU_CHEAT_REBUILD_DESC] = "Этот чит меняет код игры и появился или изменился после сборки игры. Запустите "
+                                   "установщик для этой папки ещё раз, чтобы собрать его (около трёх минут).",
+    [UI_MENU_CHEAT_UNSUPPORTED] = "не поддерживается",
+    [UI_MENU_CHEAT_UNSUPPORTED_DESC] = "Этот чит нельзя использовать с этой версией игры:",
 };
 
 static const char *const text_pt_br[UI_TEXT_COUNT] = {
@@ -834,7 +871,8 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
                             "carrega módulos de código, então o mod inteiro fica desligado.",
     [UI_MENU_MODS_EXEFS_LATER] = "Este mod altera o código do jogo (exefs). Patches de código ainda não são suportados, "
                                  "então o mod inteiro fica desligado.",
-    [UI_MENU_MODS_CHEATS_LATER] = "Este mod tem só arquivos de cheats. Cheats ainda não são suportados.",
+    [UI_MENU_MODS_CHEATS] = "Cheats: %d. Ligue-os na aba Cheats.",
+    [UI_MENU_MODS_CHEATS_FILE] = "Os cheats desta versão do jogo são lidos ao iniciar de cheats\\%s neste mod.",
     [UI_MENU_MODS_BAD_NAME] = "O nome da pasta contém |, que a lista de mods usa entre os nomes. Renomeie a pasta.",
     [UI_MENU_MODS_OTHER_VERSION] = "%u dos seus arquivos são de outra versão do jogo e ficam de fora. Procure uma versão "
                                    "deste mod feita para a sua versão do jogo.",
@@ -1235,6 +1273,25 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_FXAA] = "Antisserrilhado do jogo (FXAA)",
     [UI_MENU_FXAA_DESC] = "A suavização de bordas FXAA do próprio jogo. Borra um pouco os detalhes finos; com o DLAA "
                           "ligado não é necessária.",
+    [UI_MENU_TAB_CHEATS] = "Cheats",
+    [UI_MENU_CHEATS_NONE] = "Nenhum cheat para esta versão do jogo. Os cheats de um mod são um arquivo de cheats do "
+                            "Atmosphere na pasta cheats dele, com o nome da build do jogo: mods\\<mod>\\cheats\\%s. "
+                            "Reinicie o jogo para lê-los. Cheats que alteram o código do jogo também precisam que o "
+                            "instalador seja executado de novo nesta pasta.",
+    [UI_MENU_CHEATS_MOD] = "%s: %d cheats",
+    [UI_MENU_CHEAT_CODE_DESC] = "Altera o código do jogo. Liga e desliga na hora.",
+    [UI_MENU_CHEAT_KEY_DESC] = "Altera o código do jogo enquanto você segura %s. Liga e desliga na hora.",
+    [UI_MENU_CHEAT_DATA_DESC] = "Escreve na memória do jogo a cada quadro enquanto está ligado.",
+    [UI_MENU_CHEAT_MASTER] = "sempre ligado",
+    [UI_MENU_CHEAT_MASTER_DESC] = "O código mestre do arquivo: está sempre ligado.",
+    [UI_MENU_CHEAT_RESTORE] = "desnecessário",
+    [UI_MENU_CHEAT_RESTORE_DESC] = "Ele só escreve de volta o código original do jogo. Desligar um cheat já faz isso.",
+    [UI_MENU_CHEAT_REBUILD] = "execute o instalador",
+    [UI_MENU_CHEAT_REBUILD_DESC] = "Este cheat altera o código do jogo e é novo ou foi editado depois que o jogo foi "
+                                   "compilado. Execute o instalador de novo nesta pasta para compilá-lo (cerca de três "
+                                   "minutos).",
+    [UI_MENU_CHEAT_UNSUPPORTED] = "não suportado",
+    [UI_MENU_CHEAT_UNSUPPORTED_DESC] = "Este cheat não pode ser usado com esta versão do jogo:",
 };
 
 // Simplified Chinese: this row covers the software keyboard and the whole menu, so the menu and the overlay read Chinese
@@ -1264,7 +1321,8 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_MODS_EMPTY] = "此文件夹中没有 romfs、exefs 或 cheats 文件。",
     [UI_MENU_MODS_SUBSDK] = "此模组带有自己的游戏代码（subsdk 插件或替换的 main）。移植版无法加载代码模块，因此整个模组保持关闭。",
     [UI_MENU_MODS_EXEFS_LATER] = "此模组修改游戏代码（exefs）。目前还不支持代码补丁，因此整个模组保持关闭。",
-    [UI_MENU_MODS_CHEATS_LATER] = "此模组只有金手指文件。目前还不支持金手指。",
+    [UI_MENU_MODS_CHEATS] = "金手指：%d 个。在“金手指”标签页中开关。",
+    [UI_MENU_MODS_CHEATS_FILE] = "此游戏版本的金手指在启动时从此模组的 cheats\\%s 读取。",
     [UI_MENU_MODS_BAD_NAME] = "文件夹名称含有 |，模组列表用它分隔名称。请重命名该文件夹。",
     [UI_MENU_MODS_OTHER_VERSION] = "它有 %u 个文件是为其他游戏版本制作的，已被跳过。请寻找适用于你的游戏版本的此模组。",
     [UI_MENU_MODS_UNUSED] = "未使用",
@@ -1760,6 +1818,21 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_DLSS_PERFORMANCE] = "性能",
     [UI_MENU_FXAA] = "游戏抗锯齿（FXAA）",
     [UI_MENU_FXAA_DESC] = "游戏自身的 FXAA 边缘平滑。会让细节略微模糊；开启 DLAA 时不需要。",
+    [UI_MENU_TAB_CHEATS] = "金手指",
+    [UI_MENU_CHEATS_NONE] = "此游戏版本没有金手指。模组的金手指是它的 cheats 文件夹中以游戏构建命名的 Atmosphere "
+                            "金手指文件：mods\\<模组>\\cheats\\%s。重启游戏后才会读取。修改游戏代码的金手指还需要对此文件夹重新运行安装程序。",
+    [UI_MENU_CHEATS_MOD] = "%s：%d 个金手指",
+    [UI_MENU_CHEAT_CODE_DESC] = "修改游戏代码。立即开关。",
+    [UI_MENU_CHEAT_KEY_DESC] = "按住 %s 时修改游戏代码。立即开关。",
+    [UI_MENU_CHEAT_DATA_DESC] = "开启时每帧写入游戏内存。",
+    [UI_MENU_CHEAT_MASTER] = "始终开启",
+    [UI_MENU_CHEAT_MASTER_DESC] = "文件的主代码：始终开启。",
+    [UI_MENU_CHEAT_RESTORE] = "无需使用",
+    [UI_MENU_CHEAT_RESTORE_DESC] = "它只会写回游戏原本的代码。关闭金手指时已经会这样做。",
+    [UI_MENU_CHEAT_REBUILD] = "重新运行安装程序",
+    [UI_MENU_CHEAT_REBUILD_DESC] = "此金手指修改游戏代码，并且是在游戏构建后新增或修改的。对此文件夹重新运行安装程序来构建它（约三分钟）。",
+    [UI_MENU_CHEAT_UNSUPPORTED] = "不支持",
+    [UI_MENU_CHEAT_UNSUPPORTED_DESC] = "此金手指不能用于此游戏版本：",
 };
 
 #define SWKBD_ONLY(name, ...) static const char *const name[UI_TEXT_COUNT] = {SWKBD(__VA_ARGS__)}

@@ -14,7 +14,6 @@ typedef enum {
                         // whole mod stays off (its RomFS files may expect that code)
     MOD_EXEFS_LATER,    // has ExeFS patches (.ips, .pchtxt): a rebuild of the game code applies them, not yet here; the
                         // whole mod stays off until then
-    MOD_CHEATS_LATER,   // only cheat files, which the port does not load yet
     MOD_BAD_NAME,       // its folder name holds '|', the separator of the order keys
 } ModProblem;
 

@@ -93,7 +93,7 @@ int probe_mods(void) {
         CHECK(e->problem == MOD_PLUGIN, "subsdk-only mod is a plugin mod");
         CHECK(f->problem == MOD_EMPTY, "empty RomFS folder");
         CHECK(g->kind == (MOD_ROMFS | MOD_EXEFS) && g->problem == MOD_EXEFS_LATER, "RomFS + ExeFS mod");
-        CHECK(jm->kind == MOD_CHEATS && jm->problem == MOD_CHEATS_LATER && ends_with(jm->cheats, "J/cheats"),
+        CHECK(jm->kind == MOD_CHEATS && jm->problem == MOD_OK && ends_with(jm->cheats, "J/cheats"),
               "cheats-only mod");
         CHECK(km->kind == MOD_ROMFS && km->problem == MOD_OK && ends_with(km->romfs, "K/romfslite"), "TKMM romfslite");
         CHECK(lm->kind == (MOD_ROMFS | MOD_CHEATS) && lm->problem == MOD_OK, "RomFS + cheats, main.npdm is no code");

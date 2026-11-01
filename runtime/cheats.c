@@ -1,12 +1,14 @@
-// Cheats of an Atmosphere cheat file (cheats.h). The file is cheats\<build id>.txt next to totk.exe, the build id the
-// first 8 bytes of main's NSO build id, as Atmosphere and the emulators name it. Each cheat's switch is the setting
-// TOTK_CHEAT_<name hash> (cheat_<hash> under [cheats] in totk.ini).
+// Cheats of the mods' Atmosphere cheat files (cheats.h). Each enabled mod the port can use (mods.h) may hold
+// <build id>.txt in its cheats folder, the build id the first 8 bytes of main's NSO build id, as Atmosphere and the
+// emulators name it; the file name's case does not matter. Each cheat's switch is the setting TOTK_CHEAT_<hash>
+// (cheat_<hash> under [cheats] in totk.ini), the hash FNV-1a 32 of "<mod folder name>/<cheat name>", so two mods'
+// cheats of one name keep their own switches.
 //
 // Code cheats (opcode 0 writes into main's code) cannot be applied here: the game's code is lifted C. tools/cheats.py
-// turns them into patch sets cheat_<hash> when the game is built and writes cheats\<build id>.status, one line per
-// cheat: name hash, content hash, kind, buttons, note (tools/cheats.py has the format). A cheat whose status line is
-// missing or has another content hash was added or edited after the build: a data cheat runs anyway, a code cheat waits
-// for the setup to run again.
+// turns the code cheats of every mod into patch sets cheat_<hash> when the game is built and writes
+// build-cache\cheats.status next to totk.exe, one line per cheat: name hash, content hash, kind, buttons, note
+// (tools/cheats.py has the format). A cheat whose status line is missing or has another content hash was added or
+// edited after the build: a data cheat runs anyway, a code cheat waits for the setup to run again.
 //
 // Data cheats run in a VM after Atmosphere's dmnt cheat VM (opcodes 0-A; the 0xC.. and 0xF.. extensions are not
 // supported), every presented frame while their switch is on, with registers cleared before each cheat. Memory is the
@@ -18,11 +20,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "cfg.h"
 #include "cheats.h"
 #include "host.h"
 #include "input.h"
+#include "mods.h"
 #include "platform/platform.h"
 
 #ifdef _WIN32
@@ -37,14 +41,16 @@ typedef struct {
     CheatInfo info;
     uint32_t *words;
     int n;
+    int dup;              // 1 for the first cheat of its name in its file, 2 for the next ...
     int set;              // patch set, -1 none
     volatile int32_t on;
     char note[STATUS_MAX];
 } Cheat;
 
 static Cheat *g_cheats;
-static int g_n, g_vm;     // g_vm: some cheat needs cheats_frame
-static char g_file[64];
+static int g_n, g_cap, g_vm;   // g_vm: some cheat needs cheats_frame
+static char g_file[64];        // "<build id>.txt"
+static int g_files;            // mods whose file was read
 static uint64_t g_main, g_main_size, g_code_end;   // main's image; its code with the padding up to .rodata
 
 static uint32_t fnv(const char *s, size_t n) {
@@ -340,8 +346,9 @@ static void add_word(Cheat *c, uint32_t v, int *cap) {
     c->words[c->n++] = v;
 }
 
-static void parse(char *s) {
-    int cap = 0, wcap = 0;
+// Appends the cheats of one mod's file; mod: the mod's folder name (kept).
+static void parse(char *s, const char *mod) {
+    int first = g_n, wcap = 0;
     for (char *line = s; line && *line;) {
         char *end = strchr(line, '\n'), *next = end ? end + 1 : NULL;
         if (end) *end = 0;
@@ -349,9 +356,9 @@ static void parse(char *s) {
         size_t len = strlen(line);
         while (len && (line[len - 1] == '\r' || line[len - 1] == ' ' || line[len - 1] == '\t')) line[--len] = 0;
         if (len >= 2 && (line[0] == '[' || line[0] == '{') && (line[len - 1] == ']' || line[len - 1] == '}')) {
-            if (g_n == cap) {
-                cap = cap ? cap * 2 : 32;
-                g_cheats = (Cheat *)realloc(g_cheats, sizeof *g_cheats * (size_t)cap);
+            if (g_n == g_cap) {
+                g_cap = g_cap ? g_cap * 2 : 32;
+                g_cheats = (Cheat *)realloc(g_cheats, sizeof *g_cheats * (size_t)g_cap);
                 if (!g_cheats) rt_fatal("cheats: out of memory");
             }
             Cheat *c = &g_cheats[g_n++];
@@ -362,10 +369,13 @@ static void parse(char *s) {
             size_t k = strlen(name);
             while (k && (name[k - 1] == ' ' || name[k - 1] == '\t')) name[--k] = 0;
             c->info.name = strdup(name);
+            c->info.mod = mod;
             c->info.kind = line[0] == '{' ? CHEAT_MASTER : CHEAT_HEADING;
             c->set = -1;
+            c->dup = 1;   // a repeated name gets "#2", "#3" ... (tools/cheats.py parse)
+            for (int j = first; j < g_n - 1; j++) c->dup += !strcmp(g_cheats[j].info.name, c->info.name);
             wcap = 0;
-        } else if (g_n) {
+        } else if (g_n > first) {
             for (char *tok = strtok(line, " \t"); tok; tok = strtok(NULL, " \t")) {
                 char *e;
                 unsigned long v = strtoul(tok, &e, 16);
@@ -374,6 +384,27 @@ static void parse(char *s) {
         }
         line = next;
     }
+}
+
+// The file g_file in folder, its name in any case, into out; 0 when there is none.
+typedef struct {
+    const char *dir;
+    char *out;
+    size_t cap;
+    int found;
+} FindFile;
+static int find_cb(const char *name, int kind, uint64_t size, void *ctx) {
+    (void)size;
+    FindFile *f = (FindFile *)ctx;
+    if (kind == PLAT_FS_FILE && !strcasecmp(name, g_file) &&
+        snprintf(f->out, f->cap, "%s/%s", f->dir, name) < (int)f->cap)
+        f->found = 1;
+    return !f->found;
+}
+static int find_file(const char *folder, char *out, size_t cap) {
+    FindFile f = {folder, out, cap, 0};
+    plat_fs_list(folder, find_cb, &f);
+    return f.found;
 }
 
 // The status line of key, its fields split in place; 0 when none.
@@ -409,31 +440,38 @@ static void plain_name(char *s) {
 
 void cheats_init(void) {
     const RtLoaded *m = ldr_count() ? ldr_module(0) : NULL;
-    char dir[PLAT_PATH_MAX], bid[17], path[PLAT_PATH_MAX + 64];
+    char dir[PLAT_PATH_MAX], bid[17], path[2400];   // path: a mod's cheats folder (ModInfo.cheats) + the file
     if (!m || !exe_dir(dir, sizeof dir) || !build_id(bid)) return;
     g_main = m->base;
     g_main_size = m->size;
     g_code_end = m->base + ((m->text_end + 0xFFF) & ~0xFFFull);
-    snprintf(g_file, sizeof g_file, "cheats" SEP "%s.txt", bid);
-    snprintf(path, sizeof path, "%s%s", dir, g_file);
-    char *text = read_text(path);
-    if (!text) {
-        rt_log("cheats: no %s", g_file);
+    snprintf(g_file, sizeof g_file, "%s.txt", bid);
+    mods_scan();
+    for (int k = 0; k < mods_count(); k++) {   // the Mods tab's order, top first
+        const ModInfo *mod = mods_at(k);
+        if (!mod->enabled || mod->problem != MOD_OK || !mod->cheats[0] || !find_file(mod->cheats, path, sizeof path))
+            continue;
+        char *text = read_text(path);
+        if (!text) {
+            rt_log("cheats: %s: cannot read %s", mod->name, path);
+            continue;
+        }
+        parse(text, strdup(mod->name));
+        free(text);
+        g_files++;
+    }
+    if (!g_files) {
+        rt_log("cheats: no enabled mod holds cheats/%s", g_file);
         return;
     }
-    parse(text);
-    free(text);
-    snprintf(path, sizeof path, "%scheats" SEP "%s.status", dir, bid);
+    snprintf(path, sizeof path, "%sbuild-cache" SEP "cheats.status", dir);
     char *status = read_text(path);
     int counts[CHEAT_UNSUPPORTED + 1] = {0}, seen_dups = 0;
     for (int i = 0; i < g_n; i++) {
         Cheat *c = &g_cheats[i];
-        // the name hash: a repeated name gets "#2", "#3" ... (tools/cheats.py parse)
-        int dup = 1;
-        for (int j = 0; j < i; j++) dup += !strcmp(g_cheats[j].info.name, c->info.name);
-        char named[600];
-        snprintf(named, sizeof named, dup > 1 ? "%s#%d" : "%s", c->info.name, dup);
-        seen_dups += dup > 1;
+        char named[900];
+        snprintf(named, sizeof named, c->dup > 1 ? "%s/%s#%d" : "%s/%s", c->info.mod, c->info.name, c->dup);
+        seen_dups += c->dup > 1;
         char key[9], content[9];
         snprintf(key, sizeof key, "%08X", fnv(named, strlen(named)));
         size_t tn = (size_t)c->n * 9 + 1, tl = 0;
@@ -476,9 +514,9 @@ void cheats_init(void) {
     for (int i = 0; i < g_n; i++) plain_name((char *)g_cheats[i].info.name);   // the hashes above read the file's bytes
     int on = 0;
     for (int i = 0; i < g_n; i++) on += g_cheats[i].on && g_cheats[i].info.kind != CHEAT_HEADING;
-    rt_log("cheats: %s: %d cheats, %d on; %d code, %d while buttons are held, %d data, %d master, %d restore, "
-           "%d headings, %d need the setup again, %d not supported%s",
-           g_file, g_n, on, counts[CHEAT_CODE], counts[CHEAT_KEY], counts[CHEAT_DATA], counts[CHEAT_MASTER],
+    rt_log("cheats: %s in %d mods: %d cheats, %d on; %d code, %d while buttons are held, %d data, %d master, "
+           "%d restore, %d headings, %d need the setup again, %d not supported%s",
+           g_file, g_files, g_n, on, counts[CHEAT_CODE], counts[CHEAT_KEY], counts[CHEAT_DATA], counts[CHEAT_MASTER],
            counts[CHEAT_RESTORE], counts[CHEAT_HEADING], counts[CHEAT_REBUILD], counts[CHEAT_UNSUPPORTED],
            seen_dups ? " (repeated names numbered)" : "");
 }
@@ -498,7 +536,7 @@ void cheats_set(int i, int on) {
     plat_xchg32(&c->on, on != 0);
     if (c->info.kind == CHEAT_CODE) rt_patch_switch(c->set, on);   // CHEAT_KEY: cheats_frame follows the buttons
     cfg_set(c->info.key, on ? "1" : "0");
-    rt_log("cheats: %s %s", c->info.name, on ? "on" : "off");
+    rt_log("cheats: %s/%s %s", c->info.mod, c->info.name, on ? "on" : "off");
 }
 
 void cheats_frame(uint64_t frame) {

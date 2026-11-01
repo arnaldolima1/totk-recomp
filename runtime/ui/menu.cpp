@@ -36,6 +36,7 @@ static int g_font_bad;
 
 extern "C" {
 #include "amiibo.h"
+#include "cheats.h"
 #include "cfg.h"
 #include "fs.h"
 #include "input.h"
@@ -1048,16 +1049,23 @@ static void tab_mods(float scale) {
         char over[512] = "", other[512] = "";
         if (m->overridden) snprintf(over, sizeof over, menu_text(UI_MENU_MODS_OVERRIDDEN), m->overridden, m->overridden_by);
         if (m->other_version) snprintf(other, sizeof other, menu_text(UI_MENU_MODS_OTHER_VERSION), m->other_version);
+        char cheat[256] = "";
+        if (m->kind & MOD_CHEATS) {   // its cheats as read at start, or the file they come from
+            int count = 0;
+            for (int j = 0; j < cheats_count(); j++)
+                count += !strcmp(cheats_info(j)->mod, m->name) && cheats_info(j)->kind != CHEAT_HEADING;
+            if (count) snprintf(cheat, sizeof cheat, menu_text(UI_MENU_MODS_CHEATS), count);
+            else snprintf(cheat, sizeof cheat, menu_text(UI_MENU_MODS_CHEATS_FILE), cheats_file());
+        }
         UiTextId problem = m->problem == MOD_EMPTY        ? UI_MENU_MODS_EMPTY
                          : m->problem == MOD_PLUGIN       ? UI_MENU_MODS_SUBSDK
                          : m->problem == MOD_EXEFS_LATER  ? UI_MENU_MODS_EXEFS_LATER
-                         : m->problem == MOD_CHEATS_LATER ? UI_MENU_MODS_CHEATS_LATER
                          : m->problem == MOD_BAD_NAME     ? UI_MENU_MODS_BAD_NAME
                                                           : UI_TEXT_COUNT;
         int k = snprintf(desc, sizeof desc, menu_text(UI_MENU_MODS_ROW_DESC), m->replaced, m->added);
         if (k >= 0 && k < (int)sizeof desc)
-            snprintf(desc + k, sizeof desc - k, "%s%s%s%s%s%s\n\n%s", over[0] ? "\n\n" : "", over,
-                     other[0] ? "\n\n" : "", other, problem != UI_TEXT_COUNT ? "\n\n" : "",
+            snprintf(desc + k, sizeof desc - k, "%s%s%s%s%s%s%s%s\n\n%s", over[0] ? "\n\n" : "", over,
+                     other[0] ? "\n\n" : "", other, cheat[0] ? "\n\n" : "", cheat, problem != UI_TEXT_COUNT ? "\n\n" : "",
                      problem != UI_TEXT_COUNT ? menu_text(problem) : "", menu_text(UI_MENU_MODS_MOVE_HINT));
         const char *note = m->enabled && m->problem != MOD_OK ? menu_text(UI_MENU_MODS_UNUSED) : after;
         int s = opt_text_row(id, m->name, menu_text(m->enabled ? UI_MENU_ON : UI_MENU_OFF), note, desc, true);

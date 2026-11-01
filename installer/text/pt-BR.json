@@ -93,6 +93,7 @@
  "cleanup.ini_failed": "Não foi possível gravar o totk.ini: {detail}",
 
  "warn.lang_needs_fonts": "Textos em {lang} precisam das fontes de sistema do Switch, que o instalador não extrai; parte do texto pode não aparecer.",
+ "warn.cheats_skipped": "Não foi possível compilar os cheats da pasta de mods que alteram o código do jogo; o jogo é instalado sem eles. Detalhes: {log}",
  "warn.npdm_differs": "O main.npdm difere do dump de referência da versão {version}; só os módulos de código são usados.",
  "warn.xbox_prompts_failed": "Não foi possível preparar os ícones de botão do Xbox (código de saída {code}); o jogo mantém os ícones do Switch. Detalhes: {log}",
  "warn.shaders_skipped": "O driver gráfico travou ao compilar alguns shaders, então {count} ficaram fora da preparação. O jogo os compila quando precisar deles pela primeira vez, e o driver pode travar ali também; uma atualização do driver pode resolver. Detalhes: {log}",

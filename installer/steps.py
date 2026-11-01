@@ -711,31 +711,26 @@ EMITTED = re.compile(r'^emitted (\d+)/(\d+) chunks')
 DISCOVERED = re.compile(r'^(\w+): \d+ functions \(.*discovery')
 
 
-def bundled_cheats(ctx):
-    """The folder of cheat files the release carries, one per update, tools/data/cheats/<build id>.txt."""
-    return ctx.layout.tools / 'data' / 'cheats'
+CHEAT_PLACES = ('cheats', 'atmosphere/contents/0100F2C0115B6000/cheats', 'contents/0100F2C0115B6000/cheats',
+                '0100F2C0115B6000/cheats')
 
 
 def cheat_files(ctx):
-    """The Atmosphere cheat files in <dest>/cheats, for the lift key. All of them: the one the build reads goes by the
-    build id of the installed main, and the keys are computed before Extract runs (runner plan), when a fresh install
-    has no main and an update may still have another version's. The .status files beside them are lift's own output.
-    A file the same as the bundled one of its name is left out, or installing it would change the key of the next run:
-    the key covers the bundled folder anyway."""
-    bundled = bundled_cheats(ctx)
-    return [f for f in sorted((ctx.dest / 'cheats').glob('*.txt'))
-            if not (bundled / f.name).is_file() or f.read_bytes() != (bundled / f.name).read_bytes()]
+    """The Atmosphere cheat files of the mods folder (<dest>/mods/<mod>/cheats/*.txt and the Atmosphere places, as
+    tools/cheats.py finds them), for the lift key. All of them: the ones the build reads go by the build id of the
+    installed main, and the keys are computed before Extract runs (runner plan), when a fresh install has no main and an
+    update may still have another version's."""
+    mods = ctx.dest / 'mods'
+    if not mods.is_dir():
+        return []
+    return sorted(f for mod in mods.iterdir() if mod.is_dir() for where in CHEAT_PLACES
+                  for f in ((mod / where).glob('*.txt') if (mod / where).is_dir() else ()))
 
 
-def cheats_file(ctx):
-    """<dest>/cheats/<build id>.txt, the Atmosphere cheat file of the installed main (tools/cheats.py), whether or not
-    it exists."""
-    try:
-        with open(ctx.dest / 'exefs' / 'main', 'rb') as f:
-            bid = f.read(0x48)[0x40:0x48].hex().upper()
-    except OSError:
-        bid = 'unknown'
-    return ctx.dest / 'cheats' / f'{bid}.txt'
+def cheats_status(ctx):
+    """The build's cheat status file (tools/cheats.py --status), which runtime/cheats.c reads: in build-cache, not in a
+    mod's own cheats folder, which the player (or TKMM's merge) may empty."""
+    return ctx.dest / 'build-cache' / 'cheats.status'
 
 
 class Lift(Step):
@@ -743,8 +738,8 @@ class Lift(Step):
     transient = True
 
     def key(self, ctx):
-        return fingerprint('lift-2', ctx.keys['extract'], ctx.layout.recomp, ctx.layout.patches(game_version(ctx)),
-                           ctx.layout.tools / 'cheats.py', bundled_cheats(ctx), *cheat_files(ctx))
+        return fingerprint('lift-3', ctx.keys['extract'], ctx.layout.recomp, ctx.layout.patches(game_version(ctx)),
+                           ctx.layout.tools / 'cheats.py', *cheat_files(ctx))
 
     def current(self, ctx, record):
         gen = ctx.temp / 'gen'
@@ -761,27 +756,25 @@ class Lift(Step):
             if m:
                 rep.progress('lift', 'emit', int(m.group(1)), int(m.group(2)), 'chunks')
 
-        # The code cheats of the cheat file become patch sets (tools/cheats.py); its status file tells the runtime
-        # which cheats the build has. A player's own file wins over the bundled one, which is installed when there is
-        # none. The player did not choose a bundled file, so one the tools refuse costs its cheats, not the install.
-        plain, cheats = layout.patches(game_version(ctx)), cheats_file(ctx)
-        patches, skipped, bundled = plain, None, bundled_cheats(ctx) / cheats.name
-        ours = bundled.is_file() and (not cheats.is_file() or cheats.read_bytes() == bundled.read_bytes())
-        if ours and not cheats.is_file():
-            cheats.parent.mkdir(exist_ok=True)
-            shutil.copyfile(bundled, cheats)
-        if cheats.is_file():
+        # The code cheats of the mods' cheat files become patch sets (tools/cheats.py); its status file tells the
+        # runtime which cheats the build has. A cheat file is the player's download, so one the tools refuse costs the
+        # cheats, not the install: the game is built without them and the setup warns.
+        plain, status = layout.patches(game_version(ctx)), cheats_status(ctx)
+        patches, skipped = plain, None
+        status.unlink(missing_ok=True)   # no status: the runtime treats every code cheat as not built
+        if cheat_files(ctx):
             combined = ctx.temp / 'patches-cheats.txt'
             code, log = run_tool(ctx, 'lift', layout.tools / 'cheats.py',
-                                 ['--exefs', ctx.dest / 'exefs', '--cheats', cheats, '--patches', patches,
-                                  '--out', combined, '--status', cheats.with_suffix('.status')])
-            if code and not ours:
-                raise InstallError('lift.failed', code=code, log=str(log))
+                                 ['--exefs', ctx.dest / 'exefs', '--mods', ctx.dest / 'mods', '--patches', plain,
+                                  '--out', combined, '--status', status])
             patches, skipped = (plain, log) if code else (combined, None)
+            if code:
+                status.unlink(missing_ok=True)
         args = ['--exefs', ctx.dest / 'exefs', '--out', gen]
         code, log = run_tool(ctx, 'lift', layout.recomp / 'gen.py', args + ['--patches', patches], parse)
-        if code and ours and patches != plain:
+        if code and patches != plain:
             skipped = log
+            status.unlink(missing_ok=True)
             remove(gen)
             code, log = run_tool(ctx, 'lift', layout.recomp / 'gen.py', args + ['--patches', plain], parse)
         if code:

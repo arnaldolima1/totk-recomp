@@ -74,9 +74,11 @@ typedef enum {
     UI_MENU_MODS_ROW_DESC,       // printf: files it replaces, files it adds (as of this start)
     UI_MENU_MODS_OVERRIDDEN,     // printf: files a higher mod serves instead, that mod's name
     UI_MENU_MODS_MOVE_HINT,
-    UI_MENU_MODS_EMPTY, UI_MENU_MODS_SUBSDK, UI_MENU_MODS_EXEFS_LATER, UI_MENU_MODS_CHEATS_LATER, UI_MENU_MODS_BAD_NAME,
+    UI_MENU_MODS_EMPTY, UI_MENU_MODS_SUBSDK, UI_MENU_MODS_EXEFS_LATER, UI_MENU_MODS_BAD_NAME,
     UI_MENU_MODS_OTHER_VERSION,  // printf: files made for another game version, left out
     UI_MENU_MODS_UNUSED,         // under the switch of a mod the port cannot use
+    UI_MENU_MODS_CHEATS,         // printf: its cheats as read at start
+    UI_MENU_MODS_CHEATS_FILE,    // printf: <build id>.txt, when none were read
     UI_MENU_MODS_FPS60, UI_MENU_MODS_FPS60_DESC, UI_MENU_MODS_RES, UI_MENU_MODS_RES_DESC,
     UI_MENU_MODS_QUICKMENU, UI_MENU_MODS_QUICKMENU_DESC,
 
@@ -211,8 +213,8 @@ typedef enum {
     UI_MENU_OV_SCALE_DOWN,    // FSR is selected but the image is larger than the window: FSR only enlarges
     // the Cheats tab (cheats.c): the file, the kinds of cheat and why one cannot be switched
     UI_MENU_TAB_CHEATS,
-    UI_MENU_CHEATS_NONE,      // "%s": cheats\<build id>.txt
-    UI_MENU_CHEATS_FILE,      // "%s": the file, "%d": its cheats
+    UI_MENU_CHEATS_NONE,      // "%s": <build id>.txt
+    UI_MENU_CHEATS_MOD,       // "%s": the mod, "%d": its cheats
     UI_MENU_CHEAT_CODE_DESC, UI_MENU_CHEAT_KEY_DESC /* "%s": the buttons */, UI_MENU_CHEAT_DATA_DESC,
     UI_MENU_CHEAT_MASTER, UI_MENU_CHEAT_MASTER_DESC, UI_MENU_CHEAT_RESTORE, UI_MENU_CHEAT_RESTORE_DESC,
     UI_MENU_CHEAT_REBUILD, UI_MENU_CHEAT_REBUILD_DESC, UI_MENU_CHEAT_UNSUPPORTED, UI_MENU_CHEAT_UNSUPPORTED_DESC,
