@@ -222,6 +222,7 @@ void vk_hdr_present_source(const VkTexImage *win, VkImage *image, VkFormat *form
 }
 
 void vk_hdr_image_gone(VkImage image) {   // a texture image went away: forget it as window or source
+    if (!vk_hdr_track) return;   // no records before the first HDR present (vk_hdr_present_source): no lock per image
     plat_mutex_lock(&rec_lock);
     for (int i = 0; i < nrecs; i++) {
         if (recs[i].src == image) recs[i].src = VK_NULL_HANDLE;
