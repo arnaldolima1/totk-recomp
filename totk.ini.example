@@ -161,6 +161,10 @@
 # leaf shadows look blocky and jump) or a fixed 512, 768, 1024, 1536 or 2048. Above 960 the texture heap grows with it.
 # Read at start.
 # shadow_res = 1024
+# Anisotropic filtering of tiling, mipmapped textures: game (the level the game asks for, as on the Switch) or 2, 4,
+# 8, 16. Keeps ground and walls seen at a steep angle sharp. Shadow, nearest-filtered and clamped samplers keep the
+# game's setting. Read at start.
+# aniso = 16
 
 # HDR output: hdr = 1 sends the picture as HDR10 (needs HDR on in Windows, "Use HDR", or a Wayland compositor with
 # colour management; without it the picture stays SDR). The game's tonemap keeps highlights up to hdr_peak_nits (your

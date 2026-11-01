@@ -95,6 +95,10 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_ASPECT_FIT] = "Black bars", [UI_MENU_ASPECT_STRETCH] = "Stretch",
     [UI_MENU_FOV] = "Field of view",
     [UI_MENU_FOV_DESC] = "How much of the world the camera shows, in percent of the game's own. Game version 1.4.3 only.",
+    [UI_MENU_ANISO] = "Anisotropic filtering",
+    [UI_MENU_ANISO_DESC] = "Keeps ground and walls seen at a steep angle sharp. The game's own level is the Switch's; "
+                           "16x costs little on a desktop GPU.",
+    [UI_MENU_ANISO_GAME] = "The game's",
     [UI_MENU_SHADOW_RES] = "Shadow map size",
     [UI_MENU_SHADOW_RES_DESC] = "Size of the sun's shadow map. The game's own size changes with the view, down to about 400 "
                                 "near the ground, so leaf shadows look blocky and jump; a fixed size keeps them still and "
@@ -417,6 +421,10 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_ASPECT_FIT] = "Чёрные полосы", [UI_MENU_ASPECT_STRETCH] = "Растянуть",
     [UI_MENU_FOV] = "Поле зрения",
     [UI_MENU_FOV_DESC] = "Сколько мира показывает камера, в процентах от игрового. Только для версии игры 1.4.3.",
+    [UI_MENU_ANISO] = "Анизотропная фильтрация",
+    [UI_MENU_ANISO_DESC] = "Сохраняет чёткость земли и стен под острым углом. Уровень самой игры — как на Switch; "
+                           "16x почти ничего не стоит настольной видеокарте.",
+    [UI_MENU_ANISO_GAME] = "Как в игре",
     [UI_MENU_SHADOW_RES] = "Размер карты теней",
     [UI_MENU_SHADOW_RES_DESC] = "Размер карты теней от солнца. Собственный размер игры меняется вместе с видом, у земли до "
                                 "примерно 400, поэтому тени листвы выглядят квадратными и дёргаются; постоянный размер делает "
@@ -978,6 +986,10 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_OV_FMT_SIZE] = "%ux%u", [UI_MENU_OV_FMT_SCENE] = "%ux%u, %.0f%%",
     [UI_MENU_OV_FMT_FSR] = "AMD FSR 1, nitidez %d%%", [UI_MENU_OV_SCALE_NONE] = "nenhum (1:1)",
     [UI_MENU_OV_SCALE_BILINEAR] = "bilinear",
+    [UI_MENU_ANISO] = "Filtro anisotrópico",
+    [UI_MENU_ANISO_DESC] = "Mantém nítidos o chão e as paredes vistos em ângulo. O nível do próprio jogo é o do Switch; "
+                           "16x custa pouco numa placa de vídeo de PC.",
+    [UI_MENU_ANISO_GAME] = "Do jogo",
     [UI_MENU_SHADOW_RES] = "Tamanho do mapa de sombras",
     [UI_MENU_SHADOW_RES_DESC] = "Tamanho do mapa de sombras do sol. O tamanho do próprio jogo muda com a vista, até cerca de "
                                 "400 perto do chão, então as sombras das folhas ficam quadradas e pulam; um tamanho fixo as "

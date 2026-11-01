@@ -1577,6 +1577,7 @@ static VkCompareOp compare_op(uint32_t f) {
 }
 
 static struct { int init, mirror_clamp_edge, minmax, border_no_format; } sf;
+static float aniso_force;   // TOTK_ANISO: 0 = the game's level, else the least level of tiling colour samplers
 
 static void sampler_features(VkCtx *c) {
     if (sf.init) return;
@@ -1588,6 +1589,9 @@ static void sampler_features(VkCtx *c) {
     sf.mirror_clamp_edge = f12.samplerMirrorClampToEdge;
     sf.minmax = f12.samplerFilterMinmax;
     sf.border_no_format = c->has_custom_border_color && cbf.customBorderColors && cbf.customBorderColorWithoutFormat;
+    const char *an = cfg_value("TOTK_ANISO");
+    aniso_force = strcmp(an, "game") ? (float)atoi(an) : 0;
+    rt_log("vk: anisotropic filtering: %s", aniso_force > 1 ? an : "the game's");
     sf.init = 1;
 }
 
@@ -1622,9 +1626,20 @@ static VkSampler make_sampler(VkCtx *c, const samp_par *d) {
     if (si.maxLod < si.minLod) si.maxLod = si.minLod;
     float lim = c->props.limits.maxSamplerLodBias;
     si.mipLodBias = fmaxf(-lim, fminf(lim, d->lod_bias));
-    if (d->aniso > 1) {
+    float aniso = d->aniso;
+    // TOTK_ANISO raises the level for filtered, mipmapped colour samplers that repeat on U and V only: the surface
+    // textures it is for tile. Depth-compare (shadow) samplers, nearest or unmipmapped ones (data maps, LUTs) and clamped
+    // ones keep what the game set. Clamped samplers read screen-sized buffers, whose coordinates can stretch steeply at
+    // an object's edge; there anisotropic taps reach across the edge and leave a speckled fringe (the inventory's
+    // character preview). From upstream PR #89 (itaskaev2) and applezra's follow-up.
+    int tiled = (modes[0] == VK_SAMPLER_ADDRESS_MODE_REPEAT || modes[0] == VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT) &&
+                (modes[1] == VK_SAMPLER_ADDRESS_MODE_REPEAT || modes[1] == VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT);
+    if (aniso_force > 1 && tiled && !d->cmp_mode && si.magFilter == VK_FILTER_LINEAR && si.minFilter == VK_FILTER_LINEAR &&
+        (mf == NVN_MIN_FILTER_LINEAR_MIPMAP_NEAREST || mf == NVN_MIN_FILTER_LINEAR_MIPMAP_LINEAR) && aniso < aniso_force)
+        aniso = aniso_force;
+    if (aniso > 1) {
         si.anisotropyEnable = VK_TRUE;
-        si.maxAnisotropy = fminf(d->aniso, c->props.limits.maxSamplerAnisotropy);
+        si.maxAnisotropy = fminf(aniso, c->props.limits.maxSamplerAnisotropy);
     }
     if (d->cmp_mode) {
         si.compareEnable = VK_TRUE;

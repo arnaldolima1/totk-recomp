@@ -553,6 +553,14 @@ static void row_render_scale(void) {
     opt_choice_list("TOTK_RENDER_SCALE", UI_MENU_RENDER_SCALE, vals, names, N, UI_MENU_RENDER_SCALE_DESC);
 }
 
+// Anisotropic filtering (vk_texture.c make_sampler): the game's level or a fixed one for tiling surface textures.
+static void row_aniso(void) {
+    static const char *const vals[] = {"game", "2", "4", "8", "16"};
+    static const char *names[] = {NULL, "2x", "4x", "8x", "16x"};
+    names[0] = menu_text(UI_MENU_ANISO_GAME);
+    opt_choice_list("TOTK_ANISO", UI_MENU_ANISO, vals, names, 5, UI_MENU_ANISO_DESC);
+}
+
 static void row_shadow_res(void) {
     static const char *const vals[] = {"game", "512", "768", "1024", "1536", "2048"};
     enum { N = sizeof vals / sizeof *vals };
@@ -699,6 +707,7 @@ static void tab_screen(float scale) {
     row_output_res();
     row_render_scale();
     row_shadow_res();
+    row_aniso();
     static const UiTextId up[] = {UI_MENU_UPSCALER_FSR, UI_MENU_UPSCALER_BILINEAR};
     opt_choice("TOTK_UPSCALER", UI_MENU_UPSCALER, up, 2, UI_MENU_UPSCALER_DESC);
     opt_slider("TOTK_SHARPNESS", UI_MENU_SHARPNESS, 0, 100, UI_MENU_SHARPNESS_DESC, 5, "%.0f %%");
