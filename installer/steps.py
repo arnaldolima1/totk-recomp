@@ -838,10 +838,18 @@ class Prepare(Step):
             # Another translator: its cache keys differ, so the old translations would only take space.
             for name in ('shader-cache', 'shader-prepared.bin'):
                 remove(dest / name)
-        replace_file(layout.xlate, xlate)
+        # totk.exe starts totk_xlate.exe as a child while it prepares shaders; a preparation that was stopped from
+        # outside leaves that child holding this file, and Windows then refuses to replace it (issue #174).
+        try:
+            replace_file(layout.xlate, xlate)
+        except PermissionError:
+            raise InstallError('prepare.xlate_in_use', path=str(xlate)) from None
         xlate_id = layout.xlate.with_suffix('.id')
         if xlate_id.is_file():
-            replace_file(xlate_id, xlate.with_suffix('.id'))
+            try:
+                replace_file(xlate_id, xlate.with_suffix('.id'))
+            except PermissionError:
+                raise InstallError('prepare.xlate_in_use', path=str(xlate.with_suffix('.id'))) from None
         else:
             remove(xlate.with_suffix('.id'))
 
