@@ -33,7 +33,7 @@ static char g_focus_key[64];             // opt_focus_key: the row that takes th
 static bool g_held;                      // the last row's left / right has been held a while (steppers go faster)
 static float g_bottom;                   // opt_reserve_bottom: kept free under the panes
 static bool g_disable_next;              // opt_disable_next: the next row is greyed out with g_disable_note
-static UiTextId g_disable_note;
+static const char *g_disable_note;
 
 // The description pane: this frame's hovered and selected rows, the page's first row, and the last one shown.
 struct Desc { char text[UI_DESC_BYTES]; };
@@ -58,7 +58,9 @@ void opt_focus_key(const char *key) { snprintf(g_focus_key, sizeof g_focus_key, 
 void opt_reserve_bottom(float h) { g_bottom = h; }
 float opt_bottom(void) { return g_bottom; }
 
-void opt_disable_next(UiTextId note) {
+void opt_disable_next(UiTextId note) { opt_disable_next_text(menu_text(note)); }
+
+void opt_disable_next_text(const char *note) {
     g_disable_next = true;
     g_disable_note = note;
 }
@@ -113,7 +115,7 @@ struct RowView {
 // so its description shows). movable: the top / left face buttons, Ctrl+Up / Ctrl+Down and two drawn arrows move it.
 static int row_text(const char *key, const char *label, const char *desc, const RowView &v, bool movable) {
     const CfgMeta *m = cfg_meta(key);
-    const char *disabled = g_disable_next ? menu_text(g_disable_note) : NULL;
+    const char *disabled = g_disable_next ? g_disable_note : NULL;
     g_disable_next = false;
     bool off = disabled || cfg_from_env(key) != 0;
     ImGui::PushID(key);
@@ -271,6 +273,26 @@ bool opt_toggle(const char *key, UiTextId label, UiTextId desc, bool inverted) {
 bool opt_button(const char *id, UiTextId label, UiTextId desc, const char *value) {
     RowView v = {value ? value : "", false, false, NULL};
     return row(id, label, desc, v) == 2;   // A or a click; left and right do nothing
+}
+
+bool opt_toggle_text(const char *id, const char *label, const char *desc, bool on, const char *value) {
+    // off is the plain state: its value drawn dim, without the "default" mark
+    RowView v = {value ? value : menu_text(on ? UI_MENU_ON : UI_MENU_OFF), !on, false, on ? NULL : ""};
+    return row_text(id, label, desc, v, false) != 0;   // any step flips it
+}
+
+void opt_group_text(const char *title) {
+    ImGui::Dummy(ImVec2(0, 6 * g_scale));
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextColored(ImVec4(0.93f, 0.76f, 0.33f, 1), "%s", title);
+    ImGui::PopTextWrapPos();
+}
+
+void opt_text_str(const char *text, bool warn) {
+    ImGui::PushTextWrapPos(0);
+    if (warn) ImGui::TextColored(ImVec4(0.95f, 0.66f, 0.40f, 1), "%s", text);
+    else ImGui::TextUnformatted(text);
+    ImGui::PopTextWrapPos();
 }
 
 void opt_group(UiTextId title) {

@@ -54,6 +54,8 @@ void res_sizes(unsigned out[2], unsigned scene[2]);
 double frame_step_limit_hz(void);
 extern const int rt_game_version;
 extern const char rt_port_version[];
+void cheats_frame(uint64_t frame);   // cheats.c
+void tab_cheats(float scale);        // ui/cheats_tab.cpp
 }
 
 // Roboto Medium (Apache-2.0, ui/fonts/LICENSE-Roboto.txt) with Latin and Cyrillic glyphs.
@@ -371,7 +373,7 @@ extern "C" void menu_vk_release(void) {
 // TOTK_MENU_TEST_SET=<frame>:<key>=<value>[,<key>=<value>...][;<frame>:...]: cfg_set of each key (TOTK_ prefix
 // optional) at that presented frame; changes live settings with no input, menu open or not. totk.ini is written only by
 // the pseudo-key SAVE=1 (cfg_save, as a row change does; a failed write shows the menu's save note).
-enum { TAB_SCREEN, TAB_GAME, TAB_MODS, TAB_SOUND, TAB_CONTROLS, TAB_AMIIBO, TAB_MENU, TAB_ADVANCED, TAB_COUNT };
+enum { TAB_SCREEN, TAB_GAME, TAB_MODS, TAB_CHEATS, TAB_SOUND, TAB_CONTROLS, TAB_AMIIBO, TAB_MENU, TAB_ADVANCED, TAB_COUNT };
 enum { TEST_PAGE_FRAMES = 30, TEST_SETS = 16 };
 struct TestSet { uint64_t frame; char key[64], value[64]; };
 static struct {
@@ -1000,7 +1002,7 @@ static void tab_advanced(float scale) {
     }
 }
 
-static const UiTextId kTabNames[TAB_COUNT] = {UI_MENU_TAB_SCREEN,   UI_MENU_TAB_GAME, UI_MENU_TAB_MODS, UI_MENU_TAB_SOUND,
+static const UiTextId kTabNames[TAB_COUNT] = {UI_MENU_TAB_SCREEN,   UI_MENU_TAB_GAME, UI_MENU_TAB_MODS, UI_MENU_TAB_CHEATS, UI_MENU_TAB_SOUND,
                                               UI_MENU_TAB_CONTROLS, UI_MENU_TAB_AMIIBO, UI_MENU_TAB_MENU,
                                               UI_MENU_TAB_ADVANCED};
 static int g_tab;               // the tab shown
@@ -1130,6 +1132,7 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
             case TAB_CONTROLS: tab_controls(scale); break;
             case TAB_AMIIBO: tab_amiibo(scale); break;
             case TAB_MENU: tab_menu(scale); break;
+            case TAB_CHEATS: tab_cheats(scale); break;
             case TAB_ADVANCED: tab_advanced(scale); break;
             }
             ImGui::EndTabItem();
@@ -1410,6 +1413,7 @@ static void perf_draw(const MenuTarget *t, float scale) {
 
 extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const char **shot) {
     *shot = NULL;
+    cheats_frame(frame);   // the data cheats and the buttons of the cheats that need them held
     if (!g_test.parsed) test_parse();
     if (g_test.next_set < g_test.n_sets && frame >= g_test.sets[g_test.next_set].frame) test_apply_sets(frame);
     if (g_perf_save.exchange(0)) cfg_save();

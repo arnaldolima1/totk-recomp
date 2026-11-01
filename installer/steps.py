@@ -711,12 +711,40 @@ EMITTED = re.compile(r'^emitted (\d+)/(\d+) chunks')
 DISCOVERED = re.compile(r'^(\w+): \d+ functions \(.*discovery')
 
 
+def bundled_cheats(ctx):
+    """The folder of cheat files the release carries, one per update, tools/data/cheats/<build id>.txt."""
+    return ctx.layout.tools / 'data' / 'cheats'
+
+
+def cheat_files(ctx):
+    """The Atmosphere cheat files in <dest>/cheats, for the lift key. All of them: the one the build reads goes by the
+    build id of the installed main, and the keys are computed before Extract runs (runner plan), when a fresh install
+    has no main and an update may still have another version's. The .status files beside them are lift's own output.
+    A file the same as the bundled one of its name is left out, or installing it would change the key of the next run:
+    the key covers the bundled folder anyway."""
+    bundled = bundled_cheats(ctx)
+    return [f for f in sorted((ctx.dest / 'cheats').glob('*.txt'))
+            if not (bundled / f.name).is_file() or f.read_bytes() != (bundled / f.name).read_bytes()]
+
+
+def cheats_file(ctx):
+    """<dest>/cheats/<build id>.txt, the Atmosphere cheat file of the installed main (tools/cheats.py), whether or not
+    it exists."""
+    try:
+        with open(ctx.dest / 'exefs' / 'main', 'rb') as f:
+            bid = f.read(0x48)[0x40:0x48].hex().upper()
+    except OSError:
+        bid = 'unknown'
+    return ctx.dest / 'cheats' / f'{bid}.txt'
+
+
 class Lift(Step):
     id = 'lift'
     transient = True
 
     def key(self, ctx):
-        return fingerprint('lift-1', ctx.keys['extract'], ctx.layout.recomp, ctx.layout.patches(game_version(ctx)))
+        return fingerprint('lift-2', ctx.keys['extract'], ctx.layout.recomp, ctx.layout.patches(game_version(ctx)),
+                           ctx.layout.tools / 'cheats.py', bundled_cheats(ctx), *cheat_files(ctx))
 
     def current(self, ctx, record):
         gen = ctx.temp / 'gen'
@@ -733,10 +761,33 @@ class Lift(Step):
             if m:
                 rep.progress('lift', 'emit', int(m.group(1)), int(m.group(2)), 'chunks')
 
-        code, log = run_tool(ctx, 'lift', layout.recomp / 'gen.py',
-                             ['--exefs', ctx.dest / 'exefs', '--out', gen, '--patches', layout.patches(game_version(ctx))], parse)
+        # The code cheats of the cheat file become patch sets (tools/cheats.py); its status file tells the runtime
+        # which cheats the build has. A player's own file wins over the bundled one, which is installed when there is
+        # none. The player did not choose a bundled file, so one the tools refuse costs its cheats, not the install.
+        plain, cheats = layout.patches(game_version(ctx)), cheats_file(ctx)
+        patches, skipped, bundled = plain, None, bundled_cheats(ctx) / cheats.name
+        ours = bundled.is_file() and (not cheats.is_file() or cheats.read_bytes() == bundled.read_bytes())
+        if ours and not cheats.is_file():
+            cheats.parent.mkdir(exist_ok=True)
+            shutil.copyfile(bundled, cheats)
+        if cheats.is_file():
+            combined = ctx.temp / 'patches-cheats.txt'
+            code, log = run_tool(ctx, 'lift', layout.tools / 'cheats.py',
+                                 ['--exefs', ctx.dest / 'exefs', '--cheats', cheats, '--patches', patches,
+                                  '--out', combined, '--status', cheats.with_suffix('.status')])
+            if code and not ours:
+                raise InstallError('lift.failed', code=code, log=str(log))
+            patches, skipped = (plain, log) if code else (combined, None)
+        args = ['--exefs', ctx.dest / 'exefs', '--out', gen]
+        code, log = run_tool(ctx, 'lift', layout.recomp / 'gen.py', args + ['--patches', patches], parse)
+        if code and ours and patches != plain:
+            skipped = log
+            remove(gen)
+            code, log = run_tool(ctx, 'lift', layout.recomp / 'gen.py', args + ['--patches', plain], parse)
         if code:
             raise InstallError('lift.failed', code=code, log=str(log))
+        if skipped:
+            rep.warning('warn.cheats_skipped', log=str(skipped))
         (gen / STAMP).write_text(ctx.keys['lift'] + '\n')
         return {}
 

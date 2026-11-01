@@ -197,6 +197,64 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(e.exception.id, 'state.newer_format')
 
 
+class ReleaseFilesTest(unittest.TestCase):
+    def test_release_ships_every_tool_the_steps_run(self):
+        sys.path.insert(0, str(ROOT / 'tools'))
+        import make_release
+        text = (ROOT / 'installer' / 'steps.py').read_text(encoding='utf-8')
+        used = set(re.findall(r"layout\.tools / '(\w+\.py)'", text))
+        for names in re.findall(r"layout\.tools / n for n in \((.*?)\)", text, re.S):
+            used |= set(re.findall(r"'(\w+\.py)'", names))
+        self.assertIn('cheats.py', used)
+        self.assertEqual(used - set(make_release.TOOLS_FILES), set())
+
+
+class LiftKeyTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dest = Path(tmp.name)
+        layout = SimpleNamespace(recomp=self.dest / 'no-recomp', tools=self.dest / 'no-tools',
+                                 patches=lambda version: self.dest / 'no-patches')
+        self.ctx = SimpleNamespace(dest=self.dest, layout=layout, keys={'extract': 'x'}, state={'version': '1.4.3'})
+
+    def key(self):
+        return steps.Lift().key(self.ctx)
+
+    def add_cheats(self, name, text):
+        (self.dest / 'cheats').mkdir(exist_ok=True)
+        (self.dest / 'cheats' / name).write_text(text)
+
+    def test_extracting_main_keeps_the_key(self):
+        before = self.key()
+        (self.dest / 'exefs').mkdir()
+        (self.dest / 'exefs' / 'main').write_bytes(bytes(0x48))
+        self.assertEqual(self.key(), before)
+
+    def test_cheat_files_change_the_key(self):
+        before = self.key()
+        self.add_cheats('277178B7DBA1B6D4.txt', '[a]')
+        added = self.key()
+        self.assertNotEqual(added, before)
+        self.add_cheats('277178B7DBA1B6D4.txt', '[b]')
+        self.assertNotEqual(self.key(), added)
+
+    def test_installed_bundled_file_keeps_the_key(self):
+        (self.dest / 'no-tools' / 'data' / 'cheats').mkdir(parents=True)
+        (self.dest / 'no-tools' / 'data' / 'cheats' / '277178B7DBA1B6D4.txt').write_text('[a]')
+        before = self.key()
+        self.add_cheats('277178B7DBA1B6D4.txt', '[a]')
+        self.assertEqual(self.key(), before)
+        self.add_cheats('277178B7DBA1B6D4.txt', '[edited by the player]')
+        self.assertNotEqual(self.key(), before)
+
+    def test_status_file_keeps_the_key(self):
+        self.add_cheats('277178B7DBA1B6D4.txt', '[a]')
+        before = self.key()
+        self.add_cheats('277178B7DBA1B6D4.status', 'written by lift')
+        self.assertEqual(self.key(), before)
+
+
 class IniTest(unittest.TestCase):
     EXAMPLE = '[display]\n# vk_present = mailbox\n\n[language]\n# locale = en-US\n# lang = en-US\n# x = 1\n'
 
