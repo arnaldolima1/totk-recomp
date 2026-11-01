@@ -21,9 +21,21 @@ typedef struct {
     int stats[MP_STATS];
 } MpPlayer;
 
+// A group challenge track (tools/mp_server.py TRACKS): one figure, four tiers (bronze, silver, gold, legendary) over
+// the room's total.
+enum { MP_TIERS = 4, MP_TRACKS = MP_STATS };
+typedef struct {
+    int stat;               // MP_STAT_*
+    int total, done;        // the room's total; tiers reached (0..MP_TIERS)
+    int target[MP_TIERS];
+} MpTrack;
+
 typedef struct {
     int state;
     char room[64], error[200], server[128];
+    char me[MP_NAME_MAX];   // this game's name in the room
+    int ntracks;
+    MpTrack tracks[MP_TRACKS];
     int nplayers;
     MpPlayer players[MP_MAX_PLAYERS];
     char challenge[160];

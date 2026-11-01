@@ -113,6 +113,24 @@ PRESETS = {
                   max=60),
     'bargainer': dict(label='Encontros com a Estátua do Barganhista',
                       cond={'kind': 'number', 'name': 'DemonStatue_MeetCount'}, max=20),
+    # Multiplayer: counters the game keeps while in a room (runtime/net_mp.c), not save flags. Achievements over them
+    # stay outside the platinum and count for 100 %.
+    'mp_rooms': dict(label='Multijogador: vezes que entrou numa sala', cond={'kind': 'mp', 'counter': 'rooms'},
+                     max=1000),
+    'mp_players': dict(label='Multijogador: jogadores juntos na sala (máximo)',
+                       cond={'kind': 'mp', 'counter': 'players'}, max=32),
+    'mp_chat': dict(label='Multijogador: mensagens enviadas no chat', cond={'kind': 'mp', 'counter': 'chat'},
+                    max=10000),
+    'mp_voice': dict(label='Multijogador: minutos falando no chat de voz', cond={'kind': 'mp', 'counter': 'voice'},
+                     max=6000, unit=60),
+    'mp_minutes': dict(label='Multijogador: horas numa sala', cond={'kind': 'mp', 'counter': 'minutes'}, max=1000,
+                       unit=60),
+    'mp_friend_ach': dict(label='Multijogador: conquistas de amigos vistas na sala',
+                          cond={'kind': 'mp', 'counter': 'friend_unlocks'}, max=1000),
+    'mp_group_ach': dict(label='Multijogador: conquistas suas com amigos na sala',
+                         cond={'kind': 'mp', 'counter': 'group_unlocks'}, max=100),
+    'mp_tiers': dict(label='Multijogador: níveis de desafios do grupo concluídos',
+                     cond={'kind': 'mp', 'counter': 'tiers'}, max=24),
 }
 # Numbers the prologue inflates: under Hyrule Castle Link has 30 hearts and three stamina wheels, and the game saves
 # them (MaxLife 120, MaxStamina 3000) before setting 3 hearts and one wheel when he wakes in the Room of Awakening. A
@@ -304,8 +322,28 @@ DEFAULTS = [
     ('roupas_todas', 'Estilista de Hyrule', f'Tenha todos os {len(ARMOR_SETS)} conjuntos de roupa completos.',
      'legendary', 'armor', _p('armor_pieces', 3 * len(ARMOR_SETS))),
     # the platinum one
-    ('platina', 'Lenda de Hyrule', 'Desbloqueie todas as outras conquistas.', 'platinum', 'triforce',
-     {'kind': 'all'}),
+    # multiplayer: outside the platinum, inside 100 %
+    ('mp_primeiro_contato', 'Não Estamos Sós', 'Entre numa sala multijogador.', 'common', 'group', _p('mp_rooms', 1)),
+    ('mp_trio', 'A Força do Trio', 'Esteja numa sala com mais dois jogadores.', 'rare', 'group',
+     _p('mp_players', 3)),
+    ('mp_festa', 'Festa em Hyrule', 'Esteja numa sala com mais quatro jogadores.', 'epic', 'group',
+     _p('mp_players', 5)),
+    ('mp_tagarela', 'Tagarela de Hateno', 'Envie 50 mensagens no chat da sala.', 'rare', 'chat', _p('mp_chat', 50)),
+    ('mp_voz', 'Voz dos Sábios', 'Fale por 10 minutos no chat de voz.', 'rare', 'voice', _p('mp_voice', 10)),
+    ('mp_companhia', 'Companheiros de Jornada', 'Passe 5 horas numa sala com amigos.', 'epic', 'group',
+     _p('mp_minutes', 5)),
+    ('mp_torcida', 'Torcida Organizada', 'Veja 25 conquistas de amigos na sala.', 'rare', 'flag',
+     _p('mp_friend_ach', 25)),
+    ('mp_comemoracao', 'Vitória Compartilhada', 'Desbloqueie uma conquista com amigos na sala.', 'common', 'fairy',
+     _p('mp_group_ach', 1)),
+    ('mp_esforco', 'Esforço Conjunto', 'Conclua um nível de desafio do grupo.', 'common', 'shrine',
+     _p('mp_tiers', 1)),
+    ('mp_alianca', 'Aliança de Hyrule', 'Conclua 12 níveis de desafios do grupo.', 'epic', 'shrine',
+     _p('mp_tiers', 12)),
+    ('mp_lendas', 'Lendas Unidas', 'Conclua os 24 níveis de desafios do grupo.', 'legendary', 'triforce',
+     _p('mp_tiers', 24)),
+    ('platina', 'Lenda de Hyrule', 'Desbloqueie todas as outras conquistas (as de multijogador ficam de fora).',
+     'platinum', 'triforce', {'kind': 'all'}),
 ]
 
 
@@ -543,11 +581,29 @@ def _emblem(name):
     if name == 'flag':
         return union(P([(-0.5, -0.8), (-0.38, -0.8), (-0.38, 0.85), (-0.5, 0.85)]),
                      P([(-0.38, -0.8), (0.6, -0.55), (-0.38, -0.25)]))
+    if name == 'group':   # three people: a head over rounded shoulders, the middle one in front
+        person = lambda cx, cy, k: union(C(cx, cy - 0.3 * k, 0.2 * k),
+                                         minus(C(cx, cy + 0.32 * k, 0.4 * k), P([(cx - 1, cy + 0.36 * k),
+                                                                                 (cx + 1, cy + 0.36 * k),
+                                                                                 (cx + 1, cy + 2), (cx - 1, cy + 2)])))
+        side = union(person(-0.48, -0.05, 0.85), person(0.48, -0.05, 0.85))
+        return union(minus(side, C(0, 0.12, 0.5)), person(0, 0.12, 1.0))
+    if name == 'chat':   # a speech bubble with three dots cut out
+        bubble = union(P([(-0.78, -0.6), (0.78, -0.6), (0.78, 0.3), (-0.2, 0.3), (-0.5, 0.72), (-0.42, 0.3),
+                          (-0.78, 0.3)]))
+        return minus(bubble, union(C(-0.36, -0.15, 0.11), C(0, -0.15, 0.11), C(0.36, -0.15, 0.11)))
+    if name == 'voice':   # a microphone on its stand
+        head = union(C(0, -0.42, 0.26), P([(-0.26, -0.42), (0.26, -0.42), (0.26, 0.05), (-0.26, 0.05)]),
+                     C(0, 0.05, 0.26))
+        cup = minus(ring(0, 0.0, 0.4, 0.5), P([(-1, -1), (1, -1), (1, 0.0), (-1, 0.0)]))
+        return union(head, cup, P([(-0.05, 0.48), (0.05, 0.48), (0.05, 0.75), (-0.05, 0.75)]),
+                     P([(-0.32, 0.72), (0.32, 0.72), (0.32, 0.82), (-0.32, 0.82)]))
     return C(0, 0, 0.5)
 
 
 EMBLEMS = ('triforce', 'shrine', 'tower', 'root', 'gem', 'rupee', 'leaf', 'heart', 'stamina', 'sword', 'map', 'chest',
-           'tear', 'sages', 'feather', 'flame', 'wave', 'bolt', 'mask', 'horse', 'fairy', 'camera', 'flag', 'armor')
+           'tear', 'sages', 'feather', 'flame', 'wave', 'bolt', 'mask', 'horse', 'fairy', 'camera', 'flag', 'armor',
+           'group', 'chat', 'voice')
 ICON = 128
 
 
@@ -792,6 +848,9 @@ def resolve(cond, gd, lists):
         return ('count', lid, str(int(cond['min'])), f'{value:08x}', '')
     if k == 'all':
         return ('all', '', '', '', '')
+    if k == 'mp':   # b: the counter's minimum; c: what one shown unit is in it (minutes in seconds, say)
+        unit = PRESETS.get(cond.get('preset'), {}).get('unit', 1)
+        return ('mp', cond['counter'], str(int(cond['min'])), str(unit), '')
     raise CompileError(f'unknown condition kind {k}')
 
 
@@ -934,7 +993,10 @@ def progress(items, lists, save, unlocked=()):
                     if d[off + 4 + 64 * i:off + 4 + 64 * (i + 1)].split(b'\0')[0].decode() == a['d']:
                         have += max(0, stock[i])
             out[a['id']] = (have, int(a['c']))
-    others = [a['id'] for a in items if a['kind'] != 'all']
+    for a in items:
+        if a['kind'] == 'mp':   # counted by the game in rooms, not in the save
+            out[a['id']] = (0, int(a['b']))
+    others = [a['id'] for a in items if a['kind'] not in ('all', 'mp')]
     done = sum(1 for i in others if i in unlocked or out[i][0] >= out[i][1])
     for a in items:
         if a['kind'] == 'all':

@@ -10,7 +10,8 @@
 #include "platform/platform.h"
 
 // The condition kinds of compiled.tsv (tools/achievements.py resolve).
-enum { K_BOOL, K_ENUM, K_NUM, K_ARRSUM, K_COUNT, K_POUCH, K_ALL };
+// K_MP: a multiplayer counter (ach_mp_add / ach_mp_max), not a save flag; outside the platinum, inside 100 %.
+enum { K_BOOL, K_ENUM, K_NUM, K_ARRSUM, K_COUNT, K_POUCH, K_ALL, K_MP };
 
 typedef struct {
     char *id, *name, *desc, *item;
@@ -43,7 +44,12 @@ static HashList *lists;
 static int nlists;
 static PlatMutex lock = PLAT_MUTEX_INIT;
 static PlatOnce load_once = PLAT_ONCE_INIT;
-static char unlocked_path[1100], state_path[1100];
+static char unlocked_path[1100], state_path[1100], mp_path[1100];
+
+// The multiplayer counters K_MP conditions read (<profile>/achievements-mp.tsv): what net_mp.c counts in rooms.
+enum { MP_COUNTERS = 32 };
+static struct { char name[32]; double v; } mp_counter[MP_COUNTERS];
+static int n_mp_counters;
 
 // The saves this game wrote: a fingerprint (FNV-1a, 64-bit) of each slot's progress.sav after every commit, kept in
 // <profile>/achievements-state.tsv with the blocked achievements. A slot that differs at start was replaced while the
@@ -96,7 +102,7 @@ static int rarity_of(const char *s) {
 }
 
 static int kind_of(const char *s) {
-    static const char *const names[] = {"bool", "enum", "num", "arrsum", "count", "pouch", "all"};
+    static const char *const names[] = {"bool", "enum", "num", "arrsum", "count", "pouch", "all", "mp"};
     for (int i = 0; i < (int)(sizeof names / sizeof *names); i++)
         if (!strcmp(s, names[i])) return i;
     return -1;
@@ -141,6 +147,37 @@ static void save_unlocked(void) {
             n += snprintf(out + n, cap - n, "%s\t%lld\n", achs[i].id, (long long)achs[i].when);
     if (!plat_file_write_atomic(unlocked_path, out, n)) rt_log("achievements: cannot write %s", unlocked_path);
     free(out);
+}
+
+static double *mp_slot(const char *name, int create) {
+    for (int i = 0; i < n_mp_counters; i++)
+        if (!strcmp(mp_counter[i].name, name)) return &mp_counter[i].v;
+    if (!create || n_mp_counters == MP_COUNTERS) return NULL;
+    snprintf(mp_counter[n_mp_counters].name, sizeof mp_counter[0].name, "%s", name);
+    mp_counter[n_mp_counters].v = 0;
+    return &mp_counter[n_mp_counters++].v;
+}
+
+static void load_mp(void) {
+    uint64_t size = 0;
+    char *text = (char *)plat_file_read(mp_path, &size);
+    if (!text) return;
+    char *pos = text;
+    for (char *line; (line = next_line(&pos));) {
+        char *f[3];
+        if (*line == '#' || split(line, f, 3) < 2) continue;
+        double *v = mp_slot(f[0], 1);
+        if (v) *v = atof(f[1]);
+    }
+    free(text);
+}
+
+static void save_mp(void) {
+    char out[64 + MP_COUNTERS * 64];
+    size_t n = (size_t)snprintf(out, sizeof out, "# multiplayer counter, value (runtime/achievements.c ach_mp_add)\n");
+    for (int i = 0; i < n_mp_counters && n < sizeof out; i++)
+        n += (size_t)snprintf(out + n, sizeof out - n, "%s\t%.1f\n", mp_counter[i].name, mp_counter[i].v);
+    if (!plat_file_write_atomic(mp_path, out, n)) rt_log("achievements: cannot write %s", mp_path);
 }
 
 static void load_state(void) {
@@ -221,6 +258,10 @@ static int parse_condition(Ach *a, char **f) {
         a->a = (uint32_t)strtoul(f[4], NULL, 16), a->b = (uint32_t)strtoul(f[5], NULL, 16), a->min = atof(f[6]);
         a->item = dup_str(f[7]);
         break;
+    case K_MP:   // mp counter min unit
+        a->item = dup_str(f[4]), a->min = atof(f[5]);
+        a->unit = atof(f[6]) > 0 ? atof(f[6]) : 1;
+        break;
     }
     return 1;
 }
@@ -231,6 +272,7 @@ static void load(void *arg) {
     exe_dir(dir, sizeof dir);
     snprintf(tsv, sizeof tsv, "%sachievements/compiled.tsv", dir);
     snprintf(unlocked_path, sizeof unlocked_path, "%s/achievements.tsv", rt_config()->profile);
+    snprintf(mp_path, sizeof mp_path, "%s/achievements-mp.tsv", rt_config()->profile);
     snprintf(state_path, sizeof state_path, "%s/achievements-state.tsv", rt_config()->profile);
     uint64_t size = 0;
     char *text = (char *)plat_file_read(tsv, &size);
@@ -291,11 +333,17 @@ static void load(void *arg) {
             achs[i].kind = -1;
         }
     int others = 0;
-    for (int i = 0; i < nach; i++) others += achs[i].kind != K_ALL;
+    for (int i = 0; i < nach; i++) others += achs[i].kind != K_ALL && achs[i].kind != K_MP;
     for (int i = 0; i < nach; i++)
         if (achs[i].kind == K_ALL) achs[i].min = others;
     load_unlocked();
     load_state();
+    load_mp();
+    for (int i = 0; i < nach; i++)
+        if (achs[i].kind == K_MP) {
+            double *v = mp_slot(achs[i].item, 0);
+            achs[i].cur = v ? *v : 0;
+        }
     int done = 0;
     for (int i = 0; i < nach; i++) done += achs[i].unlocked;
     rt_log("achievements: %d loaded from %s, %d unlocked before", nach, tsv, done);
@@ -430,6 +478,23 @@ static int newest_progress(const char *save_dir, char *out, size_t cap) {
 
 // trusted: the newest save is one this game wrote (a commit just now, or the save at start matching the fingerprints);
 // otherwise what it already holds is blocked instead of unlocked.
+// Under lock: the fresh unlocks to the menu's notices and to the room.
+static void announce(const int *fresh, int nfresh) {
+    for (int k = 0; k < nfresh; k++) {
+        int next = (notice_tail + 1) % NOTICE_CAP;
+        if (next == notice_head) break;
+        notice[notice_tail] = fresh[k], notice_batch[notice_tail] = nfresh;
+        notice_tail = next;
+        rt_log("achievements: unlocked %s (%s)", achs[fresh[k]].id, achs[fresh[k]].name);
+    }
+    for (int k = 0; k < nfresh; k++) {
+        int next = (net_tail + 1) % NOTICE_NET_CAP;
+        if (next == net_head) break;
+        net_unlock[net_tail] = fresh[k];
+        net_tail = next;
+    }
+}
+
 static void evaluate(const char *save_dir, int trusted) {
     char path[1200];
     if (!newest_progress(save_dir, path, sizeof path)) return;
@@ -442,7 +507,8 @@ static void evaluate(const char *save_dir, int trusted) {
     }
     double vals[1024];
     int n = nach < 1024 ? nach : 1024;
-    for (int i = 0; i < n; i++) vals[i] = achs[i].kind == K_ALL || achs[i].kind < 0 ? 0 : value_of(&achs[i], &s);
+    for (int i = 0; i < n; i++)
+        vals[i] = achs[i].kind == K_ALL || achs[i].kind == K_MP || achs[i].kind < 0 ? 0 : value_of(&achs[i], &s);
     double stat_vals[ACH_STATS];
     for (int k = 0; k < ACH_STATS; k++) stat_vals[k] = stat_found[k] ? value_of(&stats[k], &s) / stats[k].unit : 0;
     save_free(&s);
@@ -454,7 +520,7 @@ static void evaluate(const char *save_dir, int trusted) {
     stats_gen++;
     for (int i = 0; i < n; i++) {
         Ach *a = &achs[i];
-        if (a->kind == K_ALL || a->kind < 0) continue;
+        if (a->kind == K_ALL || a->kind == K_MP || a->kind < 0) continue;
         a->cur = vals[i];
         others++;
         int done = vals[i] >= a->min;
@@ -478,19 +544,7 @@ static void evaluate(const char *save_dir, int trusted) {
             fresh[nfresh++] = i;
         }
     }
-    for (int k = 0; k < nfresh; k++) {
-        int next = (notice_tail + 1) % NOTICE_CAP;
-        if (next == notice_head) break;
-        notice[notice_tail] = fresh[k], notice_batch[notice_tail] = nfresh;
-        notice_tail = next;
-        rt_log("achievements: unlocked %s (%s)", achs[fresh[k]].id, achs[fresh[k]].name);
-    }
-    for (int k = 0; k < nfresh; k++) {   // and to the room
-        int next = (net_tail + 1) % NOTICE_NET_CAP;
-        if (next == net_head) break;
-        net_unlock[net_tail] = fresh[k];
-        net_tail = next;
-    }
+    announce(fresh, nfresh);
     if (nfresh) save_unlocked();
     if (blocked) rt_log("achievements: the save at start was not written by this game here; %d achievements it already "
                         "holds do not unlock until they are earned again", blocked);
@@ -529,6 +583,34 @@ void ach_save_opened(const char *save_dir) {
     remember_slots(save_dir);
 }
 
+// A multiplayer counter changed: its K_MP achievements unlock at once. max: keep the larger value instead of adding.
+static void mp_update(const char *name, double v, int max) {
+    ensure_loaded();
+    if (!nach) return;   // no achievements loaded: the counters file was not read either, so it is left alone
+    plat_mutex_lock(&lock);
+    double *c = mp_slot(name, 1);
+    if (!c || (max && v <= *c) || (!max && v == 0)) {
+        plat_mutex_unlock(&lock);
+        return;
+    }
+    *c = max ? v : *c + v;
+    int fresh[64], nfresh = 0;
+    int64_t now = (int64_t)time(NULL);
+    for (int i = 0; i < nach && nfresh < 64; i++) {
+        Ach *a = &achs[i];
+        if (a->kind != K_MP || strcmp(a->item, name)) continue;
+        a->cur = *c;
+        if (!a->unlocked && a->cur >= a->min) a->unlocked = 1, a->when = now, fresh[nfresh++] = i;
+    }
+    announce(fresh, nfresh);
+    if (nfresh) save_unlocked();
+    save_mp();
+    plat_mutex_unlock(&lock);
+}
+
+void ach_mp_add(const char *name, double delta) { mp_update(name, delta, 0); }
+void ach_mp_max(const char *name, double value) { mp_update(name, value, 1); }
+
 int ach_count(void) {
     ensure_loaded();
     return nach;
@@ -541,7 +623,8 @@ int ach_get(int i, AchView *out) {
     const Ach *a = &achs[i];
     double unit = a->unit > 0 ? a->unit : 1;
     *out = (AchView){a->id, a->name, a->desc, a->rarity, a->hidden, a->unlocked, a->blocked, a->when,
-                     a->unlocked && a->cur < a->min ? a->min / unit : a->cur / unit, a->min / unit, a->icon};
+                     a->unlocked && a->cur < a->min ? a->min / unit : a->cur / unit, a->min / unit, a->icon,
+                     a->kind == K_MP};
     plat_mutex_unlock(&lock);
     return 1;
 }

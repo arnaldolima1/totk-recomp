@@ -59,12 +59,23 @@ space. Nothing is encrypted or authenticated beyond the room's password: rooms a
 | room | `ACH` | player, achievement id, name, rarity |
 | room | `VOICE` | player, the frame as received (to everyone but its sender) |
 | room | `EVENT` | kind (`join`, `leave`, `challenge`), text |
-| room | `CHALLENGE` | figure (or `done`), the room's total, target, text |
+| room | `CHALLENGES` | count, then per track: figure, the room's total, tiers reached, four targets |
+| room | `CHALLENGE` | figure (or `done`), the room's total, target, text (the closest tier, for older games) |
 | room | `PONG` | |
 
 The room keeps, per player name, the best figures each has reported; a group challenge counts the sum of those, so a
-player leaving does not undo the room's progress. The challenges go in order (`tools/mp_server.py` `CHALLENGES`) and the
-room's place in them is kept in `%APPDATA%/TotK Recomp/mp_room.json`.
+player leaving does not undo the room's progress. There is one track per figure with four tiers (bronze, silver, gold,
+legendary; `tools/mp_server.py` `TRACKS`), 24 challenges that advance together; `CHALLENGES` sends every track (figure,
+the room's total, tiers reached, the four targets) and `CHALLENGE` the one closest to done for games from before the
+tracks. The tiers reached are kept in `%APPDATA%/TotK Recomp/mp_room.json`.
+
+## Multiplayer achievements
+
+The game counts what happens in rooms (`runtime/net_mp.c`): rooms joined, the most players together, chat lines sent,
+seconds of voice sent, minutes in a room with friends, friends' unlocks seen, its own unlocks with friends in the room,
+and the group tiers reached. The counters live in `<profile>/achievements-mp.tsv`; achievements over them (condition
+kind `mp`, `tools/achievements.py` presets `mp_*`) unlock at once, stay outside the platinum and count for 100 %. The
+default set has eleven.
 
 `runtime/net_mp.c` runs the game's side on a thread of its own: it connects, sends `STATUS` after each evaluated save
 and `ACH` for each unlock (`ach_take_net_unlock`), relays the menu's chat, pings, and reconnects every 5 s after a lost

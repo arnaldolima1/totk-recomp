@@ -199,6 +199,7 @@ static void on_line(char *line, Sock s) {
     if (!strcmp(f[0], "WELCOME") && n >= 3) {
         view.state = MP_CONNECTED;
         voice_connected(1);
+        ach_mp_add("rooms", 1);
         field(view.room, sizeof view.room, f[2]);
         view.error[0] = 0;
     } else if (!strcmp(f[0], "ERROR") && n >= 3) {
@@ -214,10 +215,28 @@ static void on_line(char *line, Sock s) {
             for (int k = 0; k < MP_STATS; k++) p->stats[k] = atoi(f[at + 2 + k]);
             at += 2 + MP_STATS;
         }
+        ach_mp_max("players", view.nplayers);
+    } else if (!strcmp(f[0], "CHALLENGES") && n >= 2) {   // CHALLENGES count (stat total done t1 t2 t3 t4)...
+        static const char *const stat_names[MP_STATS] = {"shrines", "lightroots", "towers", "koroks", "hearts",
+                                                         "achievements"};
+        int count = atoi(f[1]), at = 2, tiers = 0;
+        view.ntracks = 0;
+        for (int i = 0; i < count && view.ntracks < MP_TRACKS && at + 3 + MP_TIERS <= n; i++, at += 3 + MP_TIERS) {
+            int stat = -1;
+            for (int k = 0; k < MP_STATS; k++)
+                if (!strcmp(f[at], stat_names[k])) stat = k;
+            if (stat < 0) continue;
+            MpTrack *t = &view.tracks[view.ntracks++];
+            t->stat = stat, t->total = atoi(f[at + 1]), t->done = atoi(f[at + 2]);
+            for (int k = 0; k < MP_TIERS; k++) t->target[k] = atoi(f[at + 3 + k]);
+            tiers += t->done;
+        }
+        ach_mp_max("tiers", tiers);
     } else if (!strcmp(f[0], "CHAT") && n >= 3) {
         add_line(MP_LINE_CHAT, f[1], f[2], "", "", strcmp(f[1], me) != 0);   // the room echoes our own lines
     } else if (!strcmp(f[0], "ACH") && n >= 5) {   // ACH from id name rarity
         add_line(MP_LINE_ACH, f[1], f[3], f[2], f[4], 1);
+        if (strcmp(f[1], me)) ach_mp_add("friend_unlocks", 1);
     } else if (!strcmp(f[0], "EVENT") && n >= 3) {
         add_line(MP_LINE_EVENT, "", f[2], "", "", 1);
     } else if (!strcmp(f[0], "CHALLENGE") && n >= 5) {
@@ -258,12 +277,14 @@ static void session(const char *server) {
     }
     plat_mutex_lock(&lock);
     room_name(me, sizeof me, name);
+    snprintf(view.me, sizeof view.me, "%s", me);
     plat_mutex_unlock(&lock);
     rt_log("mp: connected to %s as %s", server, name);
     unsigned sent_gen = 0, ver = cfg_version();
     char settings[512], now_settings[512];
     conn_settings(settings, sizeof settings);
-    uint64_t last_ping = plat_now_ms();
+    uint64_t last_ping = plat_now_ms(), minute_at = 0;
+    int voice_frames = 0;
     char buf[16384];
     size_t have = 0;
     int alive = 1;
@@ -295,10 +316,15 @@ static void session(const char *server) {
             if (have >= sizeof buf - 1) have = 0;   // an overlong line: dropped
         }
         plat_mutex_lock(&lock);
-        int refused = view.state == MP_REFUSED, joined = view.state == MP_CONNECTED;
+        int refused = view.state == MP_REFUSED, joined = view.state == MP_CONNECTED, others = view.nplayers - 1;
         plat_mutex_unlock(&lock);
         if (refused) break;
         if (!joined) continue;
+        if (!minute_at) minute_at = plat_now_ms();
+        if (plat_now_ms() - minute_at >= 60000) {   // time in the room, for the multiplayer achievements
+            minute_at += 60000;
+            if (others > 0) ach_mp_add("minutes", 1);
+        }
         AchStats st;   // the progress after each evaluated save
         unsigned gen = ach_stats(&st);
         if (gen && gen != sent_gen) {
@@ -314,6 +340,7 @@ static void session(const char *server) {
             if (!ach_get(idx, &a)) continue;
             const char *ach[] = {"ACH", a.id, a.name, rarity_name(a.rarity)};
             alive = send_line(s, 4, ach);
+            if (others > 0 && !a.multiplayer) ach_mp_add("group_unlocks", 1);   // earned with friends in the room
         }
         for (;;) {
             char text[320];
@@ -327,6 +354,7 @@ static void session(const char *server) {
             if (!any || !alive) break;
             const char *chat[] = {"CHAT", text};
             alive = send_line(s, 2, chat);
+            ach_mp_add("chat", 1);
         }
         uint8_t pkt[VOICE_PACKET_MAX];
         for (int len; alive && (len = voice_take_packet(pkt, sizeof pkt)) > 0;) {
@@ -335,6 +363,10 @@ static void session(const char *server) {
             size_t k = 6 + b64_encode(vline + 6, pkt, (size_t)len);
             vline[k++] = '\n';
             alive = send_all(s, vline, k);
+            if (++voice_frames == 50) {   // a second of voice sent
+                voice_frames = 0;
+                ach_mp_add("voice", 1);
+            }
         }
         if (alive && plat_now_ms() - last_ping > PING_MS) {
             const char *ping[] = {"PING"};

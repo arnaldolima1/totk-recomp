@@ -7,8 +7,9 @@ What it does (runtime/net_mp.c is the game's side; docs/multiplayer.md the proto
 - keeps the list of players in the room with the progress each game reports after its saves (shrines, lightroots,
   towers, Korok seeds, hearts, achievements);
 - relays chat messages and achievement unlocks to everyone;
-- keeps a scoreboard and the room's group challenge: a target the players reach together (shrines done by the whole
-  room, say), announced to everyone when it is reached.
+- keeps a scoreboard and the room's group challenges: six tracks of four tiers the players reach together (shrines
+  done by the whole room, say), each tier announced to everyone when it is reached;
+- relays voice frames to everyone but their sender.
 
 The protocol is UTF-8 text over TCP, one message per line, fields separated by tabs (a tab or a line break inside a
 field is sent as a space). Nothing is encrypted: it is for friends, not for strangers on the internet.
@@ -27,17 +28,17 @@ PROTOCOL = 1
 STATS = ('shrines', 'lightroots', 'towers', 'koroks', 'hearts', 'achievements')
 MAX_LINE = 4096
 MAX_PLAYERS = 32
-# Group challenges: (stat, target over the room's sum, Portuguese text). The room goes through them in order.
-CHALLENGES = [
-    ('shrines', 10, 'Juntos, concluam 10 santuários'),
-    ('lightroots', 15, 'Juntos, acendam 15 raízes de luz'),
-    ('towers', 10, 'Juntos, ativem 10 torres'),
-    ('shrines', 50, 'Juntos, concluam 50 santuários'),
-    ('koroks', 100, 'Juntos, juntem 100 sementes de Korok'),
-    ('lightroots', 60, 'Juntos, acendam 60 raízes de luz'),
-    ('achievements', 60, 'Juntos, desbloqueiem 60 conquistas'),
-    ('shrines', 152, 'Juntos, concluam 152 santuários'),
+# Group challenges: one track per figure, four tiers each (bronze, silver, gold, legendary) over the room's sum of
+# the best each player reported. Every track advances at once; the game names the tiers in its own language.
+TRACKS = [
+    ('shrines', (20, 60, 152, 300), 'santuários'),
+    ('lightroots', (15, 45, 120, 240), 'raízes de luz'),
+    ('towers', (5, 10, 15, 30), 'torres'),
+    ('koroks', (100, 300, 800, 1600), 'sementes de Korok'),
+    ('hearts', (20, 40, 80, 120), 'corações'),
+    ('achievements', (10, 30, 60, 120), 'conquistas'),
 ]
+TIERS = ('Bronze', 'Prata', 'Ouro', 'Lendário')
 
 
 def clean(s):
@@ -63,7 +64,7 @@ class Room:
         self.name, self.password = name, password
         self.players = []
         self.state_path = state_path
-        self.state = {'challenge': 0, 'best': {}}
+        self.state = {'tiers': {}, 'best': {}}
         if state_path and state_path.is_file():
             try:
                 self.state.update(json.loads(state_path.read_text(encoding='utf-8')))
@@ -95,16 +96,29 @@ class Room:
                 out += [p.name, p.place] + [str(p.stats[k]) for k in STATS]
         return line(*out)
 
+    def total(self, stat):
+        # the best each player has reported, so leaving the room keeps the group's progress
+        return sum(v.get(stat, 0) for v in self.state['best'].values())
+
+    def challenges_line(self):
+        """CHALLENGES count, then per track: figure, the room's total, tiers done, the four targets."""
+        out = ['CHALLENGES', str(len(TRACKS))]
+        for stat, targets, _ in TRACKS:
+            out += [stat, str(self.total(stat)), str(self.state['tiers'].get(stat, 0))] + [str(t) for t in targets]
+        return line(*out)
+
     def challenge_line(self):
-        i = self.state['challenge']
-        if i >= len(CHALLENGES):
+        """The one challenge a game from before the tracks shows: the unfinished tier closest to done."""
+        best = None
+        for stat, targets, noun in TRACKS:
+            done = self.state['tiers'].get(stat, 0)
+            if done < len(targets):
+                k = self.total(stat) / targets[done]
+                if best is None or k > best[0]:
+                    best = (k, stat, targets[done], f'Juntos, {targets[done]} {noun}')
+        if best is None:
             return line('CHALLENGE', 'done', '0', '0', 'Todos os desafios do grupo foram concluídos!')
-        stat, target, text = CHALLENGES[i]
-        total = sum(p.stats[stat] for p in self.players if p.name)
-        # the best each player has reported counts too, so leaving the room keeps the group's progress
-        best = self.state['best']
-        total = max(total, sum(v.get(stat, 0) for v in best.values()))
-        return line('CHALLENGE', stat, str(total), str(target), text)
+        return line('CHALLENGE', best[1], str(self.total(best[1])), str(best[2]), best[3])
 
     async def progress_changed(self):
         best = self.state['best']
@@ -113,14 +127,16 @@ class Room:
                 b = best.setdefault(p.name, {})
                 for k in STATS:
                     b[k] = max(b.get(k, 0), p.stats[k])
-        while self.state['challenge'] < len(CHALLENGES):
-            stat, target, text = CHALLENGES[self.state['challenge']]
-            if sum(v.get(stat, 0) for v in best.values()) < target:
-                break
-            self.state['challenge'] += 1
-            await self.broadcast(line('EVENT', 'challenge', f'Desafio do grupo concluído: {text}!'))
+        tiers = self.state['tiers']
+        for stat, targets, noun in TRACKS:
+            while tiers.get(stat, 0) < len(targets) and self.total(stat) >= targets[tiers.get(stat, 0)]:
+                k = tiers.get(stat, 0)
+                tiers[stat] = k + 1
+                await self.broadcast(line('EVENT', 'challenge',
+                                          f'Desafio do grupo concluído: {TIERS[k]} de {noun} ({targets[k]})!'))
         self.save()
         await self.broadcast(self.roster())
+        await self.broadcast(self.challenges_line())
         await self.broadcast(self.challenge_line())
 
 

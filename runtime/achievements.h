@@ -24,6 +24,7 @@ typedef struct {
     int64_t when;          // unix time of the unlock, 0 when locked
     double cur, target;    // progress in shown units (target 1 for a yes/no condition)
     const uint8_t *icon;   // ACH_ICON * ACH_ICON * 4 bytes, NULL when the file is missing
+    int multiplayer;       // a multiplayer achievement: outside the platinum, inside 100 %
 } AchView;
 
 // The save storage's newest save directory (save/<uid> or the finished commit in save-tx): after a commit, or once at
@@ -44,6 +45,11 @@ typedef struct {
 unsigned ach_stats(AchStats *out);   // returns a count that grows with every evaluation (0: no save read yet)
 int ach_take_net_unlock(void);       // the next unlock to tell the room (an index for ach_get), -1 when none
 int ach_find(const char *id);        // the index of an achievement id, -1 when this install has none
+
+// Multiplayer counters (net_mp.c): what happens in rooms, kept in <profile>/achievements-mp.tsv; the multiplayer
+// achievements over them unlock at once. add: count up by delta; max: the largest value seen.
+void ach_mp_add(const char *name, double delta);
+void ach_mp_max(const char *name, double value);
 
 int ach_count(void);                 // achievements loaded (0 without compiled.tsv); loads them on the first call
 int ach_get(int i, AchView *out);    // 1 when i is in range; the strings live until exit
