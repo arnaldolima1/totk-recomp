@@ -11,11 +11,11 @@ typedef enum {
     UI_SWKBD_CANCEL,
     UI_SWKBD_PAD_HINT,       // how a controller answers
 
-    // Menu: window, tabs, bottom row. UI_MENU_FIRST..UI_MENU_LAST_ID carry English, Russian and Brazilian
-    // Portuguese texts.
+    // Menu: window, tabs, bottom row. UI_MENU_FIRST..UI_MENU_LAST_ID carry English, Russian, Brazilian Portuguese and
+    // Simplified Chinese texts.
     UI_MENU_FIRST,
     UI_MENU_TITLE = UI_MENU_FIRST,
-    UI_MENU_TAB_SCREEN, UI_MENU_TAB_GAME, UI_MENU_TAB_SOUND, UI_MENU_TAB_CONTROLS, UI_MENU_TAB_AMIIBO,
+    UI_MENU_TAB_SCREEN, UI_MENU_TAB_GAME, UI_MENU_TAB_MODS, UI_MENU_TAB_SOUND, UI_MENU_TAB_CONTROLS, UI_MENU_TAB_AMIIBO,
     UI_MENU_TAB_MENU, UI_MENU_TAB_ADVANCED,
     UI_MENU_CONTINUE, UI_MENU_QUIT,
     UI_MENU_ON, UI_MENU_OFF, UI_MENU_AUTO, UI_MENU_DEFAULT_MARK,      // "default" beside the default value
@@ -33,8 +33,6 @@ typedef enum {
     UI_MENU_GPU, UI_MENU_GPU_DESC, UI_MENU_GPU_AUTO,
     UI_MENU_SHADER_TOAST, UI_MENU_SHADER_TOAST_DESC,
     UI_MENU_TOAST_SHADERS,    // the notice itself: "Compiling shaders (%u)"
-    // the Amiibo tab (ui/amiibo_page.cpp)
-    UI_MENU_AMIIBO_DIR, UI_MENU_AMIIBO_SET_DIR, UI_MENU_AMIIBO_DEFAULT_DIR, UI_MENU_AMIIBO_REFRESH, UI_MENU_AMIIBO_PICK, UI_MENU_AMIIBO_FOLDER, UI_MENU_AMIIBO_ACTIONS, UI_MENU_AMIIBO_READER, UI_MENU_AMIIBO_IDLE, UI_MENU_AMIIBO_SEARCHING, UI_MENU_AMIIBO_FOUND, UI_MENU_AMIIBO_MOUNTED, UI_MENU_AMIIBO_DISABLED, UI_MENU_AMIIBO_SELECTED, UI_MENU_AMIIBO_SCAN, UI_MENU_AMIIBO_NONE_SELECTED, UI_MENU_AMIIBO_REMOVE, UI_MENU_AMIIBO_AUTO_REMOVE, UI_MENU_AMIIBO_HOLD, UI_MENU_AMIIBO_INFO, UI_MENU_AMIIBO_NO_TAG, UI_MENU_AMIIBO_STATUS, UI_MENU_AMIIBO_READY, UI_MENU_AMIIBO_CANNOT_OPEN, UI_MENU_AMIIBO_TAPPED, UI_MENU_AMIIBO_LOAD_ERROR, UI_MENU_AMIIBO_REMOVED,
     // the Multiplayer tab (net_mp.c)
     UI_MENU_TAB_MULTIPLAYER, UI_MENU_MP_INTRO, UI_MENU_MP_NAME, UI_MENU_MP_SERVER, UI_MENU_MP_PASSWORD, UI_MENU_MP_CONNECT, UI_MENU_MP_DISCONNECT, UI_MENU_MP_STATE_OFF, UI_MENU_MP_STATE_CONNECTING, UI_MENU_MP_STATE_CONNECTED, UI_MENU_MP_STATE_RETRYING, UI_MENU_MP_STATE_REFUSED, UI_MENU_MP_COL_NAME, UI_MENU_MP_COL_SHRINES, UI_MENU_MP_COL_LIGHTROOTS, UI_MENU_MP_COL_TOWERS, UI_MENU_MP_COL_KOROKS, UI_MENU_MP_COL_HEARTS, UI_MENU_MP_COL_ACH, UI_MENU_MP_CHALLENGE, UI_MENU_MP_CHALLENGES_DONE, UI_MENU_MP_CHAT, UI_MENU_MP_SEND, UI_MENU_MP_FRIEND_ACH, UI_MENU_MP_NOBODY, UI_MENU_VOICE_GROUP, UI_MENU_MP_CHAT_KEY, UI_MENU_MP_CHAT_KEY_DESC, UI_MENU_MP_VOICE, UI_MENU_MP_VOICE_DESC, UI_MENU_MP_VOICE_MODE, UI_MENU_MP_VOICE_MODE_DESC, UI_MENU_MP_VOICE_PUSH, UI_MENU_MP_VOICE_OPEN, UI_MENU_MP_VOICE_KEY, UI_MENU_MP_VOICE_KEY_DESC, UI_MENU_MP_VOICE_VOL, UI_MENU_MP_VOICE_VOL_DESC, UI_MENU_MP_HINT_PUSH, UI_MENU_MP_HINT_OPEN, UI_MENU_MP_HINT_NOVOICE, UI_MENU_MP_MIC, UI_MENU_MP_NO_MIC, UI_MENU_MP_TALKING, UI_MENU_MP_CHAT_BOX_HINT, UI_MENU_ACH_PLATINUM_PROGRESS, UI_MENU_ACH_FULL_PROGRESS, UI_MENU_ACH_MP_TAG, UI_MENU_MP_PILL_ON, UI_MENU_MP_PILL_TRYING, UI_MENU_MP_PILL_OFF, UI_MENU_MP_PLAYERS_COUNT, UI_MENU_MP_SUB_PLAYERS, UI_MENU_MP_SUB_CHALLENGES, UI_MENU_MP_SUB_ACH, UI_MENU_MP_SUB_CHAT, UI_MENU_MP_SUB_ROOM, UI_MENU_MP_YOU, UI_MENU_MP_TIER_1, UI_MENU_MP_TIER_2, UI_MENU_MP_TIER_3, UI_MENU_MP_TIER_4, UI_MENU_MP_TRACK_NEXT, UI_MENU_MP_TRACK_DONE, UI_MENU_MP_TIERS_TOTAL, UI_MENU_MP_ACH_NOTE, UI_MENU_MP_RADAR, UI_MENU_MP_RADAR_DESC, UI_MENU_MP_MARK_KEY, UI_MENU_MP_MARK_KEY_DESC, UI_MENU_MP_LAYER_SURFACE, UI_MENU_MP_LAYER_SKY, UI_MENU_MP_LAYER_DEPTHS, UI_MENU_MP_HINT_MARK, UI_MENU_MP_MARK_PLACED,
     UI_MENU_ACH_POPUP, UI_MENU_ACH_POPUP_DESC, UI_MENU_ACH_SOUND, UI_MENU_ACH_SOUND_DESC,
@@ -51,8 +49,8 @@ typedef enum {
     UI_MENU_UPSCALER, UI_MENU_UPSCALER_DESC, UI_MENU_UPSCALER_FSR, UI_MENU_UPSCALER_BILINEAR,
     UI_MENU_ASPECT, UI_MENU_ASPECT_DESC, UI_MENU_ASPECT_FIT, UI_MENU_ASPECT_STRETCH,
     UI_MENU_FOV, UI_MENU_FOV_DESC,
-    UI_MENU_ANISO, UI_MENU_ANISO_DESC, UI_MENU_ANISO_GAME,
     UI_MENU_SHADOW_RES, UI_MENU_SHADOW_RES_DESC, UI_MENU_SHADOW_RES_GAME,
+    UI_MENU_ANISO, UI_MENU_ANISO_DESC, UI_MENU_ANISO_GAME,
     UI_MENU_SHARPNESS, UI_MENU_SHARPNESS_DESC,
     UI_MENU_COLOR,            // group heading over the colour rows
     UI_MENU_COLOR_PRESET, UI_MENU_COLOR_PRESET_DESC, UI_MENU_COLOR_DEFAULT, UI_MENU_COLOR_VIVID, UI_MENU_COLOR_CLARITY,
@@ -62,6 +60,12 @@ typedef enum {
     UI_MENU_HDR_GROUP,        // group heading over the HDR rows
     UI_MENU_HDR, UI_MENU_HDR_DESC, UI_MENU_HDR_PEAK, UI_MENU_HDR_PEAK_DESC, UI_MENU_HDR_GAME, UI_MENU_HDR_GAME_DESC,
     UI_MENU_HDR_UI, UI_MENU_HDR_UI_DESC,
+    UI_MENU_SHADOW_SCALE, UI_MENU_SHADOW_SCALE_DESC,
+    UI_MENU_SHADOW_RANGE, UI_MENU_SHADOW_RANGE_DESC,
+    UI_MENU_CONTACT_SHADOWS, UI_MENU_CONTACT_SHADOWS_DESC,
+    UI_MENU_PCSS, UI_MENU_PCSS_DESC,
+    UI_MENU_DLAA, UI_MENU_DLAA_DESC, UI_MENU_DLSS, UI_MENU_DLSS_DESC, UI_MENU_DLSS_DLAA, UI_MENU_DLSS_QUALITY,
+    UI_MENU_DLSS_BALANCED, UI_MENU_DLSS_PERFORMANCE, UI_MENU_FXAA, UI_MENU_FXAA_DESC,
 
     // Game
     UI_MENU_FPS_LIMIT, UI_MENU_FPS_LIMIT_DESC, UI_MENU_FPS_30, UI_MENU_FPS_40, UI_MENU_FPS_45, UI_MENU_FPS_60, UI_MENU_FPS_90,
@@ -74,6 +78,25 @@ typedef enum {
     UI_MENU_OPERATION_MODE, UI_MENU_OPERATION_MODE_DESC, UI_MENU_MODE_DOCKED, UI_MENU_MODE_HANDHELD,
     UI_MENU_ASSUME_FOCUS, UI_MENU_ASSUME_FOCUS_DESC,
 
+    // Mods: the port's own patches and the player's mods folder (mods.c)
+    UI_MENU_MODS_BUILTIN, UI_MENU_MODS_INSTALLED,
+    UI_MENU_MODS_NONE,           // no mod folder yet: where to unpack one
+    UI_MENU_MODS_OPEN, UI_MENU_MODS_OPEN_DESC,
+    UI_MENU_MODS_ROW_DESC,       // printf: files it replaces, files it adds (as of this start)
+    UI_MENU_MODS_OVERRIDDEN,     // printf: files a higher mod serves instead, that mod's name
+    UI_MENU_MODS_MOVE_HINT,
+    UI_MENU_MODS_EMPTY, UI_MENU_MODS_SUBSDK, UI_MENU_MODS_EXEFS_LATER, UI_MENU_MODS_BAD_NAME,
+    UI_MENU_MODS_EXEFS_UNSUPPORTED,  // printf: the file and why
+    UI_MENU_MODS_EXEFS_OTHER,
+    UI_MENU_MODS_EXEFS_ON,           // printf: its ExeFS patch files in use
+    UI_MENU_MODS_REPLACES_BUILTIN,   // printf: its ExeFS patch files in use, the port's own patch sets they turn off
+    UI_MENU_MODS_OTHER_VERSION,  // printf: files made for another game version, left out
+    UI_MENU_MODS_UNUSED,         // under the switch of a mod the port cannot use
+    UI_MENU_MODS_CHEATS,         // printf: its cheats as read at start
+    UI_MENU_MODS_CHEATS_FILE,    // printf: <build id>.txt, when none were read
+    UI_MENU_MODS_FPS60, UI_MENU_MODS_FPS60_DESC, UI_MENU_MODS_RES, UI_MENU_MODS_RES_DESC,
+    UI_MENU_MODS_QUICKMENU, UI_MENU_MODS_QUICKMENU_DESC,
+
     // Sound
     UI_MENU_VOLUME, UI_MENU_VOLUME_DESC,
 
@@ -84,9 +107,15 @@ typedef enum {
     UI_MENU_RUMBLE_TRIGGERS, UI_MENU_RUMBLE_TRIGGERS_DESC,
     UI_MENU_DS_TRIGGERS, UI_MENU_DS_TRIGGERS_DESC, UI_MENU_DS_LIGHT, UI_MENU_DS_LIGHT_DESC,
     UI_MENU_PAD_LAYOUT, UI_MENU_PAD_LAYOUT_DESC, UI_MENU_PAD_LAYOUT_AUTO, UI_MENU_PAD_LAYOUT_NINTENDO,
-    UI_MENU_PAD_LAYOUT_XBOX, UI_MENU_PAD_LAYOUT_XBOX_PROMPTS, UI_MENU_PAD_LAYOUT_PLAYSTATION, UI_MENU_PAD_LAYOUT_IN_USE,
-    UI_MENU_PAD_LAYOUT_PROMPTS_MISSING, UI_MENU_PAD_LAYOUT_PROMPTS_RESTART,
-    UI_MENU_STICK_DEADZONE, UI_MENU_STICK_DEADZONE_DESC, UI_MENU_STICK_SENS, UI_MENU_STICK_SENS_DESC,
+    UI_MENU_PAD_LAYOUT_XBOX, UI_MENU_PAD_LAYOUT_IN_USE,
+    UI_MENU_PROMPTS, UI_MENU_PROMPTS_DESC, UI_MENU_PROMPTS_NINTENDO, UI_MENU_PROMPTS_XBOX, UI_MENU_PROMPTS_PLAYSTATION,
+    // the notes under the prompts: their files are missing or damaged, they change after restart, or why they are off
+    UI_MENU_PROMPTS_MISSING, UI_MENU_PROMPTS_FAILED, UI_MENU_PROMPTS_RESTART, UI_MENU_PROMPTS_OFF_SHAPE,
+    UI_MENU_PROMPTS_OFF_MODS, UI_MENU_PROMPTS_OFF_PATCHES,
+    // "Restart now" under the prompts while they change after restart, and its confirmation (Cancel: UI_MENU_RESET_NO)
+    UI_MENU_RESTART, UI_MENU_RESTART_DESC, UI_MENU_RESTART_CONFIRM, UI_MENU_RESTART_YES, UI_MENU_RESTART_SAVING,
+    UI_MENU_LSTICK_DEADZONE, UI_MENU_RSTICK_DEADZONE, UI_MENU_STICK_DEADZONE_DESC,
+    UI_MENU_STICK_DEADZONE_NOW, UI_MENU_STICK_SENS, UI_MENU_STICK_SENS_DESC,
     UI_MENU_MOUSE_SENS, UI_MENU_MOUSE_SENS_DESC,
     UI_MENU_MOUSE_SMOOTH, UI_MENU_MOUSE_SMOOTH_DESC,
     UI_MENU_WALK_KEY, UI_MENU_WALK_KEY_DESC, UI_MENU_WALK_KEY_TAKEN, UI_MENU_WALK_SCALE, UI_MENU_WALK_SCALE_DESC,
@@ -120,6 +149,17 @@ typedef enum {
     UI_PAD_START, UI_PAD_BACK, UI_PAD_DPAD_LEFT, UI_PAD_DPAD_UP, UI_PAD_DPAD_RIGHT, UI_PAD_DPAD_DOWN, UI_PAD_ZL,
     UI_PAD_ZR, UI_PAD_LPADDLE1, UI_PAD_RPADDLE1, UI_PAD_LPADDLE2, UI_PAD_RPADDLE2,
     UI_PAD_CROSS, UI_PAD_CIRCLE, UI_PAD_SQUARE, UI_PAD_TRIANGLE,
+
+    // Amiibo tab (ui/amiibo_page.cpp): the dump folder and its files, the emulated NFC reader and its state, the
+    // amiibo on it and the last action
+    UI_MENU_AMIIBO_DIR, UI_MENU_AMIIBO_OPEN, UI_MENU_AMIIBO_DEFAULT_DIR, UI_MENU_AMIIBO_REFRESH, UI_MENU_AMIIBO_PICK,
+    UI_MENU_AMIIBO_NO_DIR, UI_MENU_AMIIBO_READER, UI_MENU_AMIIBO_STATE, UI_MENU_AMIIBO_STATE_IDLE,
+    UI_MENU_AMIIBO_STATE_SEARCHING, UI_MENU_AMIIBO_STATE_FOUND, UI_MENU_AMIIBO_STATE_MOUNTED,
+    UI_MENU_AMIIBO_STATE_OFF, UI_MENU_AMIIBO_FILE, UI_MENU_AMIIBO_NO_FILE, UI_MENU_AMIIBO_TAP, UI_MENU_AMIIBO_REMOVE,
+    UI_MENU_AMIIBO_AUTO_REMOVE, UI_MENU_AMIIBO_HOLD, UI_MENU_AMIIBO_SECONDS, UI_MENU_AMIIBO_TAG,
+    UI_MENU_AMIIBO_NO_TAG, UI_MENU_AMIIBO_TAG_FILE, UI_MENU_AMIIBO_TAG_ID, UI_MENU_AMIIBO_TAG_UID,
+    UI_MENU_AMIIBO_READY, UI_MENU_AMIIBO_TAPPED, UI_MENU_AMIIBO_LOAD_FAILED, UI_MENU_AMIIBO_REMOVED,
+    UI_MENU_AMIIBO_STATUS,
 
     // Menu tab
     UI_MENU_MENU_LANG, UI_MENU_MENU_LANG_DESC, UI_MENU_MENU_LANG_AUTO,
@@ -187,7 +227,16 @@ typedef enum {
     UI_MENU_OV_FMT_SCENE,     // "%ux%u, %.0f%%": the scene and its share of the game image's width
     UI_MENU_OV_FMT_FSR,       // "AMD FSR 1, sharpness %d%%"
     UI_MENU_OV_SCALE_NONE, UI_MENU_OV_SCALE_BILINEAR,
-    UI_MENU_LAST_ID = UI_MENU_OV_SCALE_BILINEAR,
+    UI_MENU_OV_SCALE_DOWN,    // FSR is selected but the image is larger than the window: FSR only enlarges
+    // the Cheats tab (cheats.c): the file, the kinds of cheat and why one cannot be switched
+    UI_MENU_TAB_CHEATS,
+    UI_MENU_CHEATS_NONE,      // "%s": <build id>.txt
+    UI_MENU_CHEATS_MOD,       // "%s": the mod, "%d": its cheats
+    UI_MENU_CHEATS_REBUILD, UI_MENU_CHEATS_REBUILD_DESC,   // restart into the rebuild for unbuilt code cheats
+    UI_MENU_CHEAT_CODE_DESC, UI_MENU_CHEAT_KEY_DESC /* "%s": the buttons */, UI_MENU_CHEAT_DATA_DESC,
+    UI_MENU_CHEAT_MASTER, UI_MENU_CHEAT_MASTER_DESC, UI_MENU_CHEAT_RESTORE, UI_MENU_CHEAT_RESTORE_DESC,
+    UI_MENU_CHEAT_REBUILD, UI_MENU_CHEAT_REBUILD_DESC, UI_MENU_CHEAT_UNSUPPORTED, UI_MENU_CHEAT_UNSUPPORTED_DESC,
+    UI_MENU_LAST_ID = UI_MENU_CHEAT_UNSUPPORTED_DESC,
     UI_TEXT_COUNT
 } UiTextId;
 
@@ -198,14 +247,18 @@ enum { UI_DESC_BYTES = 2048 };
 
 // UTF-8 text for id in the language of ov_language(); English when the catalog has no row for that language.
 const char *ui_text(UiTextId id);
-// The same for an explicit catalog language ("en", "ja", "fr", "de", "it", "es", "nl", "pt", "pt-BR", "ru",
-// "zh-Hans", "zh-Hant", "ko"); an empty entry gives the English text.
+// The same for an explicit catalog language ("en", "ja", "fr", "de", "it", "es", "nl", "pt", "ru", "zh-Hans",
+// "zh-Hant", "ko", "pt-BR"); an empty entry gives the English text.
 const char *ui_text_in(const char *lang, UiTextId id);
+// Calls visit(ctx, text) for every string the row of lang has its own text for (an id that falls back to English is not
+// visited): the font builder covers the glyphs of the text a language shows (ui/menu.cpp).
+void ui_text_visit(const char *lang, void (*visit)(void *ctx, const char *text), void *ctx);
 // 1 when the row of lang has its own text for id (no fallback to English), for the probe.
 int ui_text_defined(const char *lang, UiTextId id);
 // The catalog language for a Switch language code ("en-GB" -> "en", "zh-CN" -> "zh-Hans", "pt-BR" stays, ...).
 const char *ui_text_lang(const char *switch_code);
 
-// Menu text: ui_text_in(menu language, id). The menu language is TOTK_MENU_LANG ("en" / "ru" / "pt-BR"); unset, Russian
-// when the system UI language is Russian, Brazilian Portuguese when it is Portuguese, else English. Follows a live change of the setting.
+// Menu text: ui_text_in(menu language, id). The menu language is TOTK_MENU_LANG ("en", "ru", "pt-BR", "zh-Hans");
+// unset, the system UI language when the catalog has menu text for it (English, Russian, Brazilian Portuguese,
+// Simplified Chinese), else English. Follows a live change of the setting.
 const char *menu_text(UiTextId id);

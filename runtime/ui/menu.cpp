@@ -43,9 +43,12 @@ extern "C" {
 #include "net_mp.h"
 #include "voice.h"
 #include "amiibo.h"
+#include "cheats.h"
 #include "cfg.h"
+#include "fs.h"
 #include "input.h"
 #include "input_map.h"
+#include "mods.h"
 #include "perfmon.h"
 #include "platform/platform.h"
 #include "sysinfo.h"
@@ -59,9 +62,6 @@ uint32_t vk_pipeline_building(void);
 void res_sizes(unsigned out[2], unsigned scene[2]);
 double frame_step_limit_hz(void);
 extern const int rt_game_version;
-// fs.h (romfs.c): a layout's prompt folder (romfs-patches-xbox, -ps) was next to romfs-index.bin at start, and the
-// layout whose prompts were loaded.
-int romfs_prompts_ready(const char *layout);
 // host.h (frame_rate.c): game time since the loaded save's first frame, -1 before; achievement notices wait for it.
 int64_t frame_step_world_us(void);
 // host.h (gfx_present.c): a world position on the window from the game's camera; the friends drawn in the world.
@@ -86,8 +86,9 @@ int gfx_figures_wanted(void);
 void gfx_figures_set(const GfxFigure *f, int n);
 // audren.h (audio_mixer.c): the achievement chime over the game's audio.
 void audio_chime(int platinum, float volume);
-const char *romfs_prompts_active(void);
 extern const char rt_port_version[];
+void cheats_frame(uint64_t frame);   // cheats.c
+bool tab_cheats(float scale);        // ui/cheats_tab.cpp; true: restart into the rebuild
 }
 
 // Roboto Medium (Apache-2.0, ui/fonts/LICENSE-Roboto.txt) with Latin and Cyrillic glyphs.
@@ -338,7 +339,9 @@ static int vk_up(const MenuTarget *t) {
 
 // Roboto Medium (Latin, Cyrillic, dashes and quotes) at 26 px per 1080 lines, with the glyphs of the Japanese, Korean
 // and Chinese language names merged in from a system font when there is one (each language is named in its own script).
-// Made again when the window height changes; the old texture goes after the queue is idle (CreateFontsTexture).
+// A catalog row also holds menu text (Simplified Chinese), so every string of the row goes into the builder: the merged
+// font must cover the whole menu of that language, not only its name. Made again when the window height changes; the old
+// texture goes after the queue is idle (CreateFontsTexture).
 static const ImWchar kRanges[] = {0x0020, 0x00FF, 0x0400, 0x052F, 0x2010, 0x2027, 0};
 static const struct { const char *lang; UiTextId name; } kCjk[] = {
     {"ja", UI_MENU_LANGNAME_JA}, {"ko", UI_MENU_LANGNAME_KO}, {"zh-Hans", UI_MENU_LANGNAME_ZH_HANS},
@@ -419,6 +422,11 @@ static void ach_icons_fill(ImFontAtlas *fa, const int *rect) {
 static ImVec2 g_fig_uv0, g_fig_uv1;
 static bool g_fig_tex;
 
+// The glyphs of every string of a catalog row (ui_text_visit), for the font that draws that language.
+static void add_row_glyphs(void *ctx, const char *text) {
+    static_cast<ImFontGlyphRangesBuilder *>(ctx)->AddText(text);
+}
+
 static int fonts_up(float scale) {
     enum { N = sizeof kCjk / sizeof *kCjk };
     ImFontAtlas *fa = ImGui::GetIO().Fonts;
@@ -443,6 +451,7 @@ static int fonts_up(float scale) {
         merged++;
         ImFontGlyphRangesBuilder b;
         b.AddText(ui_text_in("en", kCjk[i].name));
+        ui_text_visit(kCjk[i].lang, add_row_glyphs, &b);
         b.BuildRanges(&ranges[i]);
         ImFontConfig mc;
         mc.MergeMode = true;
@@ -493,8 +502,8 @@ extern "C" void menu_vk_release(void) {
 // TOTK_MENU_TEST_SET=<frame>:<key>=<value>[,<key>=<value>...][;<frame>:...]: cfg_set of each key (TOTK_ prefix
 // optional) at that presented frame; changes live settings with no input, menu open or not. totk.ini is written only by
 // the pseudo-key SAVE=1 (cfg_save, as a row change does; a failed write shows the menu's save note).
-enum { TAB_SCREEN, TAB_GAME, TAB_SOUND, TAB_CONTROLS, TAB_AMIIBO, TAB_MENU, TAB_ADVANCED, TAB_ACHIEVEMENTS,
-       TAB_MULTIPLAYER, TAB_COUNT };
+enum { TAB_SCREEN, TAB_GAME, TAB_SOUND, TAB_CONTROLS, TAB_AMIIBO, TAB_MENU, TAB_ADVANCED, TAB_MODS, TAB_CHEATS,
+       TAB_ACHIEVEMENTS, TAB_MULTIPLAYER, TAB_COUNT };
 enum { TEST_PAGE_FRAMES = 30, TEST_SETS = 16 };
 struct TestSet { uint64_t frame; char key[64], value[64]; };
 static struct {
@@ -637,14 +646,6 @@ static void row_render_scale(void) {
     opt_choice_list("TOTK_RENDER_SCALE", UI_MENU_RENDER_SCALE, vals, names, N, UI_MENU_RENDER_SCALE_DESC);
 }
 
-// Anisotropic filtering (vk_texture.c make_sampler): the game's level or a fixed one for tiling surface textures.
-static void row_aniso(void) {
-    static const char *const vals[] = {"game", "2", "4", "8", "16"};
-    static const char *names[] = {NULL, "2x", "4x", "8x", "16x"};
-    names[0] = menu_text(UI_MENU_ANISO_GAME);
-    opt_choice_list("TOTK_ANISO", UI_MENU_ANISO, vals, names, 5, UI_MENU_ANISO_DESC);
-}
-
 static void row_shadow_res(void) {
     static const char *const vals[] = {"game", "512", "768", "1024", "1536", "2048"};
     enum { N = sizeof vals / sizeof *vals };
@@ -652,6 +653,18 @@ static void row_shadow_res(void) {
     names[0] = menu_text(UI_MENU_SHADOW_RES_GAME);
     for (int i = 1; i < N; i++) names[i] = vals[i];
     opt_choice_list("TOTK_SHADOW_RES", UI_MENU_SHADOW_RES, vals, names, N, UI_MENU_SHADOW_RES_DESC);
+}
+
+static void row_shadow_scale(void) {
+    static const char *const vals[] = {"1", "2", "3", "4"};
+    static const char *const names[] = {"960 (1x)", "1920 (2x)", "2880 (3x)", "3840 (4x)"};
+    opt_choice_list("TOTK_SHADOW_SCALE", UI_MENU_SHADOW_SCALE, vals, names, 4, UI_MENU_SHADOW_SCALE_DESC);
+}
+
+static void row_shadow_range(void) {
+    static const char *const vals[] = {"100", "150", "200", "300"};
+    static const char *const names[] = {"160 m (1x)", "240 m (1.5x)", "320 m (2x)", "480 m (3x)"};
+    opt_choice_list("TOTK_SHADOW_RANGE", UI_MENU_SHADOW_RANGE, vals, names, 4, UI_MENU_SHADOW_RANGE_DESC);
 }
 
 static void row_gpu(void) {
@@ -791,13 +804,24 @@ static void tab_screen(float scale) {
     row_output_res();
     row_render_scale();
     row_shadow_res();
-    row_aniso();
     static const UiTextId up[] = {UI_MENU_UPSCALER_FSR, UI_MENU_UPSCALER_BILINEAR};
     opt_choice("TOTK_UPSCALER", UI_MENU_UPSCALER, up, 2, UI_MENU_UPSCALER_DESC);
     opt_slider("TOTK_SHARPNESS", UI_MENU_SHARPNESS, 0, 100, UI_MENU_SHARPNESS_DESC, 5, "%.0f %%");
     static const UiTextId aspect[] = {UI_MENU_ASPECT_FIT, UI_MENU_ASPECT_STRETCH};
     opt_choice("TOTK_ASPECT", UI_MENU_ASPECT, aspect, 2, UI_MENU_ASPECT_DESC);
     opt_slider("TOTK_FOV", UI_MENU_FOV, 70, 140, UI_MENU_FOV_DESC, 5, "%.0f %%");
+    static const char *const aniso[] = {"game", "2", "4", "8", "16"};
+    const char *aniso_names[] = {menu_text(UI_MENU_ANISO_GAME), "2x", "4x", "8x", "16x"};
+    opt_choice_list("TOTK_ANISO", UI_MENU_ANISO, aniso, aniso_names, 5, UI_MENU_ANISO_DESC);
+    row_shadow_scale();
+    row_shadow_range();
+    opt_slider("TOTK_PCSS", UI_MENU_PCSS, 0, 200, UI_MENU_PCSS_DESC, 10, "%.0f %%");
+    opt_slider("TOTK_CONTACT_SHADOWS", UI_MENU_CONTACT_SHADOWS, 0, 100, UI_MENU_CONTACT_SHADOWS_DESC, 10, "%.0f %%");
+    opt_toggle("TOTK_DLAA", UI_MENU_DLAA, UI_MENU_DLAA_DESC);
+    static const UiTextId dlss[] = {UI_MENU_DLSS_DLAA, UI_MENU_DLSS_QUALITY, UI_MENU_DLSS_BALANCED,
+                                    UI_MENU_DLSS_PERFORMANCE};
+    opt_choice("TOTK_DLSS", UI_MENU_DLSS, dlss, 4, UI_MENU_DLSS_DESC);
+    opt_toggle("TOTK_FXAA", UI_MENU_FXAA, UI_MENU_FXAA_DESC);
     rows_color();
     opt_group(UI_MENU_HDR_GROUP);
     opt_toggle("TOTK_HDR", UI_MENU_HDR, UI_MENU_HDR_DESC);
@@ -810,9 +834,6 @@ static void tab_screen(float scale) {
 static void tab_game(float scale) {
     opt_begin("##game", scale);
     row_fps_limit();
-    opt_toggle("TOTK_REALTIME", UI_MENU_REALTIME, UI_MENU_REALTIME_DESC);
-    opt_toggle("TOTK_CLOTH_REALTIME", UI_MENU_CLOTH_REALTIME, UI_MENU_CLOTH_REALTIME_DESC);
-    opt_toggle("TOTK_HIGHFPS_FIX", UI_MENU_HIGHFPS_FIX, UI_MENU_HIGHFPS_FIX_DESC);
     row_game_lang();
     static const UiTextId mode[] = {UI_MENU_MODE_DOCKED, UI_MENU_MODE_HANDHELD};
     opt_choice("TOTK_OPERATION_MODE", UI_MENU_OPERATION_MODE, mode, 2, UI_MENU_OPERATION_MODE_DESC);
@@ -841,17 +862,11 @@ static void tab_sound(float scale) {
     opt_end();
 }
 
-// The note under the layout. Xbox prompts (the Nintendo layout with the A/B and X/Y prompts swapped) and PlayStation
-// (the Xbox layout with PlayStation symbols) load their prompts from an overlay of their own (romfs.c overlay_init):
-// they change the buttons at once but the prompts only at the next start. "files missing" without the layout's folder,
-// "prompts change after restart" while the prompts in use differ from the choice. Automatic with a gamepad connected:
-// "in use: Xbox". NULL otherwise.
+// A confirmation is open (Controls: restart, Advanced: reset): B and Esc close it, not the menu; L / R stay on the page.
+static bool g_modal;
+
+// The note under the layout: Automatic with a gamepad connected, the layout it picked ("in use: Xbox"). NULL otherwise.
 static const char *pad_layout_note(void) {
-    const char *choice = cfg_value("TOTK_PAD_LAYOUT"), *active = romfs_prompts_active();
-    int ready = romfs_prompts_ready(choice);
-    if (ready == 0) return menu_text(UI_MENU_PAD_LAYOUT_PROMPTS_MISSING);
-    if ((ready > 0) != (active != nullptr) || (active && strcasecmp(active, choice)))
-        return menu_text(UI_MENU_PAD_LAYOUT_PROMPTS_RESTART);
     int got = input_pad_layout();
     if (got < 0 || strcmp(cfg_value("TOTK_PAD_LAYOUT"), "auto")) return nullptr;
     static char note[96];
@@ -887,7 +902,7 @@ static void row_walk_key(void) {
     InputMap m;
     input_map_snapshot(&m);
     for (int k = KEY_A; k < KEY_COUNT && !n; k++) {
-        if (!input_key_name(k) || _stricmp(input_key_name(k), cur)) continue;
+        if (!input_key_name(k) || strcasecmp(input_key_name(k), cur)) continue;
         int a = key_action(&m, k);
         if (a >= 0 && input_action_name(a)) snprintf(note, sizeof note, menu_text(UI_MENU_WALK_KEY_TAKEN), input_action_name(a)), n = note;
     }
@@ -895,18 +910,93 @@ static void row_walk_key(void) {
                     -1, n);
 }
 
+// The note under the prompts. The settings name a folder of prompts (input_prompts_folder: the prompts and the pad
+// layout, as a layout that puts A on the right button needs the face buttons named the other way round), but the game
+// reads its fonts and UI archive once at start (romfs.c overlay_init). While the folder in use differs: "files
+// missing" when the setup did not write the one asked for, why it was left out at start (damaged, a game resolution
+// that is not 16:9, a RomFS mod with the same files, TOTK_ROMFS_PATCHES), else "prompts change after restart", and only then
+// *restart is set: a restart would bring the prompts asked for. NULL when they match.
+static const char *prompts_note(bool *restart) {
+    *restart = false;
+    const char *layout = cfg_value("TOTK_PAD_LAYOUT"), *used = romfs_prompts();
+    const char *want = input_prompts_folder(input_prompts_pick(cfg_get("TOTK_PROMPTS"), layout), layout);
+    if (want == used || (want && used && !strcmp(want, used))) return nullptr;
+    if (want && !romfs_prompts_ready(want)) return menu_text(UI_MENU_PROMPTS_MISSING);
+    switch (romfs_prompts_off(want)) {
+    case ROMFS_PROMPTS_FAILED: return menu_text(UI_MENU_PROMPTS_FAILED);
+    case ROMFS_PROMPTS_SHAPE: return menu_text(UI_MENU_PROMPTS_OFF_SHAPE);
+    case ROMFS_PROMPTS_MODS: return menu_text(UI_MENU_PROMPTS_OFF_MODS);
+    case ROMFS_PROMPTS_PATCHES: return menu_text(UI_MENU_PROMPTS_OFF_PATCHES);
+    default: *restart = true; return menu_text(UI_MENU_PROMPTS_RESTART);
+    }
+}
+
+// The confirmation of "Restart now", over the menu; Cancel has the cursor first. Restart writes totk.ini, then closes
+// the game as Quit does and starts it again (gfx_window_request_restart). It waits while the game writes a save, and
+// the game stays when totk.ini cannot be written, as the new prompts would not come back. From the Cheats tab
+// (restart_rebuild) Restart also lets the next start rebuild for cheats whose last rebuild failed (cheats_rebuild_allow).
+static bool restart_rebuild;
+static void restart_confirm(void) {
+    g_modal = false;
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    if (!ImGui::BeginPopupModal("##restart_confirm", nullptr,
+                                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize))
+        return;
+    g_modal = true;
+    ImGui::TextUnformatted(menu_text(UI_MENU_RESTART_CONFIRM));
+    bool saving = fs_save_busy() != 0;
+    if (saving || !cfg_last_save_ok())
+        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.35f, 1), "%s",
+                           menu_text(saving ? UI_MENU_RESTART_SAVING : UI_MENU_SAVE_FAILED));
+    ImGui::Spacing();
+    const char *yes = menu_text(UI_MENU_RESTART_YES), *no = menu_text(UI_MENU_RESET_NO);
+    const ImGuiStyle &st = ImGui::GetStyle();
+    float bw = fmaxf(ImGui::CalcTextSize(yes).x, ImGui::CalcTextSize(no).x) + st.FramePadding.x * 4;
+    bool close = ImGui::Button(no, ImVec2(bw, 0));
+    if (ImGui::IsWindowAppearing()) ImGui::SetItemDefaultFocus();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(saving);
+    if (ImGui::Button(yes, ImVec2(bw, 0)) && cfg_save()) {
+        if (restart_rebuild) cheats_rebuild_allow();
+        gfx_window_request_restart();
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))
+        close = true;
+    if (close) {
+        ImGui::CloseCurrentPopup();
+        restart_rebuild = false;
+        opt_focus_key("##restart");   // back on the row it came from
+    }
+    ImGui::EndPopup();
+}
+
 static void tab_controls(float scale) {
     opt_begin("##controls", scale);
-    static const UiTextId layout[] = {UI_MENU_PAD_LAYOUT_AUTO, UI_MENU_PAD_LAYOUT_NINTENDO, UI_MENU_PAD_LAYOUT_XBOX,
-                                      UI_MENU_PAD_LAYOUT_XBOX_PROMPTS, UI_MENU_PAD_LAYOUT_PLAYSTATION};
-    opt_choice("TOTK_PAD_LAYOUT", UI_MENU_PAD_LAYOUT, layout, 5, UI_MENU_PAD_LAYOUT_DESC, pad_layout_note());
+    static const UiTextId layout[] = {UI_MENU_PAD_LAYOUT_AUTO, UI_MENU_PAD_LAYOUT_NINTENDO, UI_MENU_PAD_LAYOUT_XBOX};
+    opt_choice("TOTK_PAD_LAYOUT", UI_MENU_PAD_LAYOUT, layout, 3, UI_MENU_PAD_LAYOUT_DESC, pad_layout_note());
+    static const UiTextId prompts[] = {UI_MENU_PROMPTS_NINTENDO, UI_MENU_PROMPTS_XBOX, UI_MENU_PROMPTS_PLAYSTATION};
+    bool restart;
+    const char *note = prompts_note(&restart);
+    opt_choice("TOTK_PROMPTS", UI_MENU_PROMPTS, prompts, 3, UI_MENU_PROMPTS_DESC, note);
+    bool ask = restart && opt_button("##restart", UI_MENU_RESTART, UI_MENU_RESTART_DESC);
     opt_toggle("TOTK_MOTION", UI_MENU_MOTION, UI_MENU_MOTION_DESC);
     opt_slider("TOTK_RUMBLE_STRENGTH", UI_MENU_RUMBLE_STRENGTH, 0, 300, UI_MENU_RUMBLE_STRENGTH_DESC, 10, "%.0f %%");
     opt_slider("TOTK_RUMBLE_CURVE", UI_MENU_RUMBLE_CURVE, 0.2f, 1.5f, UI_MENU_RUMBLE_CURVE_DESC, 0.05f, "%.2f");
     opt_toggle("TOTK_RUMBLE_TRIGGERS", UI_MENU_RUMBLE_TRIGGERS, UI_MENU_RUMBLE_TRIGGERS_DESC);
     opt_toggle("TOTK_DS_TRIGGERS", UI_MENU_DS_TRIGGERS, UI_MENU_DS_TRIGGERS_DESC);
     opt_toggle("TOTK_DS_LIGHT", UI_MENU_DS_LIGHT, UI_MENU_DS_LIGHT_DESC);
-    opt_slider("TOTK_STICK_DEADZONE", UI_MENU_STICK_DEADZONE, 0, 50, UI_MENU_STICK_DEADZONE_DESC, 1, "%.0f %%");
+    // One row per stick, falling back to TOTK_STICK_DEADZONE (both sticks) while unset. With a gamepad connected each
+    // row shows its stick's deflection now, before the dead zone: a drifting stick's resting value, to set it above.
+    double now[2];
+    bool pad = input_pad_stick_percent(now) != 0;
+    char stick_note[2][64];
+    for (int s = 0; s < 2; s++)
+        snprintf(stick_note[s], sizeof stick_note[s], menu_text(UI_MENU_STICK_DEADZONE_NOW), now[s]);
+    opt_slider("TOTK_LSTICK_DEADZONE", UI_MENU_LSTICK_DEADZONE, 0, 50, UI_MENU_STICK_DEADZONE_DESC, 1, "%.0f %%",
+               pad ? stick_note[0] : nullptr, "TOTK_STICK_DEADZONE");
+    opt_slider("TOTK_RSTICK_DEADZONE", UI_MENU_RSTICK_DEADZONE, 0, 50, UI_MENU_STICK_DEADZONE_DESC, 1, "%.0f %%",
+               pad ? stick_note[1] : nullptr, "TOTK_STICK_DEADZONE");
     opt_slider("TOTK_STICK_SENS", UI_MENU_STICK_SENS, 0.1f, 3, UI_MENU_STICK_SENS_DESC, 0.05f, "%.2f");
     opt_slider("TOTK_MOUSE_SENS", UI_MENU_MOUSE_SENS, 0, 10, UI_MENU_MOUSE_SENS_DESC, 0.1f, "%.1f");
     opt_slider("TOTK_MOUSE_SMOOTH", UI_MENU_MOUSE_SMOOTH, 0, 100, UI_MENU_MOUSE_SMOOTH_DESC, 5, "%.0f %%");
@@ -915,19 +1005,19 @@ static void tab_controls(float scale) {
     binds_rows(scale);
     opt_end();
     binds_after_page();
+    if (ask) ImGui::OpenPopup("##restart_confirm");   // at the level BeginPopupModal looks it up
+    restart_confirm();
 }
 
 static void tab_menu(float scale) {
     opt_begin("##menu", scale);
-    // in the order of the key's values (cfg.c): automatic, en, ru, pt-BR
     static const UiTextId langs[] = {UI_MENU_MENU_LANG_AUTO, UI_MENU_LANGNAME_EN, UI_MENU_LANGNAME_RU,
-                                     UI_MENU_LANGNAME_PT_BR};
-    opt_choice("TOTK_MENU_LANG", UI_MENU_MENU_LANG, langs, 4, UI_MENU_MENU_LANG_DESC);
+                                     UI_MENU_LANGNAME_PT_BR, UI_MENU_LANGNAME_ZH_HANS};
+    opt_choice("TOTK_MENU_LANG", UI_MENU_MENU_LANG, langs, sizeof langs / sizeof *langs, UI_MENU_MENU_LANG_DESC);
     opt_end();
 }
 
 // ---- Advanced: the testing and troubleshooting keys, the bug report helpers and the reset of every setting
-static bool g_modal;   // the reset confirmation is open: B and Esc close it, not the menu; L / R stay on the page
 
 // A thread count with no fixed default: Automatic (unset), then the common counts.
 static void row_threads(const char *key, UiTextId label, UiTextId desc) {
@@ -2422,10 +2512,109 @@ static void mp_notes_draw(const MenuTarget *t, float scale) {
 
 static const UiTextId kTabNames[TAB_COUNT] = {UI_MENU_TAB_SCREEN, UI_MENU_TAB_GAME, UI_MENU_TAB_SOUND,
                                               UI_MENU_TAB_CONTROLS, UI_MENU_TAB_AMIIBO, UI_MENU_TAB_MENU,
-                                              UI_MENU_TAB_ADVANCED, UI_MENU_TAB_ACHIEVEMENTS, UI_MENU_TAB_MULTIPLAYER};
+                                              UI_MENU_TAB_ADVANCED, UI_MENU_TAB_MODS, UI_MENU_TAB_CHEATS,
+                                              UI_MENU_TAB_ACHIEVEMENTS, UI_MENU_TAB_MULTIPLAYER};
 static int g_tab;               // the tab shown
 static int g_tab_request = -1;  // select this tab at the next layout; -1 none
 static int g_focus_page = -1;   // this tab's first row takes the cursor once it is shown; -1 none
+
+// A row of another tab: that tab opens with the row under the cursor.
+static void go_to(int tab, const char *key) {
+    g_tab_request = tab;
+    opt_focus_key(key);
+}
+
+// ---- Mods: the mods folder (mods.c) with switches and the load order, then the port's own patches. The folder was
+// read at start; the rows change the order and switches for the next start.
+static void mods_builtin_rows(void) {
+    opt_group(UI_MENU_MODS_BUILTIN);
+    char fps[64], res[64];
+    const char *lim = cfg_value("TOTK_FPS_LIMIT");
+    if (!strcmp(lim, "display")) snprintf(fps, sizeof fps, "%s", menu_text(UI_MENU_FPS_DISPLAY));
+    else snprintf(fps, sizeof fps, "%s FPS", lim);
+    if (opt_button("##mods_fps60", UI_MENU_MODS_FPS60, UI_MENU_MODS_FPS60_DESC, fps)) go_to(TAB_GAME, "TOTK_FPS_LIMIT");
+    int w = 0, h = 0;
+    sscanf(cfg_value("TOTK_OUTPUT_RES"), "%dx%d", &w, &h);
+    snprintf(res, sizeof res, "%d × %d", w, h);   // U+00D7, as row_output_res shows it
+    if (opt_button("##mods_res", UI_MENU_MODS_RES, UI_MENU_MODS_RES_DESC, res)) go_to(TAB_SCREEN, "TOTK_OUTPUT_RES");
+    opt_toggle("TOTK_REALTIME", UI_MENU_REALTIME, UI_MENU_REALTIME_DESC);
+    opt_toggle("TOTK_CLOTH_REALTIME", UI_MENU_CLOTH_REALTIME, UI_MENU_CLOTH_REALTIME_DESC);
+    opt_toggle("TOTK_HIGHFPS_FIX", UI_MENU_HIGHFPS_FIX, UI_MENU_HIGHFPS_FIX_DESC);
+    opt_button("##mods_quickmenu", UI_MENU_MODS_QUICKMENU, UI_MENU_MODS_QUICKMENU_DESC,
+               menu_text(romfs_patches_loaded() ? UI_MENU_ON : UI_MENU_OFF));
+}
+
+static void tab_mods(float scale) {
+    opt_begin("##mods", scale);
+    opt_group(UI_MENU_MODS_INSTALLED);
+    int n = mods_count();
+    if (!n) opt_text(UI_MENU_MODS_NONE);
+    const char *after = mods_changed() ? menu_text(UI_MENU_AFTER_RESTART) : nullptr;
+    for (int i = 0; i < n; i++) {
+        const ModInfo *m = mods_at(i);
+        char id[32], desc[1536];
+        snprintf(id, sizeof id, "##mod%d", i);
+        char over[512] = "", other[512] = "";
+        if (m->overridden) snprintf(over, sizeof over, menu_text(UI_MENU_MODS_OVERRIDDEN), m->overridden, m->overridden_by);
+        if (m->other_version) snprintf(other, sizeof other, menu_text(UI_MENU_MODS_OTHER_VERSION), m->other_version);
+        char cheat[256] = "";
+        if (m->kind & MOD_CHEATS) {   // its cheats as read at start, or the file they come from
+            int count = 0;
+            for (int j = 0; j < cheats_count(); j++)
+                count += !strcmp(cheats_info(j)->mod, m->name) && cheats_info(j)->kind != CHEAT_HEADING;
+            if (count) snprintf(cheat, sizeof cheat, menu_text(UI_MENU_MODS_CHEATS), count);
+            else snprintf(cheat, sizeof cheat, menu_text(UI_MENU_MODS_CHEATS_FILE), cheats_file());
+        }
+        char code[512] = "", problem[512] = "";
+        if (m->nsets && m->overrides[0])
+            snprintf(code, sizeof code, menu_text(UI_MENU_MODS_REPLACES_BUILTIN), m->nsets, m->overrides);
+        else if (m->nsets)
+            snprintf(code, sizeof code, menu_text(UI_MENU_MODS_EXEFS_ON), m->nsets);
+        switch (m->problem) {
+        case MOD_EMPTY: snprintf(problem, sizeof problem, "%s", menu_text(UI_MENU_MODS_EMPTY)); break;
+        case MOD_PLUGIN: snprintf(problem, sizeof problem, "%s", menu_text(UI_MENU_MODS_SUBSDK)); break;
+        case MOD_EXEFS_LATER: snprintf(problem, sizeof problem, "%s", menu_text(UI_MENU_MODS_EXEFS_LATER)); break;
+        case MOD_EXEFS_UNSUPPORTED:
+            snprintf(problem, sizeof problem, menu_text(UI_MENU_MODS_EXEFS_UNSUPPORTED), m->note);
+            break;
+        case MOD_EXEFS_OTHER: snprintf(problem, sizeof problem, "%s", menu_text(UI_MENU_MODS_EXEFS_OTHER)); break;
+        case MOD_BAD_NAME: snprintf(problem, sizeof problem, "%s", menu_text(UI_MENU_MODS_BAD_NAME)); break;
+        default: break;
+        }
+        int k = snprintf(desc, sizeof desc, menu_text(UI_MENU_MODS_ROW_DESC), m->replaced, m->added);
+        const char *parts[] = {over, other, cheat, code, problem, menu_text(UI_MENU_MODS_MOVE_HINT)};
+        for (const char *part : parts)
+            if (*part && k >= 0 && k < (int)sizeof desc) k += snprintf(desc + k, sizeof desc - k, "\n\n%s", part);
+        const char *note = m->enabled && m->problem != MOD_OK ? menu_text(UI_MENU_MODS_UNUSED) : after;
+        int s = opt_text_row(id, m->name, menu_text(m->enabled ? UI_MENU_ON : UI_MENU_OFF), note, desc, true);
+        if (s == 2 || s == -1 || s == 1) {
+            mods_set_enabled(i, !m->enabled);
+            opt_save_soon();
+        } else if ((s == 3 && i > 0) || (s == 4 && i + 1 < n)) {
+            int to = s == 3 ? i - 1 : i + 1;
+            mods_move(i, to - i);
+            snprintf(id, sizeof id, "##mod%d", to);
+            opt_focus_key(id);   // the cursor follows the mod
+            opt_save_soon();
+        }
+    }
+    bool rebuild =
+        cheats_rebuild_pending() && opt_button("##restart", UI_MENU_CHEATS_REBUILD, UI_MENU_CHEATS_REBUILD_DESC);
+    static uint64_t open_failed;   // plat_now_ns until which the button says it failed
+    if (opt_button("##mods_open", UI_MENU_MODS_OPEN, UI_MENU_MODS_OPEN_DESC,
+                   plat_now_ns() < open_failed ? menu_text(UI_MENU_ACTION_FAILED) : "")) {
+        bool ok = mods_dir()[0] != 0;
+        if (ok) plat_file_mkdir_p(mods_dir());
+        if (!ok || !plat_open_folder(mods_dir())) open_failed = plat_now_ns() + 3000000000ull;
+    }
+    mods_builtin_rows();
+    opt_end();
+    if (rebuild) {
+        restart_rebuild = true;
+        ImGui::OpenPopup("##restart_confirm");
+    }
+    restart_confirm();
+}
 
 // ---- the look: a panel from the left edge over the dimmed game, a rail of tab icons down its left side and the page
 // beside it, in the look of the UltraTears overlay (colours in option_rows.h). The panel slides in when the menu opens
@@ -2513,6 +2702,23 @@ static void tab_icon(ImDrawList *dl, int tab, ImVec2 c, float r, ImU32 col, floa
                         col, th * 1.6f);
         }
         break;
+    case TAB_MODS: {   // a box, its lid open
+        dl->AddRect(ImVec2(c.x - r * 0.8f, c.y - r * 0.15f), ImVec2(c.x + r * 0.8f, c.y + r * 0.85f), col, r * 0.1f, 0, th);
+        ImVec2 lid[] = {{c.x - r * 0.8f, c.y - r * 0.15f}, {c.x - r * 0.45f, c.y - r * 0.85f},
+                        {c.x + r * 0.95f, c.y - r * 0.85f}, {c.x + r * 0.8f, c.y - r * 0.15f}};
+        dl->AddPolyline(lid, 4, col, 0, th);
+        dl->AddLine(ImVec2(c.x - r * 0.25f, c.y + r * 0.3f), ImVec2(c.x + r * 0.25f, c.y + r * 0.3f), col, th);
+        break;
+    }
+    case TAB_CHEATS: {   // a five-pointed star
+        ImVec2 pts[10];
+        for (int i = 0; i < 10; i++) {
+            float an = -1.5707963f + i * 0.6283185f, rr = i % 2 ? r * 0.42f : r * 0.95f;
+            pts[i] = ImVec2(c.x + cosf(an) * rr, c.y + sinf(an) * rr + r * 0.05f);
+        }
+        dl->AddPolyline(pts, 10, col, ImDrawFlags_Closed, th);
+        break;
+    }
     default:   // close
         dl->AddLine(ImVec2(c.x - r * 0.6f, c.y - r * 0.6f), ImVec2(c.x + r * 0.6f, c.y + r * 0.6f), col, th);
         dl->AddLine(ImVec2(c.x + r * 0.6f, c.y - r * 0.6f), ImVec2(c.x - r * 0.6f, c.y + r * 0.6f), col, th);
@@ -2669,6 +2875,14 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
         ImGui::EndChild();
         break;
     case TAB_ADVANCED: tab_advanced(scale); break;
+    case TAB_MODS: tab_mods(scale); break;
+    case TAB_CHEATS:
+        if (tab_cheats(scale)) {
+            restart_rebuild = true;
+            ImGui::OpenPopup("##restart_confirm");
+        }
+        restart_confirm();
+        break;
     case TAB_ACHIEVEMENTS: tab_achievements(scale); break;
     case TAB_MULTIPLAYER: tab_multiplayer(scale); break;
     }
@@ -2691,7 +2905,7 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
     ImGui::SameLine();
     if (ImGui::Button(quit, ImVec2(bw, 0))) gfx_window_request_close();
     bool was_modal = g_modal || binds_modal();
-    if (g_tab != TAB_ADVANCED) g_modal = false;
+    if (g_tab != TAB_ADVANCED && g_tab != TAB_CONTROLS && g_tab != TAB_MODS && g_tab != TAB_CHEATS) g_modal = false;
     if (!was_modal && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)))
         set_open(0);
     ImGui::End();
@@ -2828,7 +3042,11 @@ static void perf_picture(const MenuTarget *t, const ImVec4 &c) {
         int s = cfg_int("TOTK_SHARPNESS");
         snprintf(v[3], sizeof v[3], menu_text(UI_MENU_OV_FMT_FSR), s < 0 ? 0 : s > 100 ? 100 : s);
     } else {
-        snprintf(v[3], sizeof v[3], "%s", menu_text(t->scaler ? UI_MENU_OV_SCALE_BILINEAR : UI_MENU_OV_SCALE_NONE));
+        // FSR enlarges only (vk_fsr_record): an image larger than the window is shrunk by the blit even with FSR selected
+        int down = t->scaler == 1 && !strcmp(cfg_value("TOTK_UPSCALER"), "fsr") &&
+                   (t->image_w > (int)t->width || t->image_h > (int)t->height);
+        snprintf(v[3], sizeof v[3], "%s",
+                 menu_text(down ? UI_MENU_OV_SCALE_DOWN : t->scaler ? UI_MENU_OV_SCALE_BILINEAR : UI_MENU_OV_SCALE_NONE));
     }
     double hz = frame_step_limit_hz();
     snprintf(v[4], sizeof v[4], "%s", menu_text(UI_MENU_OV_NONE));
@@ -3055,6 +3273,7 @@ static void note_draw(const MenuTarget *t, float scale) {
 
 extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const char **shot) {
     *shot = NULL;
+    cheats_frame(frame);   // the data cheats and the buttons of the cheats that need them held
     if (!g_test.parsed) test_parse();
     if (g_test.next_set < g_test.n_sets && frame >= g_test.sets[g_test.next_set].frame) test_apply_sets(frame);
     if (g_perf_save.exchange(0)) cfg_save();

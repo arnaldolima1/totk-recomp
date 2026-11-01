@@ -25,9 +25,9 @@
 #include "gfx_wsys.h"
 #include "host.h"
 #include "nvn_api.h"
+#include "platform/platform.h"
 #include "ui/menu.h"
 #include "vk.h"
-#include "platform/platform.h"
 
 #define FRAMES 2
 #define MAX_IMAGES 16
@@ -42,6 +42,7 @@ void vk_queue_unlock(void) { plat_rmutex_unlock(&g_ql); }
 // ---- window state shared with the back end
 static VkSurfaceKHR g_surface;
 static volatile int32_t g_dirty;               // the window was resized; swapchain stale
+static volatile int32_t g_restart;             // gfx_window_request_restart: closing the window starts the game again
 static volatile int32_t g_focused = 1;
 static volatile int32_t g_focus_msgs;
 static PlatRMutex g_start_lock;       // gfx_window_start / vsync start
@@ -49,23 +50,41 @@ static int g_started;
 
 void gfx_window_mark_dirty(void) { plat_xchg32(&g_dirty, 1); }
 
-// The window gained or lost the focus: the game hears it as nn::oe's focus state and a notification message.
+// The window gained or lost the focus: the game hears it as nn::oe's focus state and a notification message. The line
+// carries the local wall time, the only one in the log: when a GPU hang takes the whole system down, the log ends
+// without an error, and this time set against the driver's entry in the Windows event log (nvlddmkm 153, Display 4101)
+// tells whether an alt-tab or an overlay came before the hang or followed it.
 void gfx_window_focus_changed(int in) {
     plat_xchg32(&g_focused, in);
     oe_set_focus(in);                          // pinned to 1 by TOTK_ASSUME_FOCUS inside
     oe_push_message(OE_MSG_FOCUS_STATE_CHANGED);
     plat_inc32(&g_focus_msgs);
-    rt_log("gfx: window %s the focus", in ? "gained" : "lost");
+    struct tm t;
+    plat_local_time(&t);
+    rt_log("gfx: window %s the focus at %04d-%02d-%02d %02d:%02d:%02d local time", in ? "gained" : "lost",
+           t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec);
 }
 
 // The window was closed: the process ends with it, as in MNG, once a save Commit still running in the background is
-// done.
+// done. After gfx_window_request_restart the executable then starts again with the same command line and environment
+// (plat_restart), and the new process waits until this one is gone (main.c) before it moves the log and opens the
+// RomFS and the saves.
 void gfx_window_closed(void) {
-    rt_log("gfx: window closed; exiting");
+    int restart = plat_cas32(&g_restart, 0, 0) != 0;
+    rt_log("gfx: window closed; %s", restart ? "restarting" : "exiting");
     fs_save_flush();
     vk_pipeline_save();
     prof_write();   // plat_exit runs no atexit handlers
+    if (restart) {
+        plat_setenv("TOTK_REEXEC", NULL);   // the new process counts its own address-space retries (memory.c)
+        if (!plat_restart()) rt_log("gfx: the restart could not start the game again");
+    }
     plat_exit(0);
+}
+
+void gfx_window_request_restart(void) {
+    plat_xchg32(&g_restart, 1);
+    gfx_window_request_close();
 }
 
 // TOTK_FULLSCREEN=1: borderless window over the monitor. TOTK_WINDOW_SIZE=<w>x<h>: client area of the window (the
@@ -819,6 +838,7 @@ void gfx_window_release_vk(void) {
         vk_fsr_release();
         vk_color_release();
         vk_hdr_release();
+        vk_contact_release();
         free_capture();
         free_thumbs();
         for (int i = 0; i < FRAMES; i++) {

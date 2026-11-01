@@ -28,13 +28,14 @@
 #include "vk.h"
 #include "vk_exec.h"
 #include "platform/platform.h"
+#include "vk_dlaa.h"
 
 #define MAX_BINDINGS 128
 #define MAX_DESC 1024
 #define CHUNK_BYTES (4u << 20)
 #define ZERO_BYTES 65536u
-#define SUPPORT_BYTES 1424u   // Ryujinx SupportBuffer (std140): alpha_test, is_bgra[8], viewport_inverse, viewport_size, ...;
-                              // 1408: HDR parameters (support_fill)
+#define SUPPORT_BYTES 1456u   // Ryujinx SupportBuffer (std140): alpha_test, is_bgra[8], viewport_inverse, viewport_size, ...;
+                              // 1408 pcss and 1424 shadow_spread (translator patches 0010, 0011), 1440 HDR (support_fill)
 #define NVN_STAGE_VS 0
 #define NVN_STAGE_FS 1
 #define NVN_STAGE_CS 5
@@ -1430,9 +1431,45 @@ static VkDescriptorSet alloc_set(VkExec *ex, VkDescriptorSetLayout layout) {
 }
 
 static void support_in(const VkExec *ex, float in[3]) {   // what support_fill reads: viewport size, point size
-    in[0] = ex->in_pass && ex->has_vp ? ex->vp[0][2] : (float)ex->pass_w;
-    in[1] = ex->in_pass && ex->has_vp ? ex->vp[0][3] : (float)ex->pass_h;
+    float k = ex->pass_scale > 1 ? (float)ex->pass_scale : 1.0f;
+    in[0] = ex->in_pass && ex->has_vp ? ex->vp[0][2] * k : (float)ex->pass_w;
+    in[1] = ex->in_pass && ex->has_vp ? ex->vp[0][3] * k : (float)ex->pass_h;
     in[2] = ex->point_size > 0 ? ex->point_size : 1.0f;
+}
+
+// TOTK_PCSS (percent, 0 = off): the pcss field of the support buffer, which translator patch 0010 reads in every
+// explicit-LOD compare on a 2D array texture (the sun cascades). x: penumbra width in UV per unit of light-space depth
+// between receiver and blocker (0 keeps the game's single compare), y and z: the narrowest and widest disc radius,
+// w: the blocker search radius, all in UV of the cascade map. Radii are in UV, so they hold at any TOTK_SHADOW_SCALE.
+// TOTK_PCSS_K overrides the depth-to-penumbra factor at 100 percent, for tuning.
+static const float *pcss_params(void) {
+    static float p[4] = {-1, 0, 0, 0};
+    if (p[0] < 0) {
+        int pct = cfg_int("TOTK_PCSS");
+        pct = pct < 0 ? 0 : pct > 200 ? 200 : pct;
+        const char *k = cfg_get("TOTK_PCSS_K");
+        float k100 = k && *k ? (float)atof(k) : 0.5f;
+        p[0] = k100 * (float)pct / 100.0f;
+        p[1] = 0.35f / 960.0f, p[2] = 5.0f / 960.0f, p[3] = 4.0f / 960.0f;
+        if (pct) rt_log("vk: soft shadows (PCSS) at %d%% (depth factor %g)", pct, p[0]);
+    }
+    return p;
+}
+
+// The shadow_spread field of the support buffer: the factor translator patch 0011 applies to the lighting shaders' sun
+// shadow filter offset (element 56 .xy of their lighting block), 1 / TOTK_SHADOW_SCALE. The game spaces its four
+// compares for its own shadow map texels; with maps TOTK_SHADOW_SCALE times larger, the same offset in UV spans that
+// many more texels and the near cascade shows four separate copies of each edge. Dividing by the scale keeps the game's
+// spacing in texels. The offset is in UV of the shadow map, so the output resolution plays no part. The scale is read
+// once, as vk_texture.c shadow_scale reads it: the maps keep the size they were made with.
+static const float *shadow_spread_params(void) {
+    static float p[4] = {0, 0, 0, 0};
+    if (p[0] == 0) {
+        int scale = cfg_int("TOTK_SHADOW_SCALE");
+        scale = scale < 1 ? 1 : scale > 4 ? 4 : scale;
+        p[0] = 1.0f / (float)scale;
+    }
+    return p;
 }
 
 static void support_fill(uint8_t *b, float w, float h, float point_size) {
@@ -1442,11 +1479,13 @@ static void support_fill(uint8_t *b, float w, float h, float point_size) {
     memcpy(b + 160, size, 16);
     const float one = 1.0f;
     memcpy(b + 1392, &point_size, 4);   // point_size (translator patch 0008): vertex shaders that write none output it
+    memcpy(b + 1408, pcss_params(), 16);   // pcss (translator patch 0010): soft sun shadows in the cascade compares
+    memcpy(b + 1424, shadow_spread_params(), 16);    // shadow_spread (translator patch 0011): sun shadow filter width
     for (int i = 0; i < 73; i++) memcpy(b + 192 + 16 * i, &one, 4);   // render scale 1: the host renders at guest size
     if (vk_hdr_wanted()) {   // read by the HDR tonemap only (shaders/hdr_tonemap.frag), which declares it past the translator's
         float hdr[4];
         vk_hdr_support(hdr);
-        memcpy(b + 1408, hdr, 16);
+        memcpy(b + 1440, hdr, 16);
     }
 }
 
@@ -1865,10 +1904,14 @@ static void record_fixed(VkExec *ex) {
     VkCommandBuffer cb = ex->cb;
     if (ex->dirty & VK_EXEC_DIRTY_VIEWPORT) {
         float x = 0, y = 0, w = (float)ex->pass_w, h = (float)ex->pass_h;
-        if (ex->has_vp) x = ex->vp[0][0], y = ex->vp[0][1], w = ex->vp[0][2], h = ex->vp[0][3];
+        if (ex->has_vp) {
+            float k = ex->pass_scale > 1 ? (float)ex->pass_scale : 1.0f;
+            x = ex->vp[0][0] * k, y = ex->vp[0][1] * k, w = ex->vp[0][2] * k, h = ex->vp[0][3] * k;
+        }
         if (w < 1) w = 1;
         if (h < 1) h = 1;
         VkViewport v = {x, y + h, w, -h, ex->depth_range[0], ex->depth_range[1]};   // the y flip: negative height
+        vk_dlaa_viewport(ex, &v);   // the scene's draws move by the DLAA jitter
         vkCmdSetViewportWithCount(cb, 1, &v);
         ex->recorded++;
     }
@@ -2154,6 +2197,7 @@ static int prepare_draw(VkExec *ex, int prim, int32_t count, int restart) {
         if (fs_wait) fs = shader_for(ex, NVN_STAGE_FS, &has_fs, NULL, 1);
     }
     if (!vs || (has_fs && !fs)) return 0;
+    if (vk_dlaa_skip_draw(ex, fs)) return 0;   // the game's FXAA off, or its scaling replaced by DLSS (vk_dlaa.c)
     uint32_t fbl = feedback_prepare(ex, fs);
     VkPipeState s = ex->pipe;
     s.vs = vs, s.fs = fs;
@@ -2224,6 +2268,7 @@ static int prepare_draw(VkExec *ex, int prim, int32_t count, int restart) {
         ex->recorded++;
         B.st = s, B.st_valid = 1;
     }
+    vk_dlaa_draw(ex);
     record_fixed(ex);
     repeat_stats(ex, info);
     bind_resources(ex, info);
@@ -2360,6 +2405,7 @@ static void op_dispatch(VkExec *ex, const p_dispatch *d) {
     if (d->x <= 0 || d->y <= 0 || d->z <= 0) return;
     if (!ex->prog) return warn_once(W_PROGRAM, "a dispatch without a bound program is skipped");
     vk_figure_before_dispatch(ex);   // the G-buffer's readers may be compute shaders (shadows): figures first
+    vk_contact_flush(ex);
     cb_res(ex);
     dummies_init();
     int present;

@@ -1,6 +1,6 @@
 # Adapted from MacNativeGames games/totk/scripts/make_romfs_patches.py @ ebe621d (MIT, Copyright (c) 2026
 # MacNativeGames contributors).
-"""Build the 60 fps RomFS overlay for TotK 1.1.1, 1.2.1 or 1.4.3 (runtime/romfs.c, TOTK_ROMFS_PATCHES).
+"""Build the 60 fps RomFS overlay for TotK 1.1.0, 1.2.1 or 1.4.3 (runtime/romfs.c, TOTK_ROMFS_PATCHES).
 
 UI/LayoutArchive/Common.Product.<110 or 140>.Nin_NX_NVN.blarc.zs: the weapon / shield / material quick menus capture the game
 picture for their background when the panes C_CaptureBG_00, C_CaptureClearBG_00 and P_CaptureClearBG_00 become
@@ -8,7 +8,7 @@ visible at animation frame 1.0 (anim/ShortCutBG_00_In.bflan), AutoBuilder the sa
 (anim/AutoBuilder_00_In.bflan). UI animations advance 0.5 frames per game frame at 60 fps, so the capture lands after
 the world stopped drawing and the background can be black. The visibility keys move to frame 0.0: the live world is
 captured at once (upstream checked weapon, shield, material and ability wheel at 60 fps, and 30 fps).
-The game-over flow fix of the same upstream script is 1.0.0 only (1.1.1, 1.2.1 and 1.4.3 run DmF_SY_GameOver.110) and is
+The game-over flow fix of the same upstream script is 1.0.0 only (1.1.0, 1.2.1 and 1.4.3 run DmF_SY_GameOver.110) and is
 left out.
 
 --aspect <w>x<h> (a game resolution of another shape than 16:9, such as 3440x1440 or 1280x800) also lays the UI out
@@ -17,21 +17,30 @@ cover the screen and the HUD moves to the screen's corners (wider) or its top an
 loads that overlay from romfs-patches-<w>x<h> when the game resolution is that size (runtime/romfs.c overlay_init);
 the camera's side of it is the patch set aspect (recomp/patches-v121.txt, patches-v143.txt).
 
---xbox-prompts: the same overlay with the A and B, and the X and Y button prompts swapped, for pad_layout = xbox_prompts
-(runtime/romfs.c overlay_init loads romfs-patches-xbox in place of romfs-patches). That layout plays an Xbox pad by
-position, as nintendo does: the button that does Switch A is labelled B, and the prompts then name the label. Built from
-the game's own images and glyphs, nothing added:
-- the action prompt (blyt/DoCommand_00.bflyt) draws the letter images Nt_KeyTexA/B/X/Y_00 of timg/__Combined.bntx in
-  the Common archive: their image data is swapped (same format, size and tiling). Around it, a diamond names the
-  other face buttons with one-letter text panes (T_B_00, T_X_00, ...). The game fills them from the messages of the
-  same name in LayoutMsg/DoCommand_00.msbt of each Mals/<language> archive, over the layout's own text: both have
-  their letters swapped the same way. The diamond's shape (Nt_KeyBtnSubBase*) shows the button's position, which
-  stays right.
-- every other prompt is text: the button glyphs U+E040 A, U+E041 B, U+E042 X, U+E043 Y of scft/External.bfotf, the
-  same font in each Font/Font*.Nin_NX_NVN.bfarc.zs. Their CFF outlines and horizontal metrics are swapped.
+--prompts xbox | xbox-label: the same overlay with Xbox button icons in the game's prompts, for prompts = xbox
+(runtime/romfs.c overlay_init loads romfs-patches-xbox or romfs-patches-xbox-label in place of romfs-patches). Drawn
+from the game's own files on the player's machine, nothing added (tools/button_icons.py, which needs fontTools):
+- both: L, R, ZL, ZR, Plus, Minus and the d-pad become LB, RB, LT, RT, Menu, View and a cross in the button font
+  (scft/External.bfotf, the same font in each Font/Font*.Nin_NX_NVN.bfarc.zs), and L and ZL in the button guide's images
+  (Nt_KeyTexL_00 and Nt_KeyTexZL_00 of timg/__Combined.bntx in the Common archive). The fonts grow, so the overlay also
+  carries the resource size table (System/Resource/ResourceSizeTable.Product.<n>...rsizetable.zs) with their entries
+  raised by as much.
+- xbox, for pad_layout = nintendo. That layout plays an Xbox pad by position: the button that does Switch A is
+  labelled B, so the face buttons' prompts are swapped to name the labels, A with B and X with Y:
+  - the action prompt (blyt/DoCommand_00.bflyt) draws the letter images Nt_KeyTexA/B/X/Y_00 of timg/__Combined.bntx in
+    the Common archive: their image data is swapped (same format, size and tiling). Around it, a diamond names the
+    other face buttons with one-letter text panes (T_B_00, T_X_00, ...). The game fills them from the messages of the
+    same name in LayoutMsg/DoCommand_00.msbt of each Mals/<language> archive, over the layout's own text: both have
+    their letters swapped the same way. The diamond's shape (Nt_KeyBtnSubBase*) shows the button's position, which
+    stays right.
+  - every other prompt: the glyphs U+E040 A, U+E041 B, U+E042 X, U+E043 Y of the button font trade places.
+- xbox-label, for pad_layout = xbox and auto. Those layouts put Switch A on the button labelled A (auto picks xbox for
+  every pad not labelled the Nintendo way), so the face buttons keep their letters; the action prompt's diamond keeps
+  the Switch positions (A on the right).
+--xbox-prompts is the older name of --prompts xbox.
 
---playstation-prompts: the same overlay with PlayStation symbols in place of the letters, for pad_layout = playstation
-(romfs-patches-ps). That layout plays the buttons by label as xbox does (cross is Switch A), so A becomes the cross, B
+--prompts playstation: the same overlay with PlayStation symbols in place of the letters, for prompts = playstation
+(romfs-patches-ps). That setting goes with the buttons played by label (pad_layout = xbox or auto) (cross is Switch A), so A becomes the cross, B
 the circle, X the square and Y the triangle. The symbols are drawn by tools/ps_prompts.py, not taken from anywhere:
 - the letter images Nt_KeyTexA/B/X/Y_00 (R8 alpha masks of a white disc with the letter cut out) are drawn again as
   the same disc, measured from the game's A image, with the symbol cut out;
@@ -39,8 +48,10 @@ the circle, X the square and Y the triangle. The symbols are drawn by tools/ps_p
 - the diamond's one-letter text panes and messages get the characters U+00D7, U+25CB, U+25A1 and U+25B3, which the
   game's text font (Normal_00, the Rodin fonts) draws.
 
+  --playstation-prompts is the older name of --prompts playstation. The other prompt files are left as they are.
+
 Input: build/extracted/<version>/romfs (romfs.bin and index.json, verified by tools/extract.py). Output:
-build/<version>/romfs-patches/<path> by default (romfs-patches-xbox with --xbox-prompts), and <out>/manifest.tsv (path, size, SHA-256 of the overlay, SHA-256 of the original). Run with .venv-py314.
+build/<version>/romfs-patches/<path> by default (romfs-patches-<style> with --prompts), and <out>/manifest.tsv (path, size, SHA-256 of the overlay, SHA-256 of the original). Run with .venv-py314.
 """
 import argparse
 import compression.zstd as zstd
@@ -53,25 +64,22 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
 ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-ap.add_argument('--version', choices=('v111', 'v121', 'v143'), default='v121')
+ap.add_argument('--version', choices=('v110', 'v121', 'v143'), default='v121')
 ap.add_argument('--romfs', type=Path, help='default build/extracted/<version>/romfs')
 ap.add_argument('--out', type=Path,
-                help='default build/<version>/romfs-patches (romfs-patches-xbox with --xbox-prompts)')
+                help='default build/<version>/romfs-patches (romfs-patches-<style> with --prompts)')
 ap.add_argument('--aspect', help='<w>x<h> of a game resolution of another shape than 16:9: also lay the UI out for it')
-ap.add_argument('--xbox-prompts', action='store_true', help='swap the A/B and X/Y button prompts as well')
-ap.add_argument('--playstation-prompts', action='store_true',
-                help='draw PlayStation symbols in place of the A/B/X/Y button prompts as well')
+ap.add_argument('--prompts', choices=('xbox', 'xbox-label', 'playstation'),
+                help='Xbox button icons in the prompts: xbox for pad_layout = nintendo (A shown as B, X as Y), '
+                     'xbox-label for pad_layout = xbox or auto (the face buttons keep their letters); playstation: '
+                     'PlayStation symbols on the face buttons, for pad_layout = xbox or auto')
+ap.add_argument('--xbox-prompts', dest='prompts', action='store_const', const='xbox', help='the same as --prompts xbox')
+ap.add_argument('--playstation-prompts', dest='prompts', action='store_const', const='playstation',
+                help='the same as --prompts playstation')
 args = ap.parse_args()
-if args.xbox_prompts and args.playstation_prompts:
-    ap.error('--xbox-prompts and --playstation-prompts are two different overlays')
 args.romfs = args.romfs or root / 'build/extracted' / args.version / 'romfs'
-OUT_NAME = ('romfs-patches-xbox' if args.xbox_prompts else 'romfs-patches-ps' if args.playstation_prompts
-            else 'romfs-patches')
+OUT_NAME = {None: 'romfs-patches', 'playstation': 'romfs-patches-ps'}.get(args.prompts, f'romfs-patches-{args.prompts}')
 args.out = args.out or root / 'build' / args.version / OUT_NAME
-# Loaded by path: the release's embedded Python does not put the script's folder on sys.path.
-_spec = importlib.util.spec_from_file_location('ps_prompts', Path(__file__).with_name('ps_prompts.py'))
-ps_prompts = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(ps_prompts)
 index = json.loads((args.romfs / 'index.json').read_text())
 assert index['status'] == 'pass'
 files = {f['path']: f for f in index['files']}
@@ -211,41 +219,6 @@ def cff_index(data, pos):
     return [(first + offsets[i], first + offsets[i + 1]) for i in range(count)], size, first + offsets[-1]
 
 
-def cff_charstrings(data, cff):
-    """The offset (from the CFF table) of the CharStrings INDEX: operator 17 of the Top DICT. CID-keyed fonts (ROS,
-    operator 12 30) are refused: their glyphs can use different private dictionaries."""
-    _, _, pos = cff_index(data, cff + data[cff + 2])       # Name INDEX after the header
-    top, _, _ = cff_index(data, pos)
-    (pos, end), operands, found = top[0], [], None
-    while pos < end:
-        b = data[pos]
-        if b <= 21:
-            op = (12, data[pos + 1]) if b == 12 else b
-            pos += 2 if b == 12 else 1
-            assert op != (12, 30), 'CID-keyed CFF'
-            if op == 17:
-                found = operands[-1]
-            operands = []
-        elif b == 28:
-            operands.append(struct.unpack_from('>h', data, pos + 1)[0]); pos += 3
-        elif b == 29:
-            operands.append(struct.unpack_from('>i', data, pos + 1)[0]); pos += 5
-        elif b == 30:                                    # real number: nibbles up to an 0xf
-            pos += 1
-            while data[pos] & 0x0f != 0x0f and data[pos] & 0xf0 != 0xf0:
-                pos += 1
-            pos += 1
-            operands.append(0)
-        elif b <= 246:
-            operands.append(b - 139); pos += 1
-        elif b <= 250:
-            operands.append((b - 247) * 256 + data[pos + 1] + 108); pos += 2
-        else:
-            operands.append(-(b - 251) * 256 - data[pos + 1] - 108); pos += 2
-    assert found is not None, 'no CharStrings in the Top DICT'
-    return found
-
-
 def otf_glyph(data, cmap, code):
     """The glyph id of a code point in the format 4 (platform 3 encoding 1) subtable of the cmap at data[cmap:]."""
     for k in range(struct.unpack_from('>H', data, cmap + 2)[0]):
@@ -270,47 +243,6 @@ def otf_glyph(data, cmap, code):
 def otf_checksum(data):
     data = bytes(data) + bytes(-len(data) % 4)
     return sum(struct.unpack(f'>{len(data) // 4}I', data)) & 0xffffffff
-
-
-def bfotf_swap(data, pairs):
-    """The BFOTF data with the glyphs of each (code point, code point) pair swapped: CFF outlines and horizontal
-    metrics, then the table checksums. A BFOTF is an OpenType font after an 8-byte header; from offset 4 on, every
-    4-byte word is XORed with one key, which the size field gives away (it holds the font's length)."""
-    key = bytes(x ^ y for x, y in zip(data[4:8], struct.pack('>I', len(data) - 8)))
-    plain = bytearray(data[:4]) + bytearray(x ^ key[i % 4] for i, x in enumerate(data[4:]))
-    font = plain[8:]
-    assert font[:4] == b'OTTO', 'not a CFF OpenType font'
-    tables = {}
-    for k in range(struct.unpack_from('>H', font, 4)[0]):
-        tag, _, offset, length = struct.unpack_from('>4sIII', font, 12 + 16 * k)
-        tables[tag] = (12 + 16 * k, offset, length)
-    cff = tables[b'CFF '][1]
-    strings, size, end = cff_index(font, cff + cff_charstrings(font, cff))
-    hmtx, metrics = tables[b'hmtx'][1], struct.unpack_from('>H', font, tables[b'hhea'][1] + 34)[0]
-    order = list(range(len(strings)))
-    for a, b in pairs:
-        ga, gb = otf_glyph(font, tables[b'cmap'][1], a), otf_glyph(font, tables[b'cmap'][1], b)
-        assert 0 < ga < len(strings) and 0 < gb < len(strings) and ga < metrics and gb < metrics, (a, b, ga, gb)
-        order[ga], order[gb] = order[gb], order[ga]
-        ma, mb = hmtx + 4 * ga, hmtx + 4 * gb
-        font[ma:ma + 4], font[mb:mb + 4] = font[mb:mb + 4], font[ma:ma + 4]
-    # The CharStrings INDEX again with the items in the new order: the same length, so nothing after it moves.
-    body = b''.join(bytes(font[slice(*strings[g])]) for g in order)
-    first = strings[0][0]
-    assert first + len(body) == end
-    font[first:end] = body
-    at, base = first - (len(strings) + 1) * size, 1   # the offset array ends where the first item starts
-    for i, g in enumerate(order + [None]):
-        font[at + i * size:at + (i + 1) * size] = base.to_bytes(size, 'big')
-        if g is not None:
-            base += strings[g][1] - strings[g][0]
-    head = tables[b'head'][1]
-    struct.pack_into('>I', font, head + 8, 0)
-    for entry, offset, length in tables.values():
-        struct.pack_into('>I', font, entry + 4, otf_checksum(font[offset:offset + length]))
-    struct.pack_into('>I', font, head + 8, (0xb1b0afba - otf_checksum(font)) & 0xffffffff)
-    plain[8:] = font
-    return bytes(plain[:4]) + bytes(x ^ key[i % 4] for i, x in enumerate(plain[4:]))
 
 
 def gob_offset(x, y, width_bytes, block_height):
@@ -509,7 +441,7 @@ def sarc_replace(data, new):
     return bytes(out)
 
 
-COMMON = {'v111': '110', 'v121': '110', 'v143': '140'}   # the version in the name of each game's Common archive
+COMMON = {'v110': '110', 'v121': '110', 'v143': '140'}   # the version in the name of each game's Common archive
 ARCHIVE = f'UI/LayoutArchive/Common.Product.{COMMON[args.version]}.Nin_NX_NVN.blarc.zs'
 MEMBERS = {
     'anim/ShortCutBG_00_In.bflan': ('C_CaptureBG_00', 'C_CaptureClearBG_00', 'P_CaptureClearBG_00'),
@@ -518,12 +450,11 @@ MEMBERS = {
 KEY_TEXTURES = (('Nt_KeyTexA_00', 'Nt_KeyTexB_00'), ('Nt_KeyTexX_00', 'Nt_KeyTexY_00'))
 KEY_GLYPHS = ((0xE040, 0xE041), (0xE042, 0xE043))   # A B, X Y in scft/External.bfotf
 KEY_LETTERS = {'A': 'B', 'B': 'A', 'X': 'Y', 'Y': 'X'}   # the face-button diamond around the action prompt
-# pad_layout = playstation: cross is Switch A, circle B, square X, triangle Y (the xbox layout's buttons)
+# prompts = playstation: cross is Switch A, circle B, square X, triangle Y (the xbox layout's buttons)
 PS_TEXTURES = {'Nt_KeyTexA_00': 'cross', 'Nt_KeyTexB_00': 'circle', 'Nt_KeyTexX_00': 'square',
                'Nt_KeyTexY_00': 'triangle'}
 PS_GLYPHS = {0xE040: 'cross', 0xE041: 'circle', 0xE042: 'square', 0xE043: 'triangle'}
 PS_LETTERS = {'A': '×', 'B': '○', 'X': '□', 'Y': '△'}   # times, circle, square, triangle
-PROMPTS = args.xbox_prompts or args.playstation_prompts
 FONTS = sorted(p for p in files if re.fullmatch(r'Font/Font(_\w+)?\.Nin_NX_NVN\.bfarc\.zs', p))
 # The message archive of each language: the newest version in the RomFS (Mals/USen.Product.121.sarc.zs on 1.2.1).
 MALS = {}
@@ -533,6 +464,24 @@ for p in files:
         MALS[m[1]] = (int(m[2]), p)
 MALS = sorted(p for _, p in MALS.values())
 LAYOUT_MSG = 'LayoutMsg/DoCommand_00.msbt'
+# The resource size table (System/Resource/ResourceSizeTable.Product.<n>...rsizetable.zs, matched as loosely as
+# MacNativeGames make_button_icons.py does), likewise the newest version in the RomFS.
+RESTBL = max((p for p in files if p.startswith('System/Resource/ResourceSizeTable.') and p.endswith('.rsizetable.zs')),
+             key=lambda p: int((re.search(r'\.(\d+)\.', p) or [0, 0])[1]), default=None)
+by_position = args.prompts == 'xbox'   # the face buttons' prompts swapped to the labels (pad_layout = nintendo)
+symbols = args.prompts == 'playstation'   # the face buttons' letters drawn as PlayStation symbols
+if args.prompts:
+    assert FONTS, 'no Font/Font*.Nin_NX_NVN.bfarc.zs in the RomFS'
+    assert MALS or not (by_position or symbols), 'no Mals/<language>.Product.<version>.sarc.zs in the RomFS'
+    assert RESTBL, 'no System/Resource/ResourceSizeTable.Product.<n>...rsizetable.zs in the RomFS'
+    spec = importlib.util.spec_from_file_location('button_icons', Path(__file__).with_name('button_icons.py'))
+    icons = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(icons)
+    assert icons.TEXT_ARCHIVE in FONTS, f'no {icons.TEXT_ARCHIVE} in the RomFS'
+if symbols:   # loaded by path: the release's embedded Python does not put the script's folder on sys.path
+    spec = importlib.util.spec_from_file_location('ps_prompts', Path(__file__).with_name('ps_prompts.py'))
+    ps_prompts = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ps_prompts)
 
 with (args.romfs / 'romfs.bin').open('rb') as image:
     def read(path):
@@ -546,7 +495,8 @@ with (args.romfs / 'romfs.bin').open('rb') as image:
     for name, (lo, hi) in sarc_members(pack).items():
         d = zstd.ZstdDict(pack[lo:hi])
         dictionaries[d.dict_id] = d
-    originals = {path: read(path) for path in [ARCHIVE] + (FONTS + MALS if PROMPTS else [])}
+    prompt_files = (FONTS + (MALS if by_position or symbols else []) + [RESTBL]) if args.prompts else []
+    originals = {path: read(path) for path in [ARCHIVE] + prompt_files}
 raw = originals[ARCHIVE]
 info = zstd.get_frame_info(raw)
 dictionary = dictionaries[info.dictionary_id]
@@ -577,44 +527,73 @@ diff = [i for i in range(len(original)) if original[i] != blarc[i]]
 touched = [members[m] for m in (*MEMBERS, *layout)]
 assert diff and all(any(lo <= i < hi for lo, hi in touched) for i in diff), diff
 outputs = {ARCHIVE: bytes(blarc)}   # RomFS path -> new contents (before compression)
-prompt_info = None
-if PROMPTS:
-    swap = KEY_LETTERS if args.xbox_prompts else PS_LETTERS
-    if args.xbox_prompts:
-        bntx_swap(blarc, members['timg/__Combined.bntx'][0], KEY_TEXTURES)
-    else:
+prompts = None
+if args.prompts:
+    sizes = {ARCHIVE: len(original)}   # RomFS path -> size of the original's contents
+
+    def unpack(path):
+        frame = zstd.get_frame_info(originals[path])
+        data = zstd.decompress(originals[path], zstd_dict=dictionaries.get(frame.dictionary_id))
+        sizes[path] = len(data)
+        return data
+    if symbols:
+        letters, drawn, hud = {}, {}, None
         disc = bntx_symbols(blarc, members['timg/__Combined.bntx'][0], PS_TEXTURES)
-    letters = {}
-    for member, (lo, hi) in members.items():
-        if member.endswith('.bflyt'):
-            changed = bflyt_letters(blarc, lo, hi, swap)
-            if changed:
-                letters[member] = changed
-    assert 'blyt/DoCommand_00.bflyt' in letters, 'no letter panes in blyt/DoCommand_00.bflyt'
-    outputs[ARCHIVE] = bytes(blarc)
-    assert FONTS, 'no Font/Font*.Nin_NX_NVN.bfarc.zs in the RomFS'
-    for path in FONTS:
-        frame = zstd.get_frame_info(originals[path])
-        bfarc = zstd.decompress(originals[path], zstd_dict=dictionaries.get(frame.dictionary_id))
-        lo, hi = sarc_members(bfarc)['scft/External.bfotf']
-        font = bfotf_swap(bfarc[lo:hi], KEY_GLYPHS) if args.xbox_prompts else bfotf_symbols(bfarc[lo:hi], PS_GLYPHS)
-        outputs[path] = sarc_replace(bfarc, {'scft/External.bfotf': font})
-    assert MALS, 'no Mals/<language>.Product.<version>.sarc.zs in the RomFS'
+        for member, (lo, hi) in members.items():
+            if member.endswith('.bflyt'):
+                changed = bflyt_letters(blarc, lo, hi, PS_LETTERS)
+                if changed:
+                    letters[member] = changed
+        assert 'blyt/DoCommand_00.bflyt' in letters, 'no letter panes in blyt/DoCommand_00.bflyt'
+        outputs[ARCHIVE] = bytes(blarc)
+        for path in FONTS:
+            bfarc = unpack(path)
+            lo, hi = sarc_members(bfarc)[icons.FONT]
+            outputs[path] = sarc_replace(bfarc, {icons.FONT: bfotf_symbols(bfarc[lo:hi], PS_GLYPHS)})
+    else:
+        archives = {path: unpack(path) for path in FONTS}
+        text = sarc_members(archives[icons.TEXT_ARCHIVE])
+        missing = [name for name in icons.TEXT_FONTS if name not in text]
+        assert not missing, f'no {", ".join(missing)} in {icons.TEXT_ARCHIVE}'
+        drawn = icons.xbox_icons(icons.text_glyphs(archives[icons.TEXT_ARCHIVE][slice(*text[name])]
+                                                   for name in icons.TEXT_FONTS))
+        bntx = members['timg/__Combined.bntx'][0]
+        letters = {}
+        if by_position:
+            bntx_swap(blarc, bntx, KEY_TEXTURES)
+            for member, (lo, hi) in members.items():
+                if member.endswith('.bflyt'):
+                    changed = bflyt_letters(blarc, lo, hi, KEY_LETTERS)
+                    if changed:
+                        letters[member] = changed
+            assert 'blyt/DoCommand_00.bflyt' in letters, 'no letter panes in blyt/DoCommand_00.bflyt'
+        hud = icons.bntx_redraw(blarc, bntx, icons.HUD_TEXTURES, drawn)
+        outputs[ARCHIVE] = bytes(blarc)
+        fonts = {}   # each distinct font is drawn once (1.4.3's four archives hold the same one)
+        for path, bfarc in archives.items():
+            lo, hi = sarc_members(bfarc)[icons.FONT]
+            otf, key = icons.bfotf_decode(bfarc[lo:hi])
+            if otf not in fonts:
+                fonts[otf] = icons.redraw_font(otf, drawn, KEY_GLYPHS if by_position else ())
+            outputs[path] = sarc_replace(bfarc, {icons.FONT: icons.bfotf_encode(fonts[otf], key, bfarc[lo:hi])})
     messages = {}
-    for path in MALS:
-        frame = zstd.get_frame_info(originals[path])
-        mals = bytearray(zstd.decompress(originals[path], zstd_dict=dictionaries.get(frame.dictionary_id)))
+    for path in MALS if by_position or symbols else []:
+        mals = bytearray(unpack(path))
         lo, hi = sarc_members(mals)[LAYOUT_MSG]
         msbt = bytearray(mals[lo:hi])
-        changed = msbt_letters(msbt, swap)
+        changed = msbt_letters(msbt, PS_LETTERS if symbols else KEY_LETTERS)
         assert len(changed) == sum(len(v) for v in letters.values()), (path, changed)
         mals[lo:hi] = msbt
         outputs[path] = bytes(mals)
         messages[path] = len(changed)
-    prompt_info = dict(textures=KEY_TEXTURES if args.xbox_prompts else PS_TEXTURES, letters=letters,
-                       messages=messages, fonts=FONTS)
-    if args.playstation_prompts:
-        prompt_info['disc'] = disc
+    # An archive that grew needs as much more room in the resource size table, or the game stops when it loads it.
+    grown = {path: len(data) - sizes[path] for path, data in outputs.items() if len(data) > sizes[path]}
+    if grown:
+        outputs[RESTBL] = icons.grow_restbl(unpack(RESTBL), grown)
+    prompts = dict(style=args.prompts, textures=KEY_TEXTURES if by_position else [], letters=letters,
+                   messages=messages, hud=hud, icons=len(drawn), fonts=FONTS, grown=grown)
+    if symbols:
+        prompts['disc'] = disc
 
 lines = []
 for path, contents in outputs.items():
@@ -631,5 +610,4 @@ for path, contents in outputs.items():
                                        + ''.join(line + '\n' for line in lines))
 print(json.dumps(dict(status='pass', path=ARCHIVE, members=patched, changed_bytes=len(diff),
                       ultrawide_layout=dict(aspect=args.aspect, members=len(layout)) if args.aspect else None,
-                      xbox_prompts=prompt_info if args.xbox_prompts else None,
-                      playstation_prompts=prompt_info if args.playstation_prompts else None)))
+                      prompts=prompts)))
