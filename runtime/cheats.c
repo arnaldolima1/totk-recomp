@@ -10,10 +10,10 @@
 //
 // Data cheats run in a VM after Atmosphere's dmnt cheat VM (opcodes 0-A; the 0xC.. and 0xF.. extensions are not
 // supported), every presented frame while their switch is on, with registers cleared before each cheat. Memory is the
-// guest's, mapped at its own addresses: main's image is written through VirtualProtect (its read-only data included,
-// as dmnt writes through the debugger), everything else after mem_query says the guest may read or write it. Buttons
-// are input_poll's HidNpadButton bits, the same as the cheat format's key masks; they read 0 while the menu is open.
-#include <windows.h>
+// guest's, mapped at its own addresses: main's image is written with its pages made writable for the write (read-only
+// data included, as dmnt writes through the debugger), everything else after mem_query says the guest may read or write
+// it. Buttons are input_poll's HidNpadButton bits, the same as the cheat format's key masks; they read 0 while the menu
+// is open.
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +25,12 @@
 #include "input.h"
 #include "platform/platform.h"
 
+#ifdef _WIN32
+#define SEP "\\"
+#else
+#define SEP "/"
+#endif
+
 enum { STATUS_MAX = 160, OPS_PER_RUN = 1 << 20 };
 
 typedef struct {
@@ -32,7 +38,7 @@ typedef struct {
     uint32_t *words;
     int n;
     int set;              // patch set, -1 none
-    volatile LONG on;
+    volatile int32_t on;
     char note[STATUS_MAX];
 } Cheat;
 
@@ -47,28 +53,23 @@ static uint32_t fnv(const char *s, size_t n) {
     return h;
 }
 
-// The folder of totk.exe, UTF-8, with a trailing backslash.
-static int exe_dir(char *out, int n) {
-    wchar_t w[MAX_PATH * 2];
-    DWORD k = GetModuleFileNameW(NULL, w, MAX_PATH * 2);
-    if (!k || k >= MAX_PATH * 2) return 0;
-    wchar_t *cut = wcsrchr(w, L'\\');
+// The folder of the executable, with a trailing separator.
+static int exe_dir(char *out, size_t n) {
+    if (!plat_exe_path(out, n)) return 0;
+    char *cut = plat_last_sep(out);
     if (!cut) return 0;
     cut[1] = 0;
-    return WideCharToMultiByte(CP_UTF8, 0, w, -1, out, n, NULL, NULL) > 0;
+    return 1;
 }
 
 static int build_id(char out[17]) {
-    char path[1024];
+    char path[PLAT_PATH_MAX];
     snprintf(path, sizeof path, "%s/main", rt_config()->exefs);
-    wchar_t w[1024];
-    if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, w, 1024)) return 0;
-    HANDLE f = CreateFileW(w, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-    if (f == INVALID_HANDLE_VALUE) return 0;
+    PlatFile *f = plat_file_open(path);
+    if (!f) return 0;
     uint8_t head[0x48];
-    DWORD got = 0;
-    int ok = ReadFile(f, head, sizeof head, &got, NULL) && got == sizeof head && !memcmp(head, "NSO0", 4);
-    CloseHandle(f);
+    int ok = plat_file_pread(f, head, sizeof head, 0) == sizeof head && !memcmp(head, "NSO0", 4);
+    plat_file_close(f);
     for (int i = 0; ok && i < 8; i++) snprintf(out + 2 * i, 3, "%02X", head[0x40 + i]);
     return ok;
 }
@@ -160,15 +161,29 @@ static int rd(uint64_t a, int width, uint64_t *v) {
     return 1;
 }
 
+// Writes n bytes into main's image a page at a time: a read-only page is writable for its part of the copy only.
+static void wr_main(uint64_t a, const uint8_t *from, int n) {
+    while (n > 0) {
+        uint64_t page = a & ~0xFFFull, end;
+        int k = (int)(page + 0x1000 - a);
+        if (k > n) k = n;
+        int prot = plat_mem_state(page, page + 0x1000, &end);
+        if (prot != PLAT_PROT_READ && prot != PLAT_PROT_RW) return;
+        if (prot == PLAT_PROT_READ && !plat_mem_protect(page, 0x1000, PLAT_PROT_RW)) return;
+        memcpy((void *)(uintptr_t)a, from, (size_t)k);
+        if (prot == PLAT_PROT_READ) plat_mem_protect(page, 0x1000, PLAT_PROT_READ);
+        a += (uint64_t)k;
+        from += k;
+        n -= k;
+    }
+}
+
 static void wr(uint64_t a, int width, uint64_t v) {
     uint64_t now;
     if (!rd(a, width, &now) || !memcmp(&now, &v, (size_t)width)) return;   // unchanged: no write, no protection change
     void *p = (void *)(uintptr_t)a;
     if (in_main(a, (unsigned)width)) {
-        DWORD old, back;
-        if (!VirtualProtect(p, (SIZE_T)width, PAGE_READWRITE, &old)) return;
-        memcpy(p, &v, (size_t)width);
-        VirtualProtect(p, (SIZE_T)width, old, &back);
+        wr_main(a, (const uint8_t *)&v, width);
     } else if (guest_ok(a, (unsigned)width, 2)) {
         memcpy(p, &v, (size_t)width);   // a frozen region thaws on the write (memory.c)
     }
@@ -346,7 +361,7 @@ static void parse(char *s) {
             while (*name == ' ' || *name == '\t') name++;
             size_t k = strlen(name);
             while (k && (name[k - 1] == ' ' || name[k - 1] == '\t')) name[--k] = 0;
-            c->info.name = _strdup(name);
+            c->info.name = strdup(name);
             c->info.kind = line[0] == '{' ? CHEAT_MASTER : CHEAT_HEADING;
             c->set = -1;
             wcap = 0;
@@ -386,12 +401,12 @@ static int status_of(char *status, const char *key, char **fields) {
 
 void cheats_init(void) {
     const RtLoaded *m = ldr_count() ? ldr_module(0) : NULL;
-    char dir[MAX_PATH * 3], bid[17], path[MAX_PATH * 3 + 64];
+    char dir[PLAT_PATH_MAX], bid[17], path[PLAT_PATH_MAX + 64];
     if (!m || !exe_dir(dir, sizeof dir) || !build_id(bid)) return;
     g_main = m->base;
     g_main_size = m->size;
     g_code_end = m->base + ((m->text_end + 0xFFF) & ~0xFFFull);
-    snprintf(g_file, sizeof g_file, "cheats\\%s.txt", bid);
+    snprintf(g_file, sizeof g_file, "cheats" SEP "%s.txt", bid);
     snprintf(path, sizeof path, "%s%s", dir, g_file);
     char *text = read_text(path);
     if (!text) {
@@ -400,7 +415,7 @@ void cheats_init(void) {
     }
     parse(text);
     free(text);
-    snprintf(path, sizeof path, "%scheats\\%s.status", dir, bid);
+    snprintf(path, sizeof path, "%scheats" SEP "%s.status", dir, bid);
     char *status = read_text(path);
     int counts[CHEAT_UNSUPPORTED + 1] = {0}, seen_dups = 0;
     for (int i = 0; i < g_n; i++) {
@@ -471,7 +486,7 @@ void cheats_set(int i, int on) {
     if (i < 0 || i >= g_n) return;
     Cheat *c = &g_cheats[i];
     if (c->info.kind != CHEAT_CODE && c->info.kind != CHEAT_KEY && c->info.kind != CHEAT_DATA) return;
-    InterlockedExchange(&c->on, on != 0);
+    plat_xchg32(&c->on, on != 0);
     if (c->info.kind == CHEAT_CODE) rt_patch_switch(c->set, on);   // CHEAT_KEY: cheats_frame follows the buttons
     cfg_set(c->info.key, on ? "1" : "0");
     rt_log("cheats: %s %s", c->info.name, on ? "on" : "off");
