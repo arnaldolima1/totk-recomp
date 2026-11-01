@@ -22,6 +22,10 @@
 // hash, no manifest). A path several overlays give is served by one: a player mod higher in the order beats a lower
 // one, any player mod beats the TOTK_ROMFS_MODS manifest, which beats romfs-patches (overlay_contest). A mod path that
 // matches a RomFS path only without case is served under the RomFS spelling.
+//
+// The resource size table: with a player mod enabled, the game's table is rebuilt at start with the tables the mods
+// ship merged in and the entries of the mods' files raised to what they need (restbl_overlay), and served from
+// <profile>/mods/ in place of the game's or a mod's table.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,7 +39,10 @@
 #include "romfs_config.h"
 #include "romfs_path.h"
 #include "platform/platform.h"
+#include "restbl.h"
 #include "sha256.h"
+
+#include <zstd.h>
 
 #define NH 65536                     // RomFS handle slots
 #define READ_CHUNK (64u << 20)       // largest single read
@@ -342,6 +349,51 @@ static int other_version(const char *path) {
     return 0;
 }
 
+// ---- the resource size table's inputs: the tables the overlays carry, before overlay_contest keeps one of them
+static char restbl_rel[256];   // the RomFS path of the game's table, "" when it has none
+typedef struct {
+    char *file;
+    int mod, other;   // mod: ModInfo index + 1, 0 for the port's folders; other: made for another game version
+} Shipped;
+static Shipped *shipped;
+static size_t nshipped;
+
+static int ends_with(const char *s, const char *tail) {
+    size_t n = strlen(s), k = strlen(tail);
+    return n >= k && !strcmp(s + n - k, tail);
+}
+
+// 1 when rel is a resource size table of any game version.
+static int is_restbl(const char *rel) {
+    return !strncmp(rel, "System/Resource/ResourceSizeTable.", 34) && ends_with(rel, ".rsizetable.zs");
+}
+
+static void shipped_add(const char *file, int mod, int other) {
+    Shipped *grown = realloc(shipped, (nshipped + 1) * sizeof *shipped);
+    char *copy = strdup(file);
+    need(grown && copy, "resource size table list");
+    shipped = grown;
+    shipped[nshipped++] = (Shipped){copy, mod, other};
+}
+
+// The game's table: the one System/Resource/ResourceSizeTable.*.rsizetable.zs of the RomFS.
+static void restbl_find(void) {
+    for (uint64_t i = lower("System/Resource/ResourceSizeTable."); i < file_count; i++) {
+        const char *n = entry_name(entry(i));
+        if (strncmp(n, "System/Resource/ResourceSizeTable.", 34)) break;
+        if (is_restbl(n) && strlen(n) < sizeof restbl_rel) {
+            snprintf(restbl_rel, sizeof restbl_rel, "%s", n);
+            return;
+        }
+    }
+}
+
+// The tables the overlays carry for this game version, every one of them (overlay_contest keeps one).
+static void restbl_collect(void) {
+    for (size_t k = 0; k < noverlay; k++)
+        if (restbl_rel[0] && !strcmp(overlays[k].name, restbl_rel)) shipped_add(overlays[k].path, overlays[k].mod, 0);
+}
+
 typedef struct { int k, prio; const char *dir, *rel; } ModWalk;
 
 static void mod_walk(int k, int prio, const char *dir, const char *rel);
@@ -368,6 +420,7 @@ static int mod_walk_cb(const char *leaf, int kind, uint64_t size, void *ctx) {
     }
     uint64_t i = index_any_case(path);
     if (i == UINT64_MAX && other_version(path)) {
+        if (is_restbl(path)) shipped_add(file, w->k + 1, 1);   // its entries for this mod's files still apply
         m->other_version++;
         return 1;
     }
@@ -544,6 +597,123 @@ static int serve_generated(const char *rel, Overlay *base, void *out, size_t out
     return 1;
 }
 
+// ---- the resource size table (restbl.c)
+
+// The decompressed size of a file's bytes as the game unpacks them: the content size its zstd frame records (.zs;
+// the game's files and zstd's own tools write it), four times the bytes for a frame without one, else its size.
+static uint64_t content_size(PlatFile *f, uint64_t off, uint64_t size, const char *rel) {
+    if (!ends_with(rel, ".zs") || !f) return size;
+    uint8_t head[18];
+    uint32_t n = size < sizeof head ? (uint32_t)size : (uint32_t)sizeof head;
+    if (read_at(f, head, n, off) != n) return size;
+    unsigned long long c = ZSTD_getFrameContentSize(head, n);
+    return c == ZSTD_CONTENTSIZE_ERROR ? size : c == ZSTD_CONTENTSIZE_UNKNOWN ? size * 4 : c;
+}
+
+// A table from its zstd bytes; NULL when they are not one.
+static Restbl *restbl_unpack(const void *z, size_t n) {
+    unsigned long long raw = ZSTD_getFrameContentSize(z, n);
+    if (raw == ZSTD_CONTENTSIZE_UNKNOWN || raw == ZSTD_CONTENTSIZE_ERROR || raw > (64u << 20)) return NULL;
+    uint8_t *d = malloc((size_t)raw ? (size_t)raw : 1);
+    size_t got = d ? ZSTD_decompress(d, (size_t)raw, z, n) : 0;
+    Restbl *t = d && !ZSTD_isError(got) && got == raw ? restbl_parse(d, (size_t)raw) : NULL;
+    free(d);
+    return t;
+}
+
+// With a player mod (or the TOTK_ROMFS_MODS manifest) serving files: the game's table with every shipped table of this
+// version merged in (an entry larger than the game's wins), the entries a mod's table for another version gives for
+// that mod's files, and each served mod file's entry raised to what its size needs (restbl_grow for a file the game
+// has, restbl_estimate for an added one). Never lowers the game's entries.
+static void restbl_overlay(void) {
+    int player = 0;
+    for (size_t k = 0; k < noverlay; k++) player |= overlays[k].mod || overlays[k].prio == 1;
+    if (!player || !restbl_rel[0]) return;
+    static const char keeps[] = "mod files that grew may fail to load";
+    double t0 = now_s();
+    uint64_t gi = lower(restbl_rel);
+    Entry ge = entry(gi);
+    void *gz = ge.size < (64u << 20) ? malloc((size_t)ge.size) : NULL;
+    Restbl *base = NULL, *out = NULL;
+    if (gz && read_at(image, gz, (uint32_t)ge.size, ge.offset) == (int64_t)ge.size) {
+        base = restbl_unpack(gz, (size_t)ge.size);
+        out = restbl_unpack(gz, (size_t)ge.size);
+    }
+    free(gz);
+    if (!base || !out) {
+        rt_log("RomFS: cannot read the resource size table %s; %s", restbl_rel, keeps);
+        restbl_free(base);
+        restbl_free(out);
+        return;
+    }
+    int tables = 0, merged = 0, raised = 0, estimated = 0;
+    for (size_t s = 0; s < nshipped; s++) {
+        uint64_t n = 0;
+        void *z = plat_file_read(shipped[s].file, &n);
+        Restbl *t = z ? restbl_unpack(z, (size_t)n) : NULL;
+        free(z);
+        if (!t) {
+            rt_log("RomFS: %s is not a resource size table; left out", shipped[s].file);
+            continue;
+        }
+        tables++;
+        if (!shipped[s].other) {
+            merged += restbl_merge(out, base, t);
+        } else {   // another version's table: only the entries of the files its mod serves
+            for (size_t k = 0; k < noverlay; k++) {
+                char key[4200];
+                const char *kp = restbl_key(overlays[k].name, key, sizeof key);
+                if (overlays[k].mod == shipped[s].mod) merged += restbl_take(out, t, &kp, 1);
+            }
+        }
+        restbl_free(t);
+    }
+    Overlay *served = NULL;
+    for (size_t k = 0; k < noverlay; k++) {
+        Overlay *o = &overlays[k];
+        if (o->index == gi) served = o;
+        if ((!o->mod && o->prio != 1) || o->index == gi) continue;
+        char key[4200];
+        restbl_key(o->name, key, sizeof key);
+        int mc = ends_with(o->name, ".mc");
+        PlatFile *f = open_read(o->path);
+        uint64_t now = mc ? o->size : content_size(f, 0, o->size, o->name);
+        if (f) plat_file_close(f);
+        uint32_t entry_size, want;
+        if (o->index != ADDED) {
+            if (!restbl_get(base, key, &entry_size)) continue;   // the game sizes it without the table (streamed)
+            Entry e = entry(o->index);
+            uint64_t was = mc ? e.size : content_size(image, e.offset, e.size, o->name);
+            want = restbl_grow(key, entry_size, was, now, mc);
+        } else {
+            want = restbl_estimate(key, mc ? now * 8 : now);   // a mesh codec file unpacks to several times its size
+            estimated += want != 0;
+        }
+        raised += want && restbl_raise(out, key, want);
+    }
+    restbl_free(base);
+    if (!merged && !raised && !served) {
+        restbl_free(out);
+        rt_log("RomFS: resource size table: the mods' files fit the game's entries (%.0f ms)", (now_s() - t0) * 1000);
+        return;
+    }
+    size_t rn = 0, zn = 0;
+    uint8_t *raw = restbl_write(out, &rn);
+    restbl_free(out);
+    size_t cap = raw ? ZSTD_compressBound(rn) : 0;
+    void *z = raw ? malloc(cap) : NULL;
+    if (z) zn = ZSTD_compress(z, cap, raw, rn, 3);
+    free(raw);
+    if (!z || ZSTD_isError(zn)) {
+        free(z);
+        rt_log("RomFS: cannot pack the merged resource size table; %s", keeps);
+        return;
+    }
+    if (serve_generated(restbl_rel, served, z, zn, "mods", "merged resource sizes", keeps))
+        rt_log("RomFS: resource size table: %d tables merged (%d entries), %d entries raised for mod files (%d "
+               "added files estimated), %.0f ms", tables, merged, raised, estimated, (now_s() - t0) * 1000);
+}
+
 // The HeapDef table a bigger game resolution needs (resolution.c): its texture heap and that heap's parent grow. The
 // base is an overlay that replaces the table (a mod's heap sizes stay), else the RomFS original; the grown table is
 // written to <profile>/resolution/ and served in the base's place.
@@ -600,7 +770,9 @@ int romfs_prompts_off(const char *folder) {
 static const char *overlay_clash(size_t a, size_t b, size_t c, size_t d) {
     for (size_t i = a; i < b; i++)
         for (size_t j = c; j < d; j++)
-            if (overlays[i].index != ADDED && overlays[i].index == overlays[j].index) return overlays[i].name;
+            if (overlays[i].index != ADDED && overlays[i].index == overlays[j].index &&
+                strcmp(overlays[i].name, restbl_rel))   // restbl_overlay merges both tables
+                return overlays[i].name;
     return NULL;
 }
 
@@ -624,8 +796,8 @@ static void overlay_init(void) {
     // the prompts stay until restart even though the layout itself changes live. Each folder replaces romfs-patches as
     // a whole and the setup builds no folder of another shape with Xbox prompts, so a game resolution that is not 16:9
     // keeps the Switch prompts. So does a RomFS mod (the TOTK_ROMFS_MODS manifest or a player mod) that replaces one of
-    // the prompts' files (the fonts, the resource size table): romfs-patches loads in their place, so the mod's file
-    // is not served beside prompts files made for the game's own.
+    // the prompts' fonts: romfs-patches loads in their place, so the mod's file is not served beside prompts files made
+    // for the game's own. A mod's resource size table is no clash: restbl_overlay merges it with the prompts' one.
     char def[2100], path[2100];
     const char *patches = cfg_get("TOTK_ROMFS_PATCHES"), *mods = cfg_get("TOTK_ROMFS_MODS");
     int wide = 0;
@@ -655,6 +827,7 @@ static void overlay_init(void) {
                   : patches                               ? ROMFS_PROMPTS_PATCHES
                   : !romfs_prompts_ready(prompts_wanted)  ? ROMFS_PROMPTS_MISSING
                                                           : ROMFS_PROMPTS_OK;
+    restbl_find();
     size_t first = noverlay;
     if (prompts_wanted && prompts_off == ROMFS_PROMPTS_OK) {
         snprintf(path, sizeof path, "%s/%s", index_dir, prompts_wanted);   // fits: its manifest path did
@@ -689,8 +862,10 @@ static void overlay_init(void) {
         prompts_off = ROMFS_PROMPTS_MODS;
         if (plain_ok) overlay_load(plain, 0, 0);
     }
+    restbl_collect();
     overlay_contest();
     mods_overlay_log();
+    restbl_overlay();
     heapdef_overlay();
     camera_overlay();
     added_init();

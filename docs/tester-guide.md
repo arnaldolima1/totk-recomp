@@ -64,6 +64,10 @@ it up or down. When two mods change the same file, the higher one wins.
   export location to an empty folder inside `mods/` (for example `mods/TKMM`). That folder is then one mod here.
 - Files made for another game version (names with `.Product.<number>.` that this version does not have) are left out;
   the Mods tab counts them. Look for the mod's release for your game version.
+- The resource size table (`System/Resource/ResourceSizeTable.Product.<n>...rsizetable.zs`), which tells the game how
+  much memory each file needs, is rebuilt at every start with mods enabled: the tables the mods ship are merged and
+  the entries of files a mod made larger or added are raised. The log line `RomFS: resource size table: ...` says
+  how many. A mod's table for another game version still counts for that mod's own files.
 - Mods that patch the game code (`exefs/*.ips`, `exefs/*.pchtxt`) are listed but not applied yet; a mod with both kinds
   of files stays off as a whole until they are.
 - Mods with their own code (`exefs/subsdk*` or a replaced `exefs/main`, such as UltraCam) never load, their RomFS files
