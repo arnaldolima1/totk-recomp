@@ -181,6 +181,18 @@
 # patch 0010), so the shader cache is rebuilt once after an update. Read at start.
 # pcss = 0
 
+# NVIDIA DLSS / DLAA for the 3D scene, on NVIDIA RTX GPUs with nvngx_dlss.dll (from NVIDIA's DLSS SDK) next to
+# totk.exe; elsewhere the setting does nothing. The HUD is drawn after it and is not touched. Changes while the game
+# runs take effect at once.
+# dlaa = 0
+# What DLSS works from: dlaa (the 3D scene at full size), quality, balanced or performance (the scene at 67, 58 or
+# 50 % of the output, scaled up by DLSS; these replace render_scale and sharpen texture filtering to match). With dlaa
+# = 0 the game's own scaling is used at that size. Read at start.
+# dlss = dlaa
+# The game's own FXAA after the post effects; with DLAA on it is not needed. Changes while the game runs take effect at
+# once.
+# fxaa = 1
+
 # HDR output: hdr = 1 sends the picture as HDR10 (needs HDR on in Windows, "Use HDR", or a Wayland compositor with
 # colour management; without it the picture stays SDR). The game's tonemap keeps highlights up to hdr_peak_nits (your
 # display's peak); hdr_game_nits is the picture's white (paper white, 203 is the HDR reference) and hdr_ui_nits the
