@@ -133,15 +133,31 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_PAD_LAYOUT] = "Button layout",
     [UI_MENU_PAD_LAYOUT_DESC] = "Which button is A. Nintendo: the right one, as on a Switch. Xbox: the bottom one, as "
                                 "labelled on an Xbox controller (cross on a PlayStation controller). Automatic picks "
-                                "Nintendo for controllers with Nintendo labels and Xbox for the others. Xbox prompts: "
-                                "A is the right one as with Nintendo, and the game shows the Xbox labels (B for A, A "
-                                "for B, Y for X, X for Y); the prompts change after a restart. The letters are part of the "
-                                 "game's files, so a button you remap in Controls keeps the old letter on screen.",
+                                "Nintendo for controllers with Nintendo labels and Xbox for the others. Which "
+                                "controller the game's prompts show is set under Button prompts.",
     [UI_MENU_PAD_LAYOUT_AUTO] = "Automatic", [UI_MENU_PAD_LAYOUT_NINTENDO] = "Nintendo (A right)",
-    [UI_MENU_PAD_LAYOUT_XBOX] = "Xbox (A bottom)", [UI_MENU_PAD_LAYOUT_XBOX_PROMPTS] = "Xbox prompts (A right)",
+    [UI_MENU_PAD_LAYOUT_XBOX] = "Xbox (A bottom)",
     [UI_MENU_PAD_LAYOUT_IN_USE] = "in use: %s",
-    [UI_MENU_PAD_LAYOUT_PROMPTS_MISSING] = "prompt files missing: run the setup again",
-    [UI_MENU_PAD_LAYOUT_PROMPTS_RESTART] = "prompts change after restart",
+    [UI_MENU_PROMPTS] = "Button prompts",
+    [UI_MENU_PROMPTS_DESC] = "Which controller's buttons the game's prompts show. Nintendo: the game's own. Xbox: LB, "
+                             "RB, LT, RT, Menu, View and a d-pad cross, and A, B, X and Y as labelled on the button "
+                             "the layout above presses (with Nintendo (A right) the right button is labelled B, so the "
+                             "prompts for A show B). The game reads its prompts at start, so they change after a "
+                             "restart. They are part of the game's files, so a button you remap in Controls keeps its "
+                             "old prompt on screen.",
+    [UI_MENU_PROMPTS_NINTENDO] = "Nintendo", [UI_MENU_PROMPTS_XBOX] = "Xbox",
+    [UI_MENU_PROMPTS_MISSING] = "prompt files missing: run the setup again",
+    [UI_MENU_PROMPTS_FAILED] = "prompt files damaged: run the setup again",
+    [UI_MENU_PROMPTS_RESTART] = "prompts change after restart",
+    [UI_MENU_PROMPTS_OFF_SHAPE] = "off at a game resolution not 16:9",
+    [UI_MENU_PROMPTS_OFF_MODS] = "off: a RomFS mod replaces their files",
+    [UI_MENU_PROMPTS_OFF_PATCHES] = "off while TOTK_ROMFS_PATCHES is set",
+    [UI_MENU_RESTART] = "Restart now",
+    [UI_MENU_RESTART_DESC] = "Closes the game and starts it again with the new prompts. Progress since your last save "
+                             "is lost.",
+    [UI_MENU_RESTART_CONFIRM] = "Restart the game now? Progress since your last save is lost.",
+    [UI_MENU_RESTART_YES] = "Restart",
+    [UI_MENU_RESTART_SAVING] = "The game is saving: Restart is possible in a moment.",
     [UI_MENU_STICK_DEADZONE] = "Stick dead zone",
     [UI_MENU_STICK_DEADZONE_DESC] = "How far a gamepad stick moves before the game sees it. Raise it if the character or the camera moves on its own.",
     [UI_MENU_MOUSE_SENS] = "Mouse camera sensitivity",
@@ -412,16 +428,31 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_PAD_LAYOUT] = "Раскладка кнопок",
     [UI_MENU_PAD_LAYOUT_DESC] = "Какая кнопка работает как A. Nintendo: правая, как на Switch. Xbox: нижняя, как "
                                 "подписано на контроллере Xbox (крест на контроллере PlayStation). Автоматически: "
-                                "Nintendo для контроллеров с подписями Nintendo, Xbox для остальных. Подсказки Xbox: "
-                                "A справа, как в Nintendo, а игра показывает надписи Xbox (B вместо A, A вместо B, Y "
-                                "вместо X, X вместо Y); подсказки меняются после перезапуска. Буквы записаны в файлах "
-                                 "игры, поэтому у кнопки, переназначенной на вкладке управления, на экране остаётся "
-                                 "прежняя буква.",
+                                "Nintendo для контроллеров с подписями Nintendo, Xbox для остальных. Кнопки какого "
+                                "контроллера показывают подсказки игры, задаётся в строке «Подсказки кнопок».",
     [UI_MENU_PAD_LAYOUT_AUTO] = "Автоматически", [UI_MENU_PAD_LAYOUT_NINTENDO] = "Nintendo (A справа)",
-    [UI_MENU_PAD_LAYOUT_XBOX] = "Xbox (A снизу)", [UI_MENU_PAD_LAYOUT_XBOX_PROMPTS] = "Подсказки Xbox (A справа)",
+    [UI_MENU_PAD_LAYOUT_XBOX] = "Xbox (A снизу)",
     [UI_MENU_PAD_LAYOUT_IN_USE] = "сейчас: %s",
-    [UI_MENU_PAD_LAYOUT_PROMPTS_MISSING] = "нет файлов подсказок: запустите установку снова",
-    [UI_MENU_PAD_LAYOUT_PROMPTS_RESTART] = "подсказки сменятся после перезапуска",
+    [UI_MENU_PROMPTS] = "Подсказки кнопок",
+    [UI_MENU_PROMPTS_DESC] = "Кнопки какого контроллера показывают подсказки игры. Nintendo: как в самой игре. Xbox: "
+                             "LB, RB, LT, RT, Menu, View и крестовина, а A, B, X и Y подписаны так же, как кнопка, "
+                             "которую нажимает раскладка выше (в Nintendo (A справа) правая кнопка подписана B, и "
+                             "подсказки A показывают B). Игра читает подсказки при запуске, так что они меняются после "
+                             "перезапуска. Подсказки записаны в файлах игры, поэтому у кнопки, переназначенной на "
+                             "вкладке управления, на экране остаётся прежняя подсказка.",
+    [UI_MENU_PROMPTS_NINTENDO] = "Nintendo", [UI_MENU_PROMPTS_XBOX] = "Xbox",
+    [UI_MENU_PROMPTS_MISSING] = "нет файлов подсказок: запустите установку снова",
+    [UI_MENU_PROMPTS_FAILED] = "файлы подсказок повреждены: запустите установку снова",
+    [UI_MENU_PROMPTS_RESTART] = "подсказки сменятся после перезапуска",
+    [UI_MENU_PROMPTS_OFF_SHAPE] = "выкл. при разрешении игры не 16:9",
+    [UI_MENU_PROMPTS_OFF_MODS] = "выкл.: мод RomFS заменяет их файлы",
+    [UI_MENU_PROMPTS_OFF_PATCHES] = "выкл., пока задан TOTK_ROMFS_PATCHES",
+    [UI_MENU_RESTART] = "Перезапустить сейчас",
+    [UI_MENU_RESTART_DESC] = "Закрывает игру и запускает её снова с новыми подсказками. Прогресс после последнего "
+                             "сохранения будет потерян.",
+    [UI_MENU_RESTART_CONFIRM] = "Перезапустить игру сейчас? Прогресс после последнего сохранения будет потерян.",
+    [UI_MENU_RESTART_YES] = "Перезапустить",
+    [UI_MENU_RESTART_SAVING] = "Игра сохраняется: перезапуск будет доступен через мгновение.",
     [UI_MENU_STICK_DEADZONE] = "Мёртвая зона стиков",
     [UI_MENU_STICK_DEADZONE_DESC] = "Насколько нужно отклонить стик геймпада, чтобы игра это заметила. Увеличьте, если персонаж или камера двигаются сами.",
     [UI_MENU_MOUSE_SENS] = "Чувствительность мыши",
@@ -679,10 +710,8 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
                                 "reiniciar. As letras fazem parte dos arquivos do jogo, então um botão remapeado em "
                                 "Controles continua com a letra antiga na tela.",
     [UI_MENU_PAD_LAYOUT_AUTO] = "Automático", [UI_MENU_PAD_LAYOUT_NINTENDO] = "Nintendo (A à direita)",
-    [UI_MENU_PAD_LAYOUT_XBOX] = "Xbox (A embaixo)", [UI_MENU_PAD_LAYOUT_XBOX_PROMPTS] = "Ícones de Xbox (A à direita)",
+    [UI_MENU_PAD_LAYOUT_XBOX] = "Xbox (A embaixo)",
     [UI_MENU_PAD_LAYOUT_IN_USE] = "em uso: %s",
-    [UI_MENU_PAD_LAYOUT_PROMPTS_MISSING] = "faltam os arquivos dos ícones: execute a instalação de novo",
-    [UI_MENU_PAD_LAYOUT_PROMPTS_RESTART] = "os ícones mudam após reiniciar",
     [UI_MENU_STICK_DEADZONE] = "Zona morta dos analógicos",
     [UI_MENU_STICK_DEADZONE_DESC] = "Quanto um analógico do controle precisa se mover antes que o jogo perceba. Aumente se o personagem ou a câmera se moverem sozinhos.",
     [UI_MENU_MOUSE_SENS] = "Sensibilidade da câmera no mouse",
@@ -985,10 +1014,7 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_PAD_LAYOUT_AUTO] = "自动",
     [UI_MENU_PAD_LAYOUT_NINTENDO] = "Nintendo（A 在右）",
     [UI_MENU_PAD_LAYOUT_XBOX] = "Xbox（A 在下）",
-    [UI_MENU_PAD_LAYOUT_XBOX_PROMPTS] = "Xbox 按键提示（A 在右）",
     [UI_MENU_PAD_LAYOUT_IN_USE] = "使用中：%s",
-    [UI_MENU_PAD_LAYOUT_PROMPTS_MISSING] = "缺少按键提示文件：请重新运行安装程序",
-    [UI_MENU_PAD_LAYOUT_PROMPTS_RESTART] = "按键提示重启后生效",
     [UI_MENU_STICK_DEADZONE] = "摇杆死区",
     [UI_MENU_STICK_DEADZONE_DESC] = "手柄摇杆要推动多远游戏才会响应。如果角色或视角会自己移动，"
                                     "请调高此值。",
