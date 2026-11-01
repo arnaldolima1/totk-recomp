@@ -740,7 +740,7 @@ static void row_walk_key(void) {
     InputMap m;
     input_map_snapshot(&m);
     for (int k = KEY_A; k < KEY_COUNT && !n; k++) {
-        if (!input_key_name(k) || _stricmp(input_key_name(k), cur)) continue;
+        if (!input_key_name(k) || strcasecmp(input_key_name(k), cur)) continue;
         int a = key_action(&m, k);
         if (a >= 0 && input_action_name(a)) snprintf(note, sizeof note, menu_text(UI_MENU_WALK_KEY_TAKEN), input_action_name(a)), n = note;
     }
