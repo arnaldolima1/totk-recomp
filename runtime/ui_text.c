@@ -117,6 +117,18 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_COLOR_SATURATION_DESC] = "Colour strength against grey; 100 % leaves it.",
     [UI_MENU_COLOR_GAMMA] = "Gamma",
     [UI_MENU_COLOR_GAMMA_DESC] = "Below 1 brightens dark and middle tones, above 1 darkens them; 1 leaves them.",
+    [UI_MENU_HDR_GROUP] = "HDR",
+    [UI_MENU_HDR] = "HDR output",
+    [UI_MENU_HDR_DESC] = "Bright highlights on an HDR display. Needs HDR turned on in Windows (\"Use HDR\") or in a "
+                         "Wayland compositor with colour management; without it the picture stays SDR. Applies after a "
+                         "restart. The colour profile above is for SDR and is not used in HDR.",
+    [UI_MENU_HDR_PEAK] = "Peak brightness",
+    [UI_MENU_HDR_PEAK_DESC] = "Your display's peak in nits; the brightest highlights stop there.",
+    [UI_MENU_HDR_GAME] = "Game brightness",
+    [UI_MENU_HDR_GAME_DESC] = "Nits of the picture's white (paper white). 203 is the HDR reference; raise it in a "
+                              "bright room.",
+    [UI_MENU_HDR_UI] = "HUD and menu brightness",
+    [UI_MENU_HDR_UI_DESC] = "Nits of the HUD's and this menu's white.",
 
     [UI_MENU_FPS_LIMIT] = "Frame rate limit",
     [UI_MENU_FPS_LIMIT_DESC] = "The most frames per second the game draws. Above 60 is experimental and needs Game speed "
@@ -428,6 +440,18 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_COLOR_SATURATION_DESC] = "Сила цвета относительно серого; 100 % — без изменений.",
     [UI_MENU_COLOR_GAMMA] = "Гамма",
     [UI_MENU_COLOR_GAMMA_DESC] = "Ниже 1 осветляет тёмные и средние тона, выше 1 затемняет их; 1 — без изменений.",
+    [UI_MENU_HDR_GROUP] = "HDR",
+    [UI_MENU_HDR] = "Вывод HDR",
+    [UI_MENU_HDR_DESC] = "Яркие блики на HDR-дисплее. Нужен включённый HDR в Windows («Использовать HDR») или "
+                         "Wayland-композитор с управлением цветом; без него картинка остаётся SDR. Применяется после "
+                         "перезапуска. Цветовой профиль выше — для SDR и в HDR не используется.",
+    [UI_MENU_HDR_PEAK] = "Пиковая яркость",
+    [UI_MENU_HDR_PEAK_DESC] = "Пик вашего дисплея в нитах; самые яркие блики останавливаются на нём.",
+    [UI_MENU_HDR_GAME] = "Яркость игры",
+    [UI_MENU_HDR_GAME_DESC] = "Ниты белого цвета картинки (paper white). 203 — эталон HDR; в светлой комнате "
+                              "поднимите.",
+    [UI_MENU_HDR_UI] = "Яркость интерфейса и меню",
+    [UI_MENU_HDR_UI_DESC] = "Ниты белого цвета интерфейса игры и этого меню.",
 
     [UI_MENU_FPS_LIMIT] = "Ограничение частоты кадров",
     [UI_MENU_FPS_LIMIT_DESC] = "Наибольшее число кадров в секунду. Выше 60 — экспериментальный режим, нужна «Скорость "
@@ -970,6 +994,18 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_WALK_SCALE] = "Força do andar",
     [UI_MENU_WALK_SCALE_DESC] = "A inclinação dos analógicos do teclado enquanto a tecla de andar está apertada. Metade é "
                                 "andar, a inclinação toda é correr.",
+    [UI_MENU_HDR_GROUP] = "HDR",
+    [UI_MENU_HDR] = "Saída HDR",
+    [UI_MENU_HDR_DESC] = "Brilhos intensos numa tela HDR. Precisa do HDR ligado no Windows (\"Usar HDR\") ou num "
+                         "compositor Wayland com gerenciamento de cor; sem isso a imagem continua SDR. Vale depois de "
+                         "reiniciar. O perfil de cor acima é para SDR e não é usado em HDR.",
+    [UI_MENU_HDR_PEAK] = "Brilho máximo",
+    [UI_MENU_HDR_PEAK_DESC] = "O pico da sua tela em nits; os brilhos mais fortes param aí.",
+    [UI_MENU_HDR_GAME] = "Brilho do jogo",
+    [UI_MENU_HDR_GAME_DESC] = "Nits do branco da imagem (branco de papel). 203 é a referência do HDR; aumente num "
+                              "ambiente claro.",
+    [UI_MENU_HDR_UI] = "Brilho do HUD e do menu",
+    [UI_MENU_HDR_UI_DESC] = "Nits do branco do HUD e deste menu.",
 };
 
 #define SWKBD_ONLY(name, ...) static const char *const name[UI_TEXT_COUNT] = {SWKBD(__VA_ARGS__)}
