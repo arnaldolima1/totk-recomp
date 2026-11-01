@@ -2,6 +2,22 @@
 
 **TotK Recomp** is a static recompilation of *The Legend of Zelda: Tears of the Kingdom* (Nintendo Switch, 2023) into a native Windows x86-64 application ([docs/architecture.md](docs/architecture.md)).
 
+> [!NOTE]
+> **This repository is a fork.** TotK Recomp is created and maintained by **[valentderah](https://github.com/valentderah)** in [valentderah/totk-pc-recomp](https://github.com/valentderah/totk-pc-recomp): the recompiler, the runtime, the Vulkan renderer and the installer are that project's work, with the contributors credited there and in [Credits](#credits). This fork, by [arnaldolima1](https://github.com/arnaldolima1), follows its releases and adds the features listed in [This fork](#this-fork). Problems that also happen on the original belong in its issue tracker.
+
+## This fork
+
+Added on top of the original, merged with each of its releases:
+
+- **Launcher** (`launcher/`): guided install and updates from GitHub, `totk.ini` settings with key remapping, mods in the emulator layout, Brazilian Portuguese interface
+- **Brazilian Portuguese** for the in-game menu, and the game's own language shown as Português (Brasil) with the launcher's translation
+- **Menu look**: a panel from the left with tab icons and the keys on its bottom line
+- **Achievements** ([docs/achievements.md](docs/achievements.md)): 64 achievements read from the game's own save progress, a notice with a chime, an *Achievements* tab, a platinum trophy, an editor for making your own with imported pictures, and unlocks that count only for progress made in play
+- **PlayStation button prompts** ([docs/controls.md](docs/controls.md)): ✕ ○ □ △ in place of the letters, drawn by the setup from the game's own files
+- **DualSense**: adaptive triggers and the light bar
+- Smoother mouse camera, borderless window and a notice while shaders compile
+- Faster updates: the setup keeps the compiled game code and reuses what did not change
+
 > [!IMPORTANT]
 > **No game files are included.** You need your own legally obtained copy of *Tears of the Kingdom*, dumped from your own console: the base game and the 1.2.1 or 1.4.3 update. Instructions for obtaining those files will not be provided.
 >
@@ -23,6 +39,8 @@ Report problems as issues, following [CONTRIBUTING.md](CONTRIBUTING.md).
 - In-game settings menu (F1) and performance overlay (F10)
 - Keyboard, mouse and gamepad with remapping, rumble and gyro
 - Xbox button prompts: a layout that keeps the Switch button positions and shows the Xbox labels
+- PlayStation button prompts (this fork)
+- Achievements with an editor (this fork)
 - Shaders prepared at install instead of during play
 
 ## Planned
@@ -35,7 +53,9 @@ Report problems as issues, following [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Requirements: Windows 10 or later, an x86-64 CPU with AVX2, a GPU with Vulkan 1.3 and `VK_EXT_external_memory_host`, about 36 GiB free during setup (20 GiB after).
 
-1. Download `TotK-Setup-<version>-windows.zip` from [Releases](../../releases/latest) and unpack it.
+With this fork's launcher: download `TotK.Recomp.Launcher_<version>_x64-setup.exe` from the [latest release](../../releases/latest), install it, and let it download and run the setup; it also offers the updates. By hand:
+
+1. Download `TotK-Setup-<version>-windows.zip` from a `game-v<version>` release on [Releases](../../releases) and unpack it.
 2. Start `TotK-Setup.exe`. If SmartScreen warns about an unsigned app, choose *More info*, then *Run anyway*.
 3. Pick your game files, the language and an install folder, and press *Start*. The setup builds the game once.
 4. Play `totk.exe` from the install folder.
@@ -43,6 +63,10 @@ Requirements: Windows 10 or later, an x86-64 CPU with AVX2, a GPU with Vulkan 1.
 To update, run a newer `TotK-Setup.exe` on the same folder; saves and settings are kept. Settings are in the in-game menu and in `totk.ini` ([totk.ini.example](totk.ini.example) lists every key). Controls: [docs/controls.md](docs/controls.md).
 
 ## Credits
+
+- **[valentderah](https://github.com/valentderah)**: creator and maintainer of TotK Recomp ([valentderah/totk-pc-recomp](https://github.com/valentderah/totk-pc-recomp)), and the contributors to that repository, among them Lucas-blip-png (colour profiles, field of view), shenjackyuanjie (the 1.1.1 update, the shader walk), wdiasjunior (the Linux port and Steam Deck), lcd1232 (the Linux installer's text) and JieML1100 (the equipment-switch fix)
+- **[arnaldolima1](https://github.com/arnaldolima1)**: this fork's launcher, achievements, PlayStation prompts, Brazilian Portuguese and the other changes in [This fork](#this-fork)
+- **UltraTears**: the look of the in-game menu and the fork the launcher grew from
 
 TotK Recomp builds on the projects below. What was taken from each, with its license, is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
