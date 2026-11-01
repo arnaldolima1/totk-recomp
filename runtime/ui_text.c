@@ -180,6 +180,13 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_STICK_SENS] = "Stick camera speed",
     [UI_MENU_STICK_SENS_DESC] = "Multiplies the game's own right-stick camera speed, top speed included, at each of the "
                                 "game's five camera sensitivities. The mouse keeps its own setting.",
+    [UI_MENU_WALK_KEY] = "Walk key",
+    [UI_MENU_WALK_KEY_DESC] = "Hold it to tilt the keyboard's sticks part of the way, so the keyboard walks instead of "
+                              "runs. The walk scale sets how far. A controller and the mouse are not affected.",
+    [UI_MENU_WALK_KEY_TAKEN] = "also %s",
+    [UI_MENU_WALK_SCALE] = "Walk scale",
+    [UI_MENU_WALK_SCALE_DESC] = "The tilt the keyboard's sticks get while the walk key is held. Half is a walk, the "
+                                "full tilt a run.",
 
     [UI_BINDS_HELP] = "Select a cell and press A or Enter, then the key, mouse button or controller button. Delete or "
                       "X clears a cell. A key in use moves here; a controller button swaps with the one it replaces.",
@@ -485,6 +492,13 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_STICK_SENS] = "Скорость камеры (стик)",
     [UI_MENU_STICK_SENS_DESC] = "Умножает скорость поворота камеры правым стиком, включая наибольшую, при каждой из пяти "
                                 "чувствительностей камеры в игре. На мышь не влияет.",
+    [UI_MENU_WALK_KEY] = "Клавиша шага",
+    [UI_MENU_WALK_KEY_DESC] = "Удерживайте: стики клавиатуры отклоняются частично, и персонаж идёт, а не бежит. "
+                              "Насколько — задаёт сила шага. Контроллер и мышь не затрагиваются.",
+    [UI_MENU_WALK_KEY_TAKEN] = "также %s",
+    [UI_MENU_WALK_SCALE] = "Сила шага",
+    [UI_MENU_WALK_SCALE_DESC] = "Отклонение стиков клавиатуры при удержании клавиши шага. Половина — шаг, полное "
+                                "отклонение — бег.",
 
     [UI_BINDS_HELP] = "Выберите ячейку и нажмите A или Enter, затем клавишу, кнопку мыши или кнопку контроллера. "
                       "Delete или X очищает ячейку. Занятая клавиша переходит сюда; кнопка контроллера меняется "
@@ -949,6 +963,13 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_STICK_SENS] = "Velocidade da câmera (analógico)",
     [UI_MENU_STICK_SENS_DESC] = "Multiplica a velocidade da câmera do próprio jogo no analógico direito, a máxima também, "
                                 "em cada uma das cinco sensibilidades de câmera do jogo. O mouse tem a sua própria opção.",
+    [UI_MENU_WALK_KEY] = "Tecla de andar",
+    [UI_MENU_WALK_KEY_DESC] = "Segure para inclinar os analógicos do teclado só até parte do caminho, assim o teclado anda em "
+                              "vez de correr. A força do andar define quanto. Controle e mouse não mudam.",
+    [UI_MENU_WALK_KEY_TAKEN] = "também %s",
+    [UI_MENU_WALK_SCALE] = "Força do andar",
+    [UI_MENU_WALK_SCALE_DESC] = "A inclinação dos analógicos do teclado enquanto a tecla de andar está apertada. Metade é "
+                                "andar, a inclinação toda é correr.",
 };
 
 #define SWKBD_ONLY(name, ...) static const char *const name[UI_TEXT_COUNT] = {SWKBD(__VA_ARGS__)}
