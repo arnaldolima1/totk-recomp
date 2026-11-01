@@ -108,6 +108,31 @@ static const char *const text_en[UI_TEXT_COUNT] = {
                               "bright room.",
     [UI_MENU_HDR_UI] = "HUD and menu brightness",
     [UI_MENU_HDR_UI_DESC] = "Nits of the HUD's and this menu's white.",
+    [UI_MENU_SHADOW_SCALE] = "Shadow resolution",
+    [UI_MENU_SHADOW_SCALE_DESC] = "Draws the sun's shadow maps this many times larger on each side than the game's 960x960: "
+                                  "sharper shadow edges and leaf shadows. Takes effect at the next start.",
+    [UI_MENU_PCSS] = "Soft shadows",
+    [UI_MENU_PCSS_DESC] = "Sun shadows sharp where an object meets the ground and softer the further the shadow falls "
+                          "(PCSS). 0 keeps the game's filter. Takes effect at the next start.",
+    [UI_MENU_CONTACT_SHADOWS] = "Contact shadows",
+    [UI_MENU_CONTACT_SHADOWS_DESC] = "Small sun shadows the shadow maps miss: at feet, under stones, in grass and creases. "
+                                     "Traced on the screen after lighting. Takes effect at the next start.",
+    [UI_MENU_SHADOW_RANGE] = "Shadow cascade range",
+    [UI_MENU_SHADOW_RANGE_DESC] = "Moves the steps where shadows turn softer (the game's 20, 40, 80 and 160 m) further "
+                                  "away. Spreads the shadow map over more ground: raise Shadow resolution with it. "
+                                  "Takes effect at the next start.",
+    [UI_MENU_DLAA] = "NVIDIA DLSS / DLAA",
+    [UI_MENU_DLAA_DESC] = "NVIDIA DLSS for the 3D scene (NVIDIA RTX GPUs; nvngx_dlss.dll next to totk.exe): smoother edges "
+                          "and less shimmer. The HUD is not touched. The mode below sets the resolution it works from. Takes effect "
+                          "after a restart.",
+    [UI_MENU_DLSS] = "DLSS mode",
+    [UI_MENU_DLSS_DESC] = "DLAA draws the 3D scene at full resolution. Quality, Balanced and Performance draw it at 67, 58 "
+                          "and 50 % and let DLSS scale it up, for more frames per second; they replace the 3D render "
+                          "scale. Takes effect after a restart.",
+    [UI_MENU_DLSS_DLAA] = "DLAA (native)", [UI_MENU_DLSS_QUALITY] = "Quality", [UI_MENU_DLSS_BALANCED] = "Balanced",
+    [UI_MENU_DLSS_PERFORMANCE] = "Performance",
+    [UI_MENU_FXAA] = "Game anti-aliasing (FXAA)",
+    [UI_MENU_FXAA_DESC] = "The game's own FXAA edge smoothing. It blurs fine detail a little; with DLAA on it is not needed.",
 
     [UI_MENU_FPS_LIMIT] = "Frame rate limit",
     [UI_MENU_FPS_LIMIT_DESC] = "The most frames per second the game draws. Above 60 is experimental and needs Game speed "
@@ -447,6 +472,31 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
                               "поднимите.",
     [UI_MENU_HDR_UI] = "Яркость интерфейса и меню",
     [UI_MENU_HDR_UI_DESC] = "Ниты белого цвета интерфейса игры и этого меню.",
+    [UI_MENU_SHADOW_SCALE] = "Разрешение теней",
+    [UI_MENU_SHADOW_SCALE_DESC] = "Карты теней от солнца рисуются во столько раз больше по каждой стороне, чем 960x960 "
+                                  "самой игры: края теней и тени листвы чётче. Действует после перезапуска.",
+    [UI_MENU_PCSS] = "Мягкие тени",
+    [UI_MENU_PCSS_DESC] = "Тени от солнца резкие там, где предмет касается земли, и мягче, чем дальше падает тень "
+                          "(PCSS). 0 оставляет фильтр игры. Действует после перезапуска.",
+    [UI_MENU_CONTACT_SHADOWS] = "Контактные тени",
+    [UI_MENU_CONTACT_SHADOWS_DESC] = "Мелкие тени от солнца, которых нет на картах теней: у ног, под камнями, в траве и "
+                                     "складках. Считаются по экрану после освещения. Действует после перезапуска.",
+    [UI_MENU_SHADOW_RANGE] = "Дальность каскадов теней",
+    [UI_MENU_SHADOW_RANGE_DESC] = "Отодвигает границы, за которыми тени становятся мягче (в игре 20, 40, 80 и 160 м). "
+                                  "Карта теней растягивается на большую площадь, поэтому вместе с этим поднимайте "
+                                  "разрешение теней. Действует после перезапуска.",
+    [UI_MENU_DLAA] = "NVIDIA DLSS / DLAA",
+    [UI_MENU_DLAA_DESC] = "NVIDIA DLSS для 3D-сцены (видеокарты NVIDIA RTX; nvngx_dlss.dll рядом с totk.exe): ровнее края и "
+                          "меньше мерцания. Интерфейс не затрагивается. Режим ниже задаёт разрешение, с которым он работает. "
+                          "Действует после перезапуска.",
+    [UI_MENU_DLSS] = "Режим DLSS",
+    [UI_MENU_DLSS_DESC] = "DLAA рисует 3D-сцену в полном разрешении. «Качество», «Баланс» и «Производительность» рисуют её "
+                          "в 67, 58 и 50 % и масштабируют через DLSS ради большего числа кадров; они заменяют масштаб "
+                          "3D-отрисовки. Действует после перезапуска.",
+    [UI_MENU_DLSS_DLAA] = "DLAA (родное)", [UI_MENU_DLSS_QUALITY] = "Качество", [UI_MENU_DLSS_BALANCED] = "Баланс",
+    [UI_MENU_DLSS_PERFORMANCE] = "Производительность",
+    [UI_MENU_FXAA] = "Сглаживание игры (FXAA)",
+    [UI_MENU_FXAA_DESC] = "Собственное сглаживание FXAA. Слегка размывает мелкие детали; с DLAA оно не нужно.",
 
     [UI_MENU_FPS_LIMIT] = "Ограничение частоты кадров",
     [UI_MENU_FPS_LIMIT_DESC] = "Наибольшее число кадров в секунду. Выше 60 — экспериментальный режим, нужна «Скорость "
@@ -1068,6 +1118,36 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_WALK_SCALE_DESC] = "A inclinação dos analógicos do teclado enquanto a tecla de andar está segura. Metade "
                                 "é andar, a inclinação total é correr.",
     [UI_MENU_OV_SCALE_DOWN] = "bilinear (o FSR só amplia)",
+    [UI_MENU_SHADOW_SCALE] = "Resolução das sombras",
+    [UI_MENU_SHADOW_SCALE_DESC] = "Desenha os mapas de sombra do sol essa quantidade de vezes maiores em cada lado "
+                                  "que os 960x960 do jogo: bordas de sombra e sombras de folhas mais nítidas. Vale no "
+                                  "próximo início.",
+    [UI_MENU_SHADOW_RANGE] = "Alcance das cascatas de sombra",
+    [UI_MENU_SHADOW_RANGE_DESC] = "Afasta os degraus em que as sombras ficam mais suaves (20, 40, 80 e 160 m no "
+                                  "jogo). Espalha o mapa de sombras por mais terreno: aumente a Resolução das sombras "
+                                  "junto. Vale no próximo início.",
+    [UI_MENU_CONTACT_SHADOWS] = "Sombras de contato",
+    [UI_MENU_CONTACT_SHADOWS_DESC] = "Pequenas sombras do sol que os mapas de sombra não pegam: nos pés, sob pedras, "
+                                     "na grama e em dobras. Traçadas na tela depois da iluminação. Vale no próximo "
+                                     "início.",
+    [UI_MENU_PCSS] = "Sombras suaves",
+    [UI_MENU_PCSS_DESC] = "Sombras do sol nítidas onde um objeto toca o chão e mais suaves quanto mais longe a sombra "
+                          "cai (PCSS). 0 mantém o filtro do jogo. Vale no próximo início.",
+    [UI_MENU_DLAA] = "NVIDIA DLSS / DLAA",
+    [UI_MENU_DLAA_DESC] = "NVIDIA DLSS para a cena 3D (placas NVIDIA RTX; nvngx_dlss.dll ao lado do totk.exe): bordas "
+                          "mais suaves e menos cintilação. O HUD não é afetado. O modo abaixo define a resolução de "
+                          "onde ele parte. Vale após reiniciar.",
+    [UI_MENU_DLSS] = "Modo do DLSS",
+    [UI_MENU_DLSS_DESC] = "DLAA desenha a cena 3D na resolução cheia. Qualidade, Equilibrado e Desempenho a desenham "
+                          "em 67, 58 e 50 % e deixam o DLSS ampliá-la, para mais quadros por segundo; eles substituem "
+                          "a escala 3D. Vale após reiniciar.",
+    [UI_MENU_DLSS_DLAA] = "DLAA (nativo)",
+    [UI_MENU_DLSS_QUALITY] = "Qualidade",
+    [UI_MENU_DLSS_BALANCED] = "Equilibrado",
+    [UI_MENU_DLSS_PERFORMANCE] = "Desempenho",
+    [UI_MENU_FXAA] = "Antisserrilhado do jogo (FXAA)",
+    [UI_MENU_FXAA_DESC] = "A suavização de bordas FXAA do próprio jogo. Borra um pouco os detalhes finos; com o DLAA "
+                          "ligado não é necessária.",
 };
 
 // Simplified Chinese: this row covers the software keyboard and the whole menu, so the menu and the overlay read Chinese
@@ -1551,6 +1631,25 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_WALK_SCALE] = "步行幅度",
     [UI_MENU_WALK_SCALE_DESC] = "按住步行键时键盘摇杆的推动幅度。一半为走路，推满为奔跑。",
     [UI_MENU_OV_SCALE_DOWN] = "双线性（FSR 只能放大）",
+    [UI_MENU_SHADOW_SCALE] = "阴影分辨率",
+    [UI_MENU_SHADOW_SCALE_DESC] = "将太阳阴影贴图的每条边绘制为游戏 960x960 的若干倍：阴影边缘和树叶阴影更清晰。下次启动时生效。",
+    [UI_MENU_SHADOW_RANGE] = "阴影级联范围",
+    [UI_MENU_SHADOW_RANGE_DESC] = "把阴影变柔和的分界（游戏中为 20、40、80 和 160 米）推得更远。阴影贴图会覆盖更大的地面，请同时提高阴影分辨率。下次启动时生效。",
+    [UI_MENU_CONTACT_SHADOWS] = "接触阴影",
+    [UI_MENU_CONTACT_SHADOWS_DESC] = "阴影贴图遗漏的细小太阳阴影：脚下、石头下、草丛和褶皱中。在光照之后于屏幕空间追踪。下次启动时生效。",
+    [UI_MENU_PCSS] = "柔和阴影",
+    [UI_MENU_PCSS_DESC] = "物体接触地面处的太阳阴影锐利，阴影投得越远越柔和（PCSS）。0 保留游戏自身的过滤。下次启动时生效。",
+    [UI_MENU_DLAA] = "NVIDIA DLSS / DLAA",
+    [UI_MENU_DLAA_DESC] = "用于 3D 场景的 NVIDIA DLSS（NVIDIA RTX 显卡；nvngx_dlss.dll 放在 totk.exe 旁）：边缘更平滑，闪烁更少。HUD "
+                          "不受影响。下方的模式决定它的工作分辨率。重启后生效。",
+    [UI_MENU_DLSS] = "DLSS 模式",
+    [UI_MENU_DLSS_DESC] = "DLAA 以全分辨率绘制 3D 场景。质量、平衡和性能分别以 67%、58% 和 50% 绘制，再由 DLSS 放大，以获得更高帧率；它们会取代 3D 渲染比例。重启后生效。",
+    [UI_MENU_DLSS_DLAA] = "DLAA（原生）",
+    [UI_MENU_DLSS_QUALITY] = "质量",
+    [UI_MENU_DLSS_BALANCED] = "平衡",
+    [UI_MENU_DLSS_PERFORMANCE] = "性能",
+    [UI_MENU_FXAA] = "游戏抗锯齿（FXAA）",
+    [UI_MENU_FXAA_DESC] = "游戏自身的 FXAA 边缘平滑。会让细节略微模糊；开启 DLAA 时不需要。",
 };
 
 #define SWKBD_ONLY(name, ...) static const char *const name[UI_TEXT_COUNT] = {SWKBD(__VA_ARGS__)}
