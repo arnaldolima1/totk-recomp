@@ -31,11 +31,13 @@ static int g_font_bad;
 #pragma clang diagnostic ignored "-Wunused-function"
 #include "imstb_truetype.h"
 #pragma clang diagnostic pop
+#include "ui/amiibo_page.h"
 #include "ui/binds_page.h"
 #include "ui/option_rows.h"
 
 extern "C" {
 #include "achievements.h"
+#include "amiibo.h"
 #include "cfg.h"
 #include "input.h"
 #include "input_map.h"
@@ -410,7 +412,7 @@ extern "C" void menu_vk_release(void) {
 // TOTK_MENU_TEST_SET=<frame>:<key>=<value>[,<key>=<value>...][;<frame>:...]: cfg_set of each key (TOTK_ prefix
 // optional) at that presented frame; changes live settings with no input, menu open or not. totk.ini is written only by
 // the pseudo-key SAVE=1 (cfg_save, as a row change does; a failed write shows the menu's save note).
-enum { TAB_SCREEN, TAB_GAME, TAB_SOUND, TAB_CONTROLS, TAB_MENU, TAB_ADVANCED, TAB_ACHIEVEMENTS, TAB_COUNT };
+enum { TAB_SCREEN, TAB_GAME, TAB_SOUND, TAB_CONTROLS, TAB_AMIIBO, TAB_MENU, TAB_ADVANCED, TAB_ACHIEVEMENTS, TAB_COUNT };
 enum { TEST_PAGE_FRAMES = 30, TEST_SETS = 16 };
 struct TestSet { uint64_t frame; char key[64], value[64]; };
 static struct {
@@ -1130,8 +1132,8 @@ static void tab_achievements(float scale) {
 }
 
 static const UiTextId kTabNames[TAB_COUNT] = {UI_MENU_TAB_SCREEN, UI_MENU_TAB_GAME, UI_MENU_TAB_SOUND,
-                                              UI_MENU_TAB_CONTROLS, UI_MENU_TAB_MENU, UI_MENU_TAB_ADVANCED,
-                                              UI_MENU_TAB_ACHIEVEMENTS};
+                                              UI_MENU_TAB_CONTROLS, UI_MENU_TAB_AMIIBO, UI_MENU_TAB_MENU,
+                                              UI_MENU_TAB_ADVANCED, UI_MENU_TAB_ACHIEVEMENTS};
 static int g_tab;               // the tab shown
 static int g_tab_request = -1;  // select this tab at the next layout; -1 none
 static int g_focus_page = -1;   // this tab's first row takes the cursor once it is shown; -1 none
@@ -1186,6 +1188,13 @@ static void tab_icon(ImDrawList *dl, int tab, ImVec2 c, float r, ImU32 col, floa
         dl->AddEllipse(c, ImVec2(r * 0.4f, r * 0.9f), col, 0, 20, th);
         dl->AddLine(ImVec2(c.x - r * 0.9f, c.y), ImVec2(c.x + r * 0.9f, c.y), col, th);
         break;
+    case TAB_AMIIBO: {   // a figure on its round stand
+        dl->AddCircle(ImVec2(c.x, c.y - r * 0.55f), r * 0.26f, col, 16, th);
+        dl->AddLine(ImVec2(c.x, c.y - r * 0.29f), ImVec2(c.x, c.y + r * 0.35f), col, th);
+        dl->AddLine(ImVec2(c.x - r * 0.4f, c.y - r * 0.05f), ImVec2(c.x + r * 0.4f, c.y - r * 0.05f), col, th);
+        dl->AddEllipse(ImVec2(c.x, c.y + r * 0.62f), ImVec2(r * 0.72f, r * 0.24f), col, 0, 20, th);
+        break;
+    }
     case TAB_ACHIEVEMENTS: {   // a trophy: the cup, its handles, the stem and the base
         ImVec2 cup[] = {{c.x - r * 0.62f, c.y - r * 0.82f}, {c.x + r * 0.62f, c.y - r * 0.82f}, {c.x + r * 0.5f, c.y - r * 0.1f},
                         {c.x, c.y + r * 0.22f}, {c.x - r * 0.5f, c.y - r * 0.1f}};
@@ -1356,6 +1365,7 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
     case TAB_SOUND: tab_sound(scale); break;
     case TAB_CONTROLS: tab_controls(scale); break;
     case TAB_MENU: tab_menu(scale); break;
+    case TAB_AMIIBO: tab_amiibo(scale); break;
     case TAB_ADVANCED: tab_advanced(scale); break;
     case TAB_ACHIEVEMENTS: tab_achievements(scale); break;
     }
@@ -1751,6 +1761,7 @@ extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const cha
     bool toast = toast_tick(toast_now, toast_last ? (float)((toast_now - toast_last) / 1e9) : 0);
     toast_last = toast_now;
     toast = note_tick() || toast;   // an achievement notice needs the overlay's frame as the shader notice does
+    amiibo_tick();
     bool open = g_open.load(std::memory_order_relaxed);
     if (!open) {
         if (g_save_pending) g_save_pending = opt_save_tick(1);   // closed: the last change goes to totk.ini now
