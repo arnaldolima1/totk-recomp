@@ -8,8 +8,11 @@ only when the extraction has to run again. Prints JSON events on stdout (events.
 """
 import argparse
 import hashlib
+import os
 import signal
+import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -43,6 +46,49 @@ def cancel(signum, frame):
     raise KeyboardInterrupt
 
 
+def is_installer(pid):
+    """Whether pid is a running Python process (the installer runs in the release's python.exe)."""
+    if pid <= 0 or pid == os.getpid():
+        return False
+    if os.name == 'nt':
+        r = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/FO', 'CSV', '/NH'], capture_output=True, text=True,
+                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        return 'python' in r.stdout.lower()
+    try:
+        return b'installer' in Path(f'/proc/{pid}/cmdline').read_bytes()
+    except OSError:
+        return False
+
+
+def take_over(dest, rep):
+    """End an installer still running on the same install folder, then record this one. A launcher closed during an
+    install used to leave its installer and the tool it ran (totk.exe --prepare-shaders) going unseen, and the next
+    install then fought it over the same files; the launcher ends its install when it closes now, but one left by an
+    older launcher, or by a crash, is ended here. The record is in the system's temp folder, keyed by the install
+    folder, so releases share it."""
+    tag = hashlib.sha256(str(dest).lower().encode()).hexdigest()[:8]
+    record = Path(tempfile.gettempdir()) / f'totk-installer-{tag}.pid'
+    try:
+        old = int(record.read_text().strip() or 0)
+    except (OSError, ValueError):
+        old = 0
+    if is_installer(old):
+        rep.log(f'an earlier installer (pid {old}) is still running on this folder: ending it and the tools it runs')
+        if os.name == 'nt':
+            subprocess.run(['taskkill', '/T', '/F', '/PID', str(old)], capture_output=True,
+                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        else:
+            try:   # the launcher starts the installer as a process group leader
+                os.killpg(old, signal.SIGKILL)
+            except OSError:
+                pass
+        time.sleep(1)   # Windows releases the files of the ended processes shortly after
+    try:
+        record.write_text(str(os.getpid()))
+    except OSError:
+        pass
+
+
 def main(argv=None):
     ap = Parser(prog='python -m installer', description=__doc__.splitlines()[0])
     ap.add_argument('--base', type=Path, help='base game, XCI or NSP')
@@ -68,6 +114,7 @@ def main(argv=None):
     log = temp / 'logs' / time.strftime('install-%Y%m%d-%H%M%S.log')
     rep = Reporter(log_path=log)
     t0 = time.monotonic()
+    take_over(dest, rep)
     try:
         state = statefile.load(dest)
     except statefile.StateError as e:

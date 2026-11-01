@@ -794,24 +794,49 @@ else:\n    sys.exit(1)\n";
 #[tauri::command]
 fn cancel_build(app: AppHandle, procs: State<Procs>) {
     let Some(pid) = *procs.build.lock().unwrap() else { return };
-    #[cfg(windows)]
-    let asked = release_root(&app).and_then(|r| python(&r)).is_some_and(|py| {
-        no_window(Command::new(py).args(["-c", BREAK_HELPER, &pid.to_string()])).status().is_ok_and(|s| s.success())
-    });
-    #[cfg(unix)]
-    let asked = Command::new("kill").args(["-TERM", &format!("-{pid}")]).status().is_ok_and(|s| s.success());
-    if !asked {
+    if !ask_stop(&app, pid) {
         return kill_tree(pid);
     }
     thread::spawn(move || {
-        for _ in 0..600 {
-            thread::sleep(Duration::from_millis(100));
-            if *app.state::<Procs>().build.lock().unwrap() != Some(pid) {
-                return;
-            }
+        if !wait_build_gone(&app, pid, 600) {
+            kill_tree(pid);
         }
-        kill_tree(pid);
     });
+}
+
+fn ask_stop(app: &AppHandle, pid: u32) -> bool {
+    #[cfg(windows)]
+    return release_root(app).and_then(|r| python(&r)).is_some_and(|py| {
+        no_window(Command::new(py).args(["-c", BREAK_HELPER, &pid.to_string()])).status().is_ok_and(|s| s.success())
+    });
+    #[cfg(unix)]
+    {
+        let _ = app;
+        Command::new("kill").args(["-TERM", &format!("-{pid}")]).status().is_ok_and(|s| s.success())
+    }
+}
+
+/// Waits up to `tenths` tenths of a second for the install `pid` to end (start_build's waiting thread clears the slot
+/// once the installer exited and the launcher's files are back). True when it ended.
+fn wait_build_gone(app: &AppHandle, pid: u32, tenths: u32) -> bool {
+    for _ in 0..tenths {
+        if *app.state::<Procs>().build.lock().unwrap() != Some(pid) {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    false
+}
+
+/// The launcher is closing during an install: the installer and the tool it runs (totk.exe --prepare-shaders, clang)
+/// would go on unseen and fight the next install over the same files, so they stop with it. Asked first, so the
+/// installer records the steps it finished; ended after 10 s.
+fn stop_build_on_exit(app: &AppHandle) {
+    let Some(pid) = *app.state::<Procs>().build.lock().unwrap() else { return };
+    if !ask_stop(app, pid) || !wait_build_gone(app, pid, 100) {
+        kill_tree(pid);
+        wait_build_gone(app, pid, 30);
+    }
 }
 
 #[cfg(windows)]
@@ -983,6 +1008,11 @@ fn main() {
             status, set_home, set_release, get_source, set_source, installer_text, start_view, custom_art, read_ini, write_ini, releases,
             download_release, cancel_download, find_game_files, mods_list, mods_apply, mods_add, mods_adapt, mods_remove, start_build, cancel_build, launch_game, stop_game, log_tail, open_path,
         ])
-        .run(tauri::generate_context!())
-        .expect("launcher");
+        .build(tauri::generate_context!())
+        .expect("launcher")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                stop_build_on_exit(app);
+            }
+        });
 }

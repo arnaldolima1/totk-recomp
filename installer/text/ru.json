@@ -150,6 +150,7 @@
  "ui.amount_bytes": "{done} / {total} ГБ",
  "ui.amount_chunks": "{done} / {total} частей",
  "ui.amount_objects": "{done} / {total} файлов",
+ "ui.amount_patches": "{done} / {total} наборов",
  "ui.amount_shaders": "{done} / {total} шейдеров",
  "ui.amount_other": "{done} / {total} {unit}",
  "ui.seconds": "{n} с",

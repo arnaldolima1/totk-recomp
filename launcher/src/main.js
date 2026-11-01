@@ -766,7 +766,7 @@ const PT = {
   'phase.cleanup.ini': 'Escrevendo o totk.ini',
   'phase.cleanup.temp': 'Apagando os arquivos temporários',
 };
-const UNITS = { chunks: 'blocos', objects: 'objetos', shaders: 'shaders' };
+const UNITS = { chunks: 'blocos', objects: 'objetos', shaders: 'shaders', patches: 'conjuntos' };
 let catalog = {};
 function message(id, params = {}) {
   const text = (currentLang() === 'pt' && PT[id]) || catalog[id] || id;

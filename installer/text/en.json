@@ -150,6 +150,7 @@
  "ui.amount_bytes": "{done} / {total} GB",
  "ui.amount_chunks": "{done} / {total} parts",
  "ui.amount_objects": "{done} / {total} files",
+ "ui.amount_patches": "{done} / {total} sets",
  "ui.amount_shaders": "{done} / {total} shaders",
  "ui.amount_other": "{done} / {total} {unit}",
  "ui.seconds": "{n} s",

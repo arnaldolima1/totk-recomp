@@ -126,6 +126,10 @@ def linux_kernel():
     return (int(m.group(1)), int(m.group(2))) if m else None
 
 
+RUNNING = set()   # the tool processes run_tool has running, so run_parallel can end them all when cancelled
+RUNNING_LOCK = threading.Lock()
+
+
 def run_tool(ctx, step, script, args, parse=None, cwd=None):
     """Run a tool script with the bundled Python. Its output goes to <temp>/logs/<step>-<script>.log and, line by line,
     to parse(line). Returns (exit code, log path)."""
@@ -139,6 +143,8 @@ def run_tool(ctx, step, script, args, parse=None, cwd=None):
         proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=cwd or ctx.layout.root,
                                 env=env, text=True, encoding='utf-8', errors='replace', bufsize=1,
                                 start_new_session=os.name != 'nt')
+        with RUNNING_LOCK:
+            RUNNING.add(proc)
         try:
             for line in proc.stdout:
                 out.write(line)
@@ -148,8 +154,42 @@ def run_tool(ctx, step, script, args, parse=None, cwd=None):
         except BaseException:
             kill_tree(proc)
             raise
+        finally:
+            with RUNNING_LOCK:
+                RUNNING.discard(proc)
     ctx.reporter.log(f'{Path(script).name}: exit code {code}; output in {log}')
     return code, log
+
+
+def run_parallel(ctx, jobs, workers, on_done=None):
+    """Run run_tool jobs, (step, script, args), at most workers at a time. Returns [(code, log)] in the jobs' order;
+    on_done(count) after each one ends. The main thread only waits, so a cancel (KeyboardInterrupt from the console's
+    Ctrl+Break, installer/cli.py cancel) reaches it there and ends every running tool before going up."""
+    import concurrent.futures as cf
+    results = [None] * len(jobs)
+    futures = {}
+    pool = cf.ThreadPoolExecutor(max_workers=max(1, workers))
+    try:
+        futures = {pool.submit(run_tool, ctx, *job): i for i, job in enumerate(jobs)}
+        pending, finished = set(futures), 0
+        while pending:
+            done, pending = cf.wait(pending, timeout=0.5, return_when=cf.FIRST_COMPLETED)
+            for f in done:
+                results[futures[f]] = f.result()
+                finished += 1
+                if on_done:
+                    on_done(finished)
+    except BaseException:
+        for f in futures:
+            f.cancel()
+        with RUNNING_LOCK:
+            procs = list(RUNNING)
+        for proc in procs:
+            kill_tree(proc)
+        raise
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
+    return results
 
 
 def free_bytes(path):
@@ -665,42 +705,39 @@ class Prepare(Step):
         else:
             remove(xlate.with_suffix('.id'))
 
-        rep.progress('prepare', 'romfs_patches', force=True)
-        remove(dest / 'romfs-patches')
-        code, log = run_tool(ctx, 'prepare', layout.tools / 'make_romfs_patches.py',
-                             ['--version', version_tag(game_version(ctx)), '--romfs', dest / 'romfs', '--out',
-                              dest / 'romfs-patches'])
-        if code:
-            raise InstallError('prepare.romfs_patches_failed', code=code, log=str(log))
-        # The same overlay with the UI laid out for each game resolution of another shape the settings menu offers
-        # (runtime/romfs.c overlay_init picks the one that matches; the camera's side is the patch set aspect,
-        # recomp/patches-v<ver>.txt).
-        for size in ASPECT_SIZES:
-            remove(dest / f'romfs-patches-{size}')
-            code, log = run_tool(ctx, 'prepare', layout.tools / 'make_romfs_patches.py',
-                                 ['--version', version_tag(game_version(ctx)), '--romfs', dest / 'romfs', '--out',
-                                  dest / f'romfs-patches-{size}', '--aspect', size])
-            if code:
+        # The overlay sets, each its own run of make_romfs_patches.py that reads the RomFS and writes only its own
+        # folder, so they run side by side (one after another they took 5 minutes on a 16-thread machine):
+        # - romfs-patches: the 60 fps patches;
+        # - romfs-patches-<size>: the same with the UI laid out for each game resolution of another shape the settings
+        #   menu offers (runtime/romfs.c overlay_init picks the one that matches; the camera's side is the patch set
+        #   aspect, recomp/patches-v<ver>.txt);
+        # - romfs-patches-xbox: the A/B and X/Y prompts swapped, for pad_layout = xbox_prompts (written on every install,
+        #   so the menu choice works without another run of the setup);
+        # - romfs-patches-ps: PlayStation symbols in place of the letters, for pad_layout = playstation.
+        # The two prompt sets are optional: when one fails, the game keeps the Switch prompts and the menu says the
+        # files are missing, so the setup warns and goes on.
+        base = ['--version', version_tag(game_version(ctx)), '--romfs', dest / 'romfs', '--out']
+        # The prompt sets first: they take about nine times as long as the others, which then run beside them.
+        sets = [('prepare-xbox', 'romfs-patches-xbox', ['--xbox-prompts']),
+                ('prepare-ps', 'romfs-patches-ps', ['--playstation-prompts']), ('prepare', 'romfs-patches', [])]
+        sets += [(f'prepare-{size}', f'romfs-patches-{size}', ['--aspect', size]) for size in ASPECT_SIZES]
+        for _, folder, _ in sets:
+            remove(dest / folder)
+        rep.progress('prepare', 'romfs_patches', 0, len(sets), 'patches', force=True)
+        # Each run is one Python process of a few hundred MB: a quarter of the logical cores, two to six runs.
+        workers = min(6, max(2, (os.cpu_count() or 4) // 4))
+        results = run_parallel(ctx, [(step, layout.tools / 'make_romfs_patches.py', [*base, dest / folder, *extra])
+                                     for step, folder, extra in sets], workers,
+                               lambda n: rep.progress('prepare', 'romfs_patches', n, len(sets), 'patches'))
+        for (step, folder, _), (code, log) in zip(sets, results):
+            if not code:
+                continue
+            if step in ('prepare-xbox', 'prepare-ps'):
+                remove(dest / folder)
+                rep.warning('warn.xbox_prompts_failed' if step == 'prepare-xbox' else 'warn.ps_prompts_failed',
+                            code=code, log=str(log))
+            else:
                 raise InstallError('prepare.romfs_patches_failed', code=code, log=str(log))
-        # romfs-patches-xbox: the same with the A/B and X/Y prompts swapped, for pad_layout = xbox_prompts (written on
-        # every install, so the menu choice works without another run of the setup). Optional: when it fails, the game
-        # keeps the Switch prompts and the menu says the files are missing, so the setup warns and goes on.
-        remove(dest / 'romfs-patches-xbox')
-        code, log = run_tool(ctx, 'prepare-xbox', layout.tools / 'make_romfs_patches.py',
-                             ['--version', version_tag(game_version(ctx)), '--romfs', dest / 'romfs', '--out',
-                              dest / 'romfs-patches-xbox', '--xbox-prompts'])
-        if code:
-            remove(dest / 'romfs-patches-xbox')
-            rep.warning('warn.xbox_prompts_failed', code=code, log=str(log))
-        # romfs-patches-ps: PlayStation symbols in place of the letters, for pad_layout = playstation; optional the
-        # same way.
-        remove(dest / 'romfs-patches-ps')
-        code, log = run_tool(ctx, 'prepare-ps', layout.tools / 'make_romfs_patches.py',
-                             ['--version', version_tag(game_version(ctx)), '--romfs', dest / 'romfs', '--out',
-                              dest / 'romfs-patches-ps', '--playstation-prompts'])
-        if code:
-            remove(dest / 'romfs-patches-ps')
-            rep.warning('warn.ps_prompts_failed', code=code, log=str(log))
         # Achievements (tools/achievements.py): the default set when the folder has none (the player's own set, made
         # in the editor, stays), compiled against this game version. Optional: without it the game has no
         # achievements, so the setup warns and goes on.
