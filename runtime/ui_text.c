@@ -95,6 +95,11 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_ASPECT_FIT] = "Black bars", [UI_MENU_ASPECT_STRETCH] = "Stretch",
     [UI_MENU_FOV] = "Field of view",
     [UI_MENU_FOV_DESC] = "How much of the world the camera shows, in percent of the game's own. Game version 1.4.3 only.",
+    [UI_MENU_SHADOW_RES] = "Shadow map size",
+    [UI_MENU_SHADOW_RES_DESC] = "Size of the sun's shadow map. The game's own size changes with the view, down to about 400 "
+                                "near the ground, so leaf shadows look blocky and jump; a fixed size keeps them still and "
+                                "sharper. Above 1024 the shadows cost more GPU time and video memory.",
+    [UI_MENU_SHADOW_RES_GAME] = "Game (changes)",
     [UI_MENU_SHARPNESS] = "FSR sharpness",
     [UI_MENU_SHARPNESS_DESC] = "Sharpening after FSR scaling; 0 turns it off.",
     [UI_MENU_COLOR] = "Colour",
@@ -390,6 +395,11 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_ASPECT_FIT] = "Чёрные полосы", [UI_MENU_ASPECT_STRETCH] = "Растянуть",
     [UI_MENU_FOV] = "Поле зрения",
     [UI_MENU_FOV_DESC] = "Сколько мира показывает камера, в процентах от игрового. Только для версии игры 1.4.3.",
+    [UI_MENU_SHADOW_RES] = "Размер карты теней",
+    [UI_MENU_SHADOW_RES_DESC] = "Размер карты теней от солнца. Собственный размер игры меняется вместе с видом, у земли до "
+                                "примерно 400, поэтому тени листвы выглядят квадратными и дёргаются; постоянный размер делает "
+                                "их ровными и чётче. Выше 1024 тени требуют больше времени GPU и видеопамяти.",
+    [UI_MENU_SHADOW_RES_GAME] = "Как в игре (меняется)",
     [UI_MENU_SHARPNESS] = "Резкость FSR",
     [UI_MENU_SHARPNESS_DESC] = "Повышение резкости после масштабирования FSR; 0 выключает его.",
     [UI_MENU_COLOR] = "Цвет",
@@ -924,6 +934,12 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_OV_FMT_SIZE] = "%ux%u", [UI_MENU_OV_FMT_SCENE] = "%ux%u, %.0f%%",
     [UI_MENU_OV_FMT_FSR] = "AMD FSR 1, nitidez %d%%", [UI_MENU_OV_SCALE_NONE] = "nenhum (1:1)",
     [UI_MENU_OV_SCALE_BILINEAR] = "bilinear",
+    [UI_MENU_SHADOW_RES] = "Tamanho do mapa de sombras",
+    [UI_MENU_SHADOW_RES_DESC] = "Tamanho do mapa de sombras do sol. O tamanho do próprio jogo muda com a vista, até cerca de "
+                                "400 perto do chão, então as sombras das folhas ficam quadradas e pulam; um tamanho fixo as "
+                                "deixa paradas e mais nítidas. Acima de 1024 as sombras custam mais tempo de GPU e memória "
+                                "de vídeo.",
+    [UI_MENU_SHADOW_RES_GAME] = "Do jogo (muda)",
 };
 
 #define SWKBD_ONLY(name, ...) static const char *const name[UI_TEXT_COUNT] = {SWKBD(__VA_ARGS__)}
