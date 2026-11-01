@@ -249,7 +249,9 @@ static float mouse_smooth_get(void) {
 }
 
 // The mouse camera as a right-stick sample, held for the whole presented frame and eased between frames
-// (TOTK_MOUSE_SMOOTH). Under `lock`.
+// (TOTK_MOUSE_SMOOTH). Under `lock`. The sample is divided by the camera speed factor the game runs with
+// (camera_speed.c, cam_speed_applied), which multiplies every right-stick turn rate, so TOTK_MOUSE_SENS alone sets the
+// mouse's speed; below 1 the sample stays within the stick's range, so the mouse's top speed drops with the factor.
 static void mouse_camera(int32_t out[2]) {
     static uint64_t frame = ~0ull, t0;
     static int32_t held[2];
@@ -276,8 +278,10 @@ static void mouse_camera(int32_t out[2]) {
             eased[0] = eased[1] = 0;
         }
     }
-    out[0] = held[0];
-    out[1] = held[1];
+    double k = cam_speed_applied(), x = held[0] / k, y = held[1] / k, len = sqrt(x * x + y * y);
+    if (len > STICK_MAX) x *= STICK_MAX / len, y *= STICK_MAX / len;
+    out[0] = (int32_t)lround(x);
+    out[1] = (int32_t)lround(y);
 }
 
 static float stick_dead = -1;              // TOTK_STICK_DEADZONE as a fraction of full deflection; live (cfg_version)

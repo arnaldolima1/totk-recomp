@@ -177,6 +177,9 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_MOUSE_SMOOTH] = "Mouse camera smoothing",
     [UI_MENU_MOUSE_SMOOTH_DESC] = "Eases the camera's turn over a few milliseconds so an uneven mouse or frame rate turns it "
                                   "evenly. Higher is smoother but follows the mouse a little later; 0 turns it off.",
+    [UI_MENU_STICK_SENS] = "Stick camera speed",
+    [UI_MENU_STICK_SENS_DESC] = "Multiplies the game's own right-stick camera speed, top speed included, at each of the "
+                                "game's five camera sensitivities. The mouse keeps its own setting.",
 
     [UI_BINDS_HELP] = "Select a cell and press A or Enter, then the key, mouse button or controller button. Delete or "
                       "X clears a cell. A key in use moves here; a controller button swaps with the one it replaces.",
@@ -479,6 +482,9 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_MOUSE_SMOOTH_DESC] = "Сглаживает поворот камеры на несколько миллисекунд, чтобы неровное движение мыши или "
                                   "частота кадров поворачивали её ровно. Больше — плавнее, но камера чуть позже следует "
                                   "за мышью; 0 выключает.",
+    [UI_MENU_STICK_SENS] = "Скорость камеры (стик)",
+    [UI_MENU_STICK_SENS_DESC] = "Умножает скорость поворота камеры правым стиком, включая наибольшую, при каждой из пяти "
+                                "чувствительностей камеры в игре. На мышь не влияет.",
 
     [UI_BINDS_HELP] = "Выберите ячейку и нажмите A или Enter, затем клавишу, кнопку мыши или кнопку контроллера. "
                       "Delete или X очищает ячейку. Занятая клавиша переходит сюда; кнопка контроллера меняется "
@@ -940,6 +946,9 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
                                 "deixa paradas e mais nítidas. Acima de 1024 as sombras custam mais tempo de GPU e memória "
                                 "de vídeo.",
     [UI_MENU_SHADOW_RES_GAME] = "Do jogo (muda)",
+    [UI_MENU_STICK_SENS] = "Velocidade da câmera (analógico)",
+    [UI_MENU_STICK_SENS_DESC] = "Multiplica a velocidade da câmera do próprio jogo no analógico direito, a máxima também, "
+                                "em cada uma das cinco sensibilidades de câmera do jogo. O mouse tem a sua própria opção.",
 };
 
 #define SWKBD_ONLY(name, ...) static const char *const name[UI_TEXT_COUNT] = {SWKBD(__VA_ARGS__)}
