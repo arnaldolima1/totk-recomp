@@ -68,8 +68,12 @@ it up or down. When two mods change the same file, the higher one wins.
   much memory each file needs, is rebuilt at every start with mods enabled: the tables the mods ship are merged and
   the entries of files a mod made larger or added are raised. The log line `RomFS: resource size table: ...` says
   how many. A mod's table for another game version still counts for that mod's own files.
-- Mods that patch the game code (`exefs/*.ips`, `exefs/*.pchtxt`) are listed but not applied yet; a mod with both kinds
-  of files stays off as a whole until they are.
+- Mods that patch the game code (`exefs/*.ips`, `exefs/*.pchtxt`, or `atmosphere/exefs_patches/<name>/*.ips`) work
+  when the patches are for this game version and change only code: the game rebuilds itself with them at the next
+  start (the setup's rebuild window, a few minutes) and switches them with the mod. Patches for another version are
+  counted and left out; a file that writes the game's data, or that the port cannot express, keeps the whole mod off
+  and the Mods tab says why. A patch over one of the port's own patches turns that built-in patch off while the mod
+  is on (the Mods tab names it).
 - Mods with their own code (`exefs/subsdk*` or a replaced `exefs/main`, such as UltraCam) never load, their RomFS files
   included.
 - Cheats: an Atmosphère cheat file goes into a mod's `cheats` folder (`mods/<name>/cheats/<build id>.txt`, the

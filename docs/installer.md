@@ -53,8 +53,9 @@ loads the saves 1.4.3 wrote.
    and BFTTF header). Without a firmware folder the setup warns and goes on; the game then lacks those glyphs.
 3. **Extract** ExeFS and RomFS into the install folder and verify the hashes.
 4. **Lift** the ExeFS to C (`recomp/gen.py`, `recomp/patches-v121.txt` or `patches-v143.txt`) into a temp folder next
-   to the installer. The code cheats of the mods' cheat files become patch sets first (`tools/cheats.py`, status in
-   `build-cache/cheats.status`); a cheat file the tool refuses costs the cheats, not the install.
+   to the installer. The code cheats of the mods' cheat files and the mods' ExeFS patch files become patch sets first
+   (`tools/cheats.py`, `tools/exefs_patches.py`, status in `build-cache/cheats.status` and `exefs.status`); a file the
+   tools refuse costs those cheats or patches, not the install.
 5. **Compile** the generated C, `modules.c`, `romfs.c`, `patches.c` and `ov_zstd.c` (they bake the per-install layout, RomFS
    hashes and the game version's patch page) and link
    them with the prebuilt runtime library for the host's level (`libtotkrt.a` or `libtotkrt-v2.a`) into `totk.exe`
@@ -82,12 +83,12 @@ Ninja recompiles only those: a new or edited code cheat costs the lift (under a 
 and a few dozen chunks, not a full compile, and the shaders stay prepared.
 
 `build-cache/rebuild.txt` holds the command that opens the setup window in its rebuild mode on the install folder
-(`python -m installer.gui --rebuild <install folder>`), one argument per line. When an enabled mod has code cheats the
-build lacks, `totk.exe` runs it at start and exits (`runtime/cheats.c` `rebuild_if_needed`); the window runs the setup
-on the folder at once and starts the game again when it succeeds. A failed or cancelled rebuild offers to start the
-game with the code it has; `build-cache/rebuild.skip` then keeps the same cheats from starting it again, until "Rebuild
-the game now" on the Cheats tab. `[mods] mods_rebuild = off` turns it off. The rebuild needs the release folder the
-setup ran from: a moved or deleted release folder means running a setup again.
+(`python -m installer.gui --rebuild <install folder>`), one argument per line. When an enabled mod has code cheats or
+ExeFS patch files the build lacks, `totk.exe` runs it at start and exits (`runtime/cheats.c` `rebuild_if_needed`); the
+window runs the setup on the folder at once and starts the game again when it succeeds. A failed or cancelled rebuild
+offers to start the game with the code it has; `build-cache/rebuild.skip` then keeps the same files from starting it
+again, until "Rebuild the game now" on the Cheats or Mods tab. `[mods] mods_rebuild = off` turns it off. The rebuild
+needs the release folder the setup ran from: a moved or deleted release folder means running a setup again.
 
 ## Command line
 

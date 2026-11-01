@@ -75,6 +75,10 @@ typedef enum {
     UI_MENU_MODS_OVERRIDDEN,     // printf: files a higher mod serves instead, that mod's name
     UI_MENU_MODS_MOVE_HINT,
     UI_MENU_MODS_EMPTY, UI_MENU_MODS_SUBSDK, UI_MENU_MODS_EXEFS_LATER, UI_MENU_MODS_BAD_NAME,
+    UI_MENU_MODS_EXEFS_UNSUPPORTED,  // printf: the file and why
+    UI_MENU_MODS_EXEFS_OTHER,
+    UI_MENU_MODS_EXEFS_ON,           // printf: its ExeFS patch files in use
+    UI_MENU_MODS_REPLACES_BUILTIN,   // printf: its ExeFS patch files in use, the port's own patch sets they turn off
     UI_MENU_MODS_OTHER_VERSION,  // printf: files made for another game version, left out
     UI_MENU_MODS_UNUSED,         // under the switch of a mod the port cannot use
     UI_MENU_MODS_CHEATS,         // printf: its cheats as read at start

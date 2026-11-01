@@ -67,32 +67,41 @@ int probe_mods(void) {
         "K/romfslite/k.bin", "L/romfs/l.bin", "L/cheats/0123456789ABCDEF.txt", "L/exefs/main.npdm",
     };
     for (size_t i = 0; i < sizeof files / sizeof *files; i++) put(root, files[i]);
+    // an IPS file for this game's main (any file counts as one when main cannot be read), in Atmosphere's layout
+    char ips[160];
+    snprintf(ips, sizeof ips, "M/atmosphere/exefs_patches/x/%s.ips", *mods_main_build_id() ? mods_main_build_id() : "0");
+    put(root, ips);
 
     cfg_set("TOTK_MODS_DIR", root);
     cfg_set("TOTK_MODS_ORDER", "B|A|Gone");
     cfg_set("TOTK_MODS_DISABLED", "C");
     mods_scan();
 
-    static const char *const order[] = {"B", "A", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "Ultra \xD0\x96"};
+    static const char *const order[] = {"B", "A", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+                                        "Ultra \xD0\x96"};
     enum { N = sizeof order / sizeof *order };
-    CHECK(mods_count() == N, "thirteen mod folders");
+    CHECK(mods_count() == N, "fourteen mod folders");
     int in_order = mods_count() == N;
     for (int i = 0; in_order && i < N; i++) in_order = EQ(mods_at(i)->name, order[i]);
     CHECK(in_order, "order: mods_order first, the rest by name");
     if (mods_count() == N && in_order) {
         ModInfo *a = mods_at(1), *b = mods_at(0), *c = mods_at(2), *d = mods_at(3), *e = mods_at(4), *f = mods_at(5),
                 *g = mods_at(6), *hm = mods_at(7), *im = mods_at(8), *jm = mods_at(9), *km = mods_at(10),
-                *lm = mods_at(11), *u = mods_at(12);
+                *lm = mods_at(11), *mm = mods_at(12), *u = mods_at(13);
         CHECK(hm->kind == (MOD_ROMFS | MOD_SUBSDK) && hm->problem == MOD_PLUGIN, "RomFS + subsdk plugin: unusable");
         CHECK(im->kind == (MOD_ROMFS | MOD_SUBSDK) && im->problem == MOD_PLUGIN, "RomFS + replaced exefs/main");
         CHECK(ends_with(b->romfs, "B/atmosphere/contents/0100F2C0115B6000/romfs"), "Atmosphere RomFS root");
         CHECK(ends_with(c->romfs, "C/contents/0100F2C0115B6000/romfs"), "contents RomFS root");
         CHECK(ends_with(a->romfs, "A/romfs") && a->kind == MOD_ROMFS && a->problem == MOD_OK, "plain RomFS mod");
         CHECK(!c->enabled && a->enabled && b->enabled && g->enabled && u->enabled, "mods_disabled switches C off");
-        CHECK(d->kind == MOD_EXEFS && d->problem == MOD_EXEFS_LATER, "ExeFS patch mod");
+        CHECK(d->kind == MOD_EXEFS && d->problem == MOD_EXEFS_OTHER && d->other_version == 1,
+              "ExeFS patch mod without a build id: another version's");
         CHECK(e->problem == MOD_PLUGIN, "subsdk-only mod is a plugin mod");
         CHECK(f->problem == MOD_EMPTY, "empty RomFS folder");
-        CHECK(g->kind == (MOD_ROMFS | MOD_EXEFS) && g->problem == MOD_EXEFS_LATER, "RomFS + ExeFS mod");
+        CHECK(g->kind == (MOD_ROMFS | MOD_EXEFS) && g->problem == MOD_OK && g->other_version == 1,
+              "RomFS + another version's ExeFS patch: the RomFS is used");
+        CHECK(mm->kind == MOD_EXEFS && mm->problem == MOD_EXEFS_LATER && mm->pending == 1,
+              "an ExeFS patch for main the build lacks waits for the rebuild");
         CHECK(jm->kind == MOD_CHEATS && jm->problem == MOD_OK && ends_with(jm->cheats, "J/cheats"),
               "cheats-only mod");
         CHECK(km->kind == MOD_ROMFS && km->problem == MOD_OK && ends_with(km->romfs, "K/romfslite"), "TKMM romfslite");
@@ -102,7 +111,7 @@ int probe_mods(void) {
 
         mods_move(1, -1);
         CHECK(EQ(mods_at(0)->name, "A") && EQ(mods_at(1)->name, "B"), "move up");
-        CHECK(EQ(cfg_get("TOTK_MODS_ORDER"), "A|B|C|D|E|F|G|H|I|J|K|L|Ultra \xD0\x96"),
+        CHECK(EQ(cfg_get("TOTK_MODS_ORDER"), "A|B|C|D|E|F|G|H|I|J|K|L|M|Ultra \xD0\x96"),
               "order written without the gone name");
         mods_move(0, -1);
         CHECK(EQ(mods_at(0)->name, "A"), "move up at the top does nothing");

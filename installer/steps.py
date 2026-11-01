@@ -14,7 +14,7 @@ logs/. The cleanup keeps gen/, build/ and logs/: the next run lifts into the sam
 only the chunks whose C changed, and Ninja in build/ recompiles only those. A change of the mods' code cheats then
 costs the lift (about a minute) and the chunks it touches, not a full compile.
 
-Install folder build-cache/: cheats.status (tools/cheats.py) and rebuild.txt, the command that starts this setup in
+Install folder build-cache/: cheats.status (tools/cheats.py), exefs.status (tools/exefs_patches.py) and rebuild.txt, the command that starts this setup in
 its rebuild mode on the install folder (installer/gui.py --rebuild), one argument per line; totk.exe runs it at start
 when an enabled mod has code cheats the build lacks (runtime/cheats.c).
 """
@@ -733,6 +733,30 @@ def cheat_files(ctx):
                   for f in ((mod / where).glob('*.txt') if (mod / where).is_dir() else ()))
 
 
+EXEFS_PLACES = ('exefs', 'atmosphere/contents/0100F2C0115B6000/exefs', 'contents/0100F2C0115B6000/exefs',
+                '0100F2C0115B6000/exefs')
+
+
+def exefs_files(ctx):
+    """The ExeFS patch files of the mods folder (.ips and .pchtxt in each mod's exefs places and its
+    atmosphere/exefs_patches/<name>/, as tools/exefs_patches.py finds them), for the lift key."""
+    mods = ctx.dest / 'mods'
+    if not mods.is_dir():
+        return []
+    out = []
+    for mod in (m for m in mods.iterdir() if m.is_dir()):
+        folders = [mod / w for w in EXEFS_PLACES if (mod / w).is_dir()]
+        patches = mod / 'atmosphere' / 'exefs_patches'
+        folders += [d for d in patches.iterdir() if d.is_dir()] if patches.is_dir() else []
+        out += [f for d in folders for f in d.iterdir() if f.is_file() and f.suffix.lower() in ('.ips', '.pchtxt')]
+    return sorted(out)
+
+
+def exefs_status(ctx):
+    """The build's ExeFS patch status file (tools/exefs_patches.py --status), which runtime/mods.c reads."""
+    return ctx.dest / 'build-cache' / 'exefs.status'
+
+
 def cheats_status(ctx):
     """The build's cheat status file (tools/cheats.py --status), which runtime/cheats.c reads: in build-cache, not in a
     mod's own cheats folder, which the player (or TKMM's merge) may empty."""
@@ -744,8 +768,9 @@ class Lift(Step):
     transient = True
 
     def key(self, ctx):
-        return fingerprint('lift-3', ctx.keys['extract'], ctx.layout.recomp, ctx.layout.patches(game_version(ctx)),
-                           ctx.layout.tools / 'cheats.py', *cheat_files(ctx))
+        return fingerprint('lift-4', ctx.keys['extract'], ctx.layout.recomp, ctx.layout.patches(game_version(ctx)),
+                           ctx.layout.tools / 'cheats.py', ctx.layout.tools / 'exefs_patches.py', *cheat_files(ctx),
+                           *exefs_files(ctx))
 
     def current(self, ctx, record):
         gen = ctx.temp / 'gen'
@@ -764,30 +789,38 @@ class Lift(Step):
             if m:
                 rep.progress('lift', 'emit', int(m.group(1)), int(m.group(2)), 'chunks')
 
-        # The code cheats of the mods' cheat files become patch sets (tools/cheats.py); its status file tells the
-        # runtime which cheats the build has. A cheat file is the player's download, so one the tools refuse costs the
-        # cheats, not the install: the game is built without them and the setup warns.
-        plain, status = layout.patches(game_version(ctx)), cheats_status(ctx)
-        patches, skipped = plain, None
-        status.unlink(missing_ok=True)   # no status: the runtime treats every code cheat as not built
-        if cheat_files(ctx):
-            combined = ctx.temp / 'patches-cheats.txt'
-            code, log = run_tool(ctx, 'lift', layout.tools / 'cheats.py',
-                                 ['--exefs', ctx.dest / 'exefs', '--mods', ctx.dest / 'mods', '--patches', plain,
-                                  '--out', combined, '--status', status])
-            patches, skipped = (plain, log) if code else (combined, None)
+        # The code cheats of the mods' cheat files and the mods' ExeFS patch files become patch sets (tools/cheats.py,
+        # tools/exefs_patches.py); their status files tell the runtime what the build has. Both are the player's
+        # downloads, so files the tools refuse cost those cheats or patches, not the install: the game is built
+        # without them and the setup warns.
+        plain = layout.patches(game_version(ctx))
+        stages = [('cheats.py', 'patches-cheats.txt', cheats_status(ctx), cheat_files(ctx), 'warn.cheats_skipped'),
+                  ('exefs_patches.py', 'patches-exefs.txt', exefs_status(ctx), exefs_files(ctx), 'warn.exefs_skipped')]
+        patches, skipped = plain, {}
+        for tool, out, status, inputs, warn in stages:
+            status.unlink(missing_ok=True)   # no status: the runtime treats every such file as not built
+            if not inputs:
+                continue
+            code, log = run_tool(ctx, 'lift', layout.tools / tool,
+                                 ['--exefs', ctx.dest / 'exefs', '--mods', ctx.dest / 'mods', '--patches', patches,
+                                  '--out', ctx.temp / out, '--status', status])
             if code:
                 status.unlink(missing_ok=True)
+                skipped[warn] = log
+            else:
+                patches = ctx.temp / out
         args = ['--exefs', ctx.dest / 'exefs', '--out', gen]
         code, log = run_tool(ctx, 'lift', layout.recomp / 'gen.py', args + ['--patches', patches], parse)
         if code and patches != plain:
-            skipped = log
-            status.unlink(missing_ok=True)
+            for tool, out, status, inputs, warn in stages:
+                if inputs and warn not in skipped:
+                    status.unlink(missing_ok=True)
+                    skipped[warn] = log
             code, log = run_tool(ctx, 'lift', layout.recomp / 'gen.py', args + ['--patches', plain], parse)
         if code:
             raise InstallError('lift.failed', code=code, log=str(log))
-        if skipped:
-            rep.warning('warn.cheats_skipped', log=str(skipped))
+        for warn, log in skipped.items():
+            rep.warning(warn, log=str(log))
         (gen / STAMP).write_text(ctx.keys['lift'] + '\n')
         return {}
 

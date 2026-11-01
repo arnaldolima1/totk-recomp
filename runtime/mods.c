@@ -10,6 +10,13 @@
 // Windows file name cannot hold '|'; a folder whose name does on Linux is listed as unusable); a folder it does not name
 // goes below the named ones, by name. TOTK_MODS_DISABLED lists the switched-off names. The menu changes the list in
 // place and writes both keys; the scan's state is kept to tell the menu a restart is due.
+//
+// ExeFS patch files: an .ips or .pchtxt file in the exefs folder or in atmosphere/exefs_patches/<name>/ is for the game
+// when its build id is main's (an IPS file's name, a pchtxt file's @nsobid line); others are another version's and
+// counted. The setup builds every mod's files into patch sets and writes build-cache/exefs.status next to totk.exe
+// (tools/exefs_patches.py has the format): a file whose line is missing or has another content hash waits for the
+// rebuild at start (cheats.c), and its mod stays off until then.
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -119,10 +126,178 @@ static const char *problem_name(ModProblem p) {
     switch (p) {
     case MOD_EMPTY: return "empty";
     case MOD_PLUGIN: return "has a code module (subsdk or main), not supported; the whole mod stays off";
-    case MOD_EXEFS_LATER: return "ExeFS patches need a game code rebuild, not applied; the whole mod stays off";
+    case MOD_EXEFS_LATER: return "ExeFS patches wait for a rebuild of the game code; the whole mod stays off";
+    case MOD_EXEFS_UNSUPPORTED: return "an ExeFS patch file cannot be applied; the whole mod stays off";
+    case MOD_EXEFS_OTHER: return "its ExeFS patches are for another game version";
     case MOD_BAD_NAME: return "its folder name holds '|', which the order list uses; rename the folder";
     default: return "ok";
     }
+}
+
+// ---- ExeFS patch files
+
+static uint32_t fnv(const void *p, size_t n) {
+    uint32_t h = 0x811C9DC5u;
+    for (size_t i = 0; i < n; i++) h = (h ^ ((const uint8_t *)p)[i]) * 0x01000193u;
+    return h;
+}
+
+const char *mods_main_build_id(void) {
+    static char bid[65];
+    static int read;
+    if (read) return bid;
+    read = 1;
+    char path[2100];
+    snprintf(path, sizeof path, "%s/main", rt_config()->exefs);
+    PlatFile *f = plat_file_open(path);
+    uint8_t head[0x60];
+    int ok = f && plat_file_pread(f, head, sizeof head, 0) == sizeof head && !memcmp(head, "NSO0", 4);
+    if (f) plat_file_close(f);
+    for (int i = 0; ok && i < 32; i++) snprintf(bid + 2 * i, 3, "%02x", head[0x40 + i]);
+    return bid;
+}
+
+// 1 when hex (any case; trailing zeros left out or not) names main's build id; also when main's is unknown.
+static int same_build(const char *hex, size_t n) {
+    const char *bid = mods_main_build_id();
+    if (!*bid) return 1;
+    if (!n || n > 64) return 0;
+    for (size_t i = 0; i < 64; i++) {
+        char c = i < n ? hex[i] : '0';
+        if (c >= 'A' && c <= 'F') c = (char)(c - 'A' + 'a');
+        if (c != bid[i]) return 0;
+    }
+    return 1;
+}
+
+// build-cache/exefs.status next to totk.exe, read once; "" when there is none.
+static const char *exefs_status(void) {
+    static char *text;
+    if (text) return text;
+    char path[2100];
+    uint64_t n = 0;
+    if (plat_exe_path(path, sizeof path)) {
+        char *cut = strrchr(path, '/'), *back = strrchr(path, '\\');
+        if (back > cut) cut = back;
+        if (cut) snprintf(cut + 1, sizeof path - (size_t)(cut + 1 - path), "build-cache/exefs.status");
+        text = (char *)plat_file_read(path, &n);
+    }
+    if (!text) text = calloc(1, 1);
+    return text;
+}
+
+// The status line of key: its kind, built-in sets and note, NUL-terminated copies; 0 when none.
+static int status_line(const char *key, const char *content, char *kind, char *over, char *note) {
+    char want[20];
+    snprintf(want, sizeof want, "%s\t%s\t", key, content);
+    for (const char *line = exefs_status(); *line;) {
+        const char *end = strchr(line, '\n');
+        size_t len = end ? (size_t)(end - line) : strlen(line);
+        if (len > 18 && !memcmp(line, want, 18)) {
+            char copy[600];
+            snprintf(copy, sizeof copy, "%.*s", (int)(len < sizeof copy ? len : sizeof copy - 1), line + 18);
+            char *t1 = strchr(copy, '\t'), *t2 = t1 ? strchr(t1 + 1, '\t') : NULL;
+            if (!t1 || !t2) return 0;
+            *t1 = *t2 = 0;
+            char *r = strchr(t2 + 1, '\r');
+            if (r) *r = 0;
+            snprintf(kind, 16, "%s", copy);
+            snprintf(over, 256, "%s", strcmp(t1 + 1, "-") ? t1 + 1 : "");
+            snprintf(note, 256, "%s", t2 + 1);
+            return 1;
+        }
+        line = end ? end + 1 : line + len;
+    }
+    return 0;
+}
+
+typedef struct {
+    ModInfo *m;
+    const char *folder, *rel;   // the folder listed and its path in the mod
+    int unsupported;
+} ExefsWalk;
+
+// One file of an exefs folder: its build, then its status line.
+static int exefs_file_cb(const char *leaf, int kind, uint64_t size, void *ctx) {
+    (void)size;
+    ExefsWalk *w = ctx;
+    ModInfo *m = w->m;
+    int ips = ends_with_ci(leaf, ".ips");
+    if (kind != PLAT_FS_FILE || (!ips && !ends_with_ci(leaf, ".pchtxt"))) return 1;
+    m->kind |= MOD_EXEFS;
+    char path[4300], rel[600];
+    snprintf(path, sizeof path, "%s/%s", w->folder, leaf);
+    snprintf(rel, sizeof rel, "%s/%s/%s", m->name, w->rel, leaf);
+    uint64_t n = 0;
+    char *data = (char *)plat_file_read(path, &n);
+    if (!data) {
+        rt_log("mods: %s: cannot read %s", m->name, path);
+        return 1;
+    }
+    int for_main;
+    if (ips) {
+        for_main = same_build(leaf, strlen(leaf) - 4);
+    } else {
+        char *id = NULL;   // after "@nsobid-" at the start of a line
+        for (char *p = data; !id && p && data + n - p > 8;) {
+            if (!memcmp(p, "@nsobid-", 8)) id = p + 8;
+            p = memchr(p, '\n', (size_t)(data + n - p));
+            if (p) p++;
+        }
+        size_t len = 0;
+        while (id && id + len < data + n && isxdigit((unsigned char)id[len])) len++;
+        for_main = id && same_build(id, len);
+    }
+    char key[9], content[9], kind_s[16], over[256], note[256];
+    snprintf(key, sizeof key, "%08X", fnv(rel, strlen(rel)));
+    snprintf(content, sizeof content, "%08X", fnv(data, (size_t)n));
+    free(data);
+    if (!for_main) {
+        m->other_version++;
+        return 1;
+    }
+    if (!status_line(key, content, kind_s, over, note)) {
+        m->pending++;
+        m->pending_key = (m->pending_key ^ fnv(key, 8)) * 0x01000193u;
+        m->pending_key = (m->pending_key ^ fnv(content, 8)) * 0x01000193u;
+        return 1;
+    }
+    if (!strcmp(kind_s, "unsupported")) {
+        if (!w->unsupported) snprintf(m->note, sizeof m->note, "%s: %s", leaf, note);
+        w->unsupported = 1;
+    } else if (!strcmp(kind_s, "code") && m->nsets < (int)(sizeof m->sets / sizeof *m->sets)) {
+        m->sets[m->nsets++] = (uint32_t)strtoul(key, NULL, 16);
+        size_t k = strlen(m->overrides);
+        if (*over) snprintf(m->overrides + k, sizeof m->overrides - k, "%s%s", k ? "," : "", over);
+    } else if (!strcmp(kind_s, "other")) {
+        m->other_version++;
+    }
+    return 1;
+}
+
+// atmosphere/exefs_patches/<name>/ of a mod: each <name> folder's files.
+static int exefs_patches_cb(const char *leaf, int kind, uint64_t size, void *ctx) {
+    (void)size;
+    ExefsWalk *w = ctx;
+    if (kind != PLAT_FS_DIR) return 1;
+    char folder[4300], rel[600];
+    snprintf(folder, sizeof folder, "%s/%s", w->folder, leaf);
+    snprintf(rel, sizeof rel, "atmosphere/exefs_patches/%s", leaf);
+    ExefsWalk sub = {w->m, folder, rel, 0};
+    plat_fs_list(folder, exefs_file_cb, &sub);
+    w->unsupported |= sub.unsupported;
+    return 1;
+}
+
+// The ExeFS patch files of mod m (folder path): 1 when one cannot be applied.
+static int exefs_check(ModInfo *m, const char *path) {
+    ExefsWalk w = {m, m->exefs, m->exefs + strlen(path) + 1, 0};
+    if (m->exefs[0]) plat_fs_list(m->exefs, exefs_file_cb, &w);
+    char patches[2200];
+    snprintf(patches, sizeof patches, "%s/atmosphere/exefs_patches", path);
+    ExefsWalk at = {m, patches, "", 0};
+    if (plat_dir_exists(patches)) plat_fs_list(patches, exefs_patches_cb, &at);
+    return w.unsupported || at.unsupported;
 }
 
 // One mod folder of the scan.
@@ -149,12 +324,15 @@ static int scan_cb(const char *name, int kind, uint64_t size, void *ctx) {
     if (m->romfs[0] && has_file(m->romfs)) m->kind |= MOD_ROMFS;
     if (m->exefs[0]) plat_fs_list(m->exefs, exefs_cb, &m->kind);
     if (m->cheats[0]) plat_fs_list(m->cheats, cheats_cb, &m->kind);
+    int unsupported = exefs_check(m, path);
     // a mod whose code part the port cannot use is off as a whole: its RomFS files may expect that code
-    m->problem = strchr(m->name, '|')               ? MOD_BAD_NAME
-               : m->kind & MOD_SUBSDK               ? MOD_PLUGIN
-               : m->kind & MOD_EXEFS                ? MOD_EXEFS_LATER
-               : m->kind & (MOD_ROMFS | MOD_CHEATS) ? MOD_OK
-                                                    : MOD_EMPTY;
+    m->problem = strchr(m->name, '|')                                ? MOD_BAD_NAME
+               : m->kind & MOD_SUBSDK                                ? MOD_PLUGIN
+               : unsupported                                         ? MOD_EXEFS_UNSUPPORTED
+               : m->pending                                          ? MOD_EXEFS_LATER
+               : m->nsets || m->kind & (MOD_ROMFS | MOD_CHEATS)     ? MOD_OK
+               : m->kind & MOD_EXEFS                                 ? MOD_EXEFS_OTHER
+                                                                     : MOD_EMPTY;
     m->enabled = !listed(disabled, m->name);
     nmods++;
     return 1;
@@ -190,11 +368,45 @@ void mods_scan(void) {
         snprintf(start_order[i], sizeof start_order[i], "%s", mods[i].name);
         start_enabled[i] = mods[i].enabled;
         const ModInfo *m = &mods[i];
-        rt_log("mods: %s: %s,%s%s%s%s%s, %s", m->name, m->enabled ? "on" : "off", m->kind & MOD_ROMFS ? " romfs" : "",
+        rt_log("mods: %s: %s,%s%s%s%s%s, %s%s%s", m->name, m->enabled ? "on" : "off", m->kind & MOD_ROMFS ? " romfs" : "",
                m->kind & MOD_EXEFS ? " exefs" : "", m->kind & MOD_SUBSDK ? " subsdk" : "",
-               m->kind & MOD_CHEATS ? " cheats" : "", m->kind ? "" : " no files", problem_name(m->problem));
+               m->kind & MOD_CHEATS ? " cheats" : "", m->kind ? "" : " no files", problem_name(m->problem),
+               m->note[0] ? ": " : "", m->note);
     }
     rt_log("mods: %d folders in %s", nmods, dir);
+}
+
+void mods_exefs_switch(void) {
+    mods_scan();
+    for (int i = 0; i < nmods; i++) {
+        const ModInfo *m = &mods[i];
+        if (!start_enabled[i] || m->problem != MOD_OK || !m->nsets) continue;
+        for (int k = 0; k < m->nsets; k++) {
+            char name[32];
+            snprintf(name, sizeof name, "mod_%08x", m->sets[k]);
+            int set = rt_patch_set(name);
+            if (set >= 0) rt_patch_switch(set, 1);
+            else rt_log("mods: %s: patch set %s is not in this build", m->name, name);
+        }
+        char over[256];
+        snprintf(over, sizeof over, "%s", m->overrides);
+        for (char *s = strtok(over, ","); s; s = strtok(NULL, ",")) {
+            int set = rt_patch_set(s);
+            if (set >= 0) rt_patch_switch(set, 0);
+            rt_log("mods: %s replaces the port's patch set %s; it stays off", m->name, s);
+        }
+        rt_log("mods: %s: %d ExeFS patch files on", m->name, m->nsets);
+    }
+}
+
+int mods_exefs_pending(uint32_t *key) {
+    int n = 0;
+    for (int i = 0; i < nmods; i++) {
+        if (!start_enabled[i] || mods[i].problem != MOD_EXEFS_LATER) continue;
+        n += (int)mods[i].pending;
+        *key = (*key ^ mods[i].pending_key) * 0x01000193u;
+    }
+    return n;
 }
 
 const char *mods_dir(void) { return dir; }

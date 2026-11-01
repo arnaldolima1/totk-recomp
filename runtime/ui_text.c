@@ -171,8 +171,8 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_MODS_EMPTY] = "This folder has no romfs, exefs or cheats files.",
     [UI_MENU_MODS_SUBSDK] = "This mod brings its own game code (a subsdk plugin or a replaced main). The port cannot "
                             "load code modules, so the whole mod stays off.",
-    [UI_MENU_MODS_EXEFS_LATER] = "This mod patches the game code (exefs). Code patches are not supported yet, so the "
-                                 "whole mod stays off.",
+    [UI_MENU_MODS_EXEFS_LATER] = "This mod patches the game code (exefs). The game builds the patches in when it "
+                                 "starts next (a rebuild of a few minutes); until then the whole mod stays off.",
     [UI_MENU_MODS_CHEATS] = "Cheats: %d. Switch them on the Cheats tab.",
     [UI_MENU_MODS_CHEATS_FILE] = "Cheats for this game version are read at start from cheats\\%s in this mod.",
     [UI_MENU_MODS_BAD_NAME] = "The folder name contains |, which the mod list uses between names. Rename the folder.",
@@ -439,6 +439,12 @@ static const char *const text_en[UI_TEXT_COUNT] = {
                                     "edited, or their last rebuild failed or was cancelled. Closes the game; the setup "
                                     "builds them in (a few minutes) and starts the game again. Progress since your "
                                     "last save is lost.",
+    [UI_MENU_MODS_EXEFS_UNSUPPORTED] = "This mod patches the game code (exefs) in a way the port cannot apply, so the "
+                                       "whole mod stays off. %s",
+    [UI_MENU_MODS_EXEFS_OTHER] = "Its code patches (exefs) are made for another game version.",
+    [UI_MENU_MODS_EXEFS_ON] = "Code patches in use: %d files.",
+    [UI_MENU_MODS_REPLACES_BUILTIN] = "Code patches in use: %d files. They replace the port's own patch %s, which "
+                                      "stays off while this mod is on.",
 };
 
 static const char *const text_ru[UI_TEXT_COUNT] = {
@@ -588,8 +594,8 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_MODS_EMPTY] = "В этой папке нет файлов romfs, exefs или cheats.",
     [UI_MENU_MODS_SUBSDK] = "Этот мод приносит свой код игры (плагин subsdk или заменённый main). Порт не загружает "
                             "модули кода, поэтому мод выключен целиком.",
-    [UI_MENU_MODS_EXEFS_LATER] = "Этот мод меняет код игры (exefs). Патчи кода пока не поддерживаются, поэтому мод "
-                                 "выключен целиком.",
+    [UI_MENU_MODS_EXEFS_LATER] = "Этот мод меняет код игры (exefs). Игра соберёт эти патчи при следующем запуске "
+                                 "(пересборка на несколько минут); до тех пор мод выключен целиком.",
     [UI_MENU_MODS_CHEATS] = "Читов: %d. Они включаются на вкладке «Читы».",
     [UI_MENU_MODS_CHEATS_FILE] = "Читы для этой версии игры читаются при запуске из cheats\\%s в этом моде.",
     [UI_MENU_MODS_BAD_NAME] = "В имени папки есть символ |, которым список модов разделяет имена. Переименуйте папку.",
@@ -860,6 +866,12 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
                                     "либо прошлая пересборка не удалась или была отменена. Закрывает игру; установщик "
                                     "собирает их (несколько минут) и снова запускает игру. Прогресс после последнего "
                                     "сохранения будет потерян.",
+    [UI_MENU_MODS_EXEFS_UNSUPPORTED] = "Этот мод меняет код игры (exefs) так, как порт применить не может, поэтому мод "
+                                       "выключен целиком. %s",
+    [UI_MENU_MODS_EXEFS_OTHER] = "Его патчи кода (exefs) сделаны для другой версии игры.",
+    [UI_MENU_MODS_EXEFS_ON] = "Патчи кода в работе: файлов: %d.",
+    [UI_MENU_MODS_REPLACES_BUILTIN] = "Патчи кода в работе: файлов: %d. Они заменяют собственный патч порта %s, "
+                                      "который выключен, пока этот мод включён.",
 };
 
 static const char *const text_pt_br[UI_TEXT_COUNT] = {
@@ -881,8 +893,9 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_MODS_EMPTY] = "Esta pasta não tem arquivos romfs, exefs ou cheats.",
     [UI_MENU_MODS_SUBSDK] = "Este mod traz código próprio do jogo (um plugin subsdk ou um main substituído). O port não "
                             "carrega módulos de código, então o mod inteiro fica desligado.",
-    [UI_MENU_MODS_EXEFS_LATER] = "Este mod altera o código do jogo (exefs). Patches de código ainda não são suportados, "
-                                 "então o mod inteiro fica desligado.",
+    [UI_MENU_MODS_EXEFS_LATER] = "Este mod altera o código do jogo (exefs). O jogo compila esses patches na próxima "
+                                 "vez que iniciar (uma recompilação de alguns minutos); até lá o mod inteiro fica "
+                                 "desligado.",
     [UI_MENU_MODS_CHEATS] = "Cheats: %d. Ligue-os na aba Cheats.",
     [UI_MENU_MODS_CHEATS_FILE] = "Os cheats desta versão do jogo são lidos ao iniciar de cheats\\%s neste mod.",
     [UI_MENU_MODS_BAD_NAME] = "O nome da pasta contém |, que a lista de mods usa entre os nomes. Renomeie a pasta.",
@@ -1309,6 +1322,12 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
                                     "novos ou editados, ou a última recompilação falhou ou foi cancelada. Fecha o "
                                     "jogo; o instalador os compila (alguns minutos) e inicia o jogo de novo. O "
                                     "progresso desde o último salvamento é perdido.",
+    [UI_MENU_MODS_EXEFS_UNSUPPORTED] = "Este mod altera o código do jogo (exefs) de um jeito que o port não consegue "
+                                       "aplicar, então o mod inteiro fica desligado. %s",
+    [UI_MENU_MODS_EXEFS_OTHER] = "Os patches de código dele (exefs) são para outra versão do jogo.",
+    [UI_MENU_MODS_EXEFS_ON] = "Patches de código em uso: %d arquivos.",
+    [UI_MENU_MODS_REPLACES_BUILTIN] = "Patches de código em uso: %d arquivos. Eles substituem o patch do próprio port "
+                                      "%s, que fica desligado enquanto este mod está ligado.",
 };
 
 // Simplified Chinese: this row covers the software keyboard and the whole menu, so the menu and the overlay read Chinese
@@ -1337,7 +1356,7 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
                                "更改在重启后生效。",
     [UI_MENU_MODS_EMPTY] = "此文件夹中没有 romfs、exefs 或 cheats 文件。",
     [UI_MENU_MODS_SUBSDK] = "此模组带有自己的游戏代码（subsdk 插件或替换的 main）。移植版无法加载代码模块，因此整个模组保持关闭。",
-    [UI_MENU_MODS_EXEFS_LATER] = "此模组修改游戏代码（exefs）。目前还不支持代码补丁，因此整个模组保持关闭。",
+    [UI_MENU_MODS_EXEFS_LATER] = "此模组修改游戏代码（exefs）。游戏会在下次启动时把这些补丁构建进去（重新构建需要几分钟）；在此之前整个模组保持关闭。",
     [UI_MENU_MODS_CHEATS] = "金手指：%d 个。在“金手指”标签页中开关。",
     [UI_MENU_MODS_CHEATS_FILE] = "此游戏版本的金手指在启动时从此模组的 cheats\\%s 读取。",
     [UI_MENU_MODS_BAD_NAME] = "文件夹名称含有 |，模组列表用它分隔名称。请重命名该文件夹。",
@@ -1853,6 +1872,10 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_CHEAT_UNSUPPORTED_DESC] = "此金手指不能用于此游戏版本：",
     [UI_MENU_CHEATS_REBUILD] = "立即重新构建游戏",
     [UI_MENU_CHEATS_REBUILD_DESC] = "有些金手指会修改游戏代码，但尚未构建进游戏：它们是新增或修改的，或上次重新构建失败或被取消。将关闭游戏；安装程序会把它们构建进去（几分钟）并重新启动游戏。上次存档之后的进度会丢失。",
+    [UI_MENU_MODS_EXEFS_UNSUPPORTED] = "此模组修改游戏代码（exefs）的方式本移植无法应用，因此整个模组保持关闭。%s",
+    [UI_MENU_MODS_EXEFS_OTHER] = "它的代码补丁（exefs）是为其他游戏版本制作的。",
+    [UI_MENU_MODS_EXEFS_ON] = "正在使用的代码补丁：%d 个文件。",
+    [UI_MENU_MODS_REPLACES_BUILTIN] = "正在使用的代码补丁：%d 个文件。它们取代本移植自带的补丁 %s，此模组开启时该补丁保持关闭。",
 };
 
 #define SWKBD_ONLY(name, ...) static const char *const name[UI_TEXT_COUNT] = {SWKBD(__VA_ARGS__)}

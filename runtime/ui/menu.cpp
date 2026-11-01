@@ -1063,16 +1063,26 @@ static void tab_mods(float scale) {
             if (count) snprintf(cheat, sizeof cheat, menu_text(UI_MENU_MODS_CHEATS), count);
             else snprintf(cheat, sizeof cheat, menu_text(UI_MENU_MODS_CHEATS_FILE), cheats_file());
         }
-        UiTextId problem = m->problem == MOD_EMPTY        ? UI_MENU_MODS_EMPTY
-                         : m->problem == MOD_PLUGIN       ? UI_MENU_MODS_SUBSDK
-                         : m->problem == MOD_EXEFS_LATER  ? UI_MENU_MODS_EXEFS_LATER
-                         : m->problem == MOD_BAD_NAME     ? UI_MENU_MODS_BAD_NAME
-                                                          : UI_TEXT_COUNT;
+        char code[512] = "", problem[512] = "";
+        if (m->nsets && m->overrides[0])
+            snprintf(code, sizeof code, menu_text(UI_MENU_MODS_REPLACES_BUILTIN), m->nsets, m->overrides);
+        else if (m->nsets)
+            snprintf(code, sizeof code, menu_text(UI_MENU_MODS_EXEFS_ON), m->nsets);
+        switch (m->problem) {
+        case MOD_EMPTY: snprintf(problem, sizeof problem, "%s", menu_text(UI_MENU_MODS_EMPTY)); break;
+        case MOD_PLUGIN: snprintf(problem, sizeof problem, "%s", menu_text(UI_MENU_MODS_SUBSDK)); break;
+        case MOD_EXEFS_LATER: snprintf(problem, sizeof problem, "%s", menu_text(UI_MENU_MODS_EXEFS_LATER)); break;
+        case MOD_EXEFS_UNSUPPORTED:
+            snprintf(problem, sizeof problem, menu_text(UI_MENU_MODS_EXEFS_UNSUPPORTED), m->note);
+            break;
+        case MOD_EXEFS_OTHER: snprintf(problem, sizeof problem, "%s", menu_text(UI_MENU_MODS_EXEFS_OTHER)); break;
+        case MOD_BAD_NAME: snprintf(problem, sizeof problem, "%s", menu_text(UI_MENU_MODS_BAD_NAME)); break;
+        default: break;
+        }
         int k = snprintf(desc, sizeof desc, menu_text(UI_MENU_MODS_ROW_DESC), m->replaced, m->added);
-        if (k >= 0 && k < (int)sizeof desc)
-            snprintf(desc + k, sizeof desc - k, "%s%s%s%s%s%s%s%s\n\n%s", over[0] ? "\n\n" : "", over,
-                     other[0] ? "\n\n" : "", other, cheat[0] ? "\n\n" : "", cheat, problem != UI_TEXT_COUNT ? "\n\n" : "",
-                     problem != UI_TEXT_COUNT ? menu_text(problem) : "", menu_text(UI_MENU_MODS_MOVE_HINT));
+        const char *parts[] = {over, other, cheat, code, problem, menu_text(UI_MENU_MODS_MOVE_HINT)};
+        for (const char *part : parts)
+            if (*part && k >= 0 && k < (int)sizeof desc) k += snprintf(desc + k, sizeof desc - k, "\n\n%s", part);
         const char *note = m->enabled && m->problem != MOD_OK ? menu_text(UI_MENU_MODS_UNUSED) : after;
         int s = opt_text_row(id, m->name, menu_text(m->enabled ? UI_MENU_ON : UI_MENU_OFF), note, desc, true);
         if (s == 2 || s == -1 || s == 1) {
@@ -1086,6 +1096,8 @@ static void tab_mods(float scale) {
             opt_save_soon();
         }
     }
+    bool rebuild =
+        cheats_rebuild_pending() && opt_button("##restart", UI_MENU_CHEATS_REBUILD, UI_MENU_CHEATS_REBUILD_DESC);
     static uint64_t open_failed;   // plat_now_ns until which the button says it failed
     if (opt_button("##mods_open", UI_MENU_MODS_OPEN, UI_MENU_MODS_OPEN_DESC,
                    plat_now_ns() < open_failed ? menu_text(UI_MENU_ACTION_FAILED) : "")) {
@@ -1095,6 +1107,11 @@ static void tab_mods(float scale) {
     }
     mods_builtin_rows();
     opt_end();
+    if (rebuild) {
+        restart_rebuild = true;
+        ImGui::OpenPopup("##restart_confirm");
+    }
+    restart_confirm();
 }
 
 // ---- the window: title, tabs (L / R or Q / E switch), the page, and the bottom row with "Continue" and "Quit game".

@@ -440,10 +440,11 @@ static void plain_name(char *s) {
     }
 }
 
-// ---- rebuild: code cheats the build lacks
+// ---- rebuild: code cheats and ExeFS patches the build lacks
 // The setup writes build-cache\rebuild.txt (installer/steps.py write_rebuild_command), the command that starts its
 // window in rebuild mode on this install folder, one argument per line. When an enabled mod has code cheats this build
-// lacks (CHEAT_REBUILD), the game runs it and exits; the setup lifts and compiles them in and starts the game again.
+// lacks (CHEAT_REBUILD) or ExeFS patch files it lacks (mods_exefs_pending), the game runs it and exits; the setup lifts
+// and compiles them in and starts the game again.
 // build-cache\rebuild.skip holds the key of the cheats a rebuild was started for: a rebuild that failed or was
 // cancelled leaves them unbuilt, and the same set does not start it again. TOTK_MODS_REBUILD=off never starts it.
 // Scripted runs (--seconds, --boot) never start it.
@@ -457,7 +458,8 @@ static void rebuild_if_needed(const char *dir) {
         key = (key ^ fnv(c->info.key, strlen(c->info.key))) * 0x01000193u;
         key = (key ^ c->content) * 0x01000193u;
     }
-    if (!need) return;
+    int patches = mods_exefs_pending(&key);
+    if (!need && !patches) return;
     char cmd_path[PLAT_PATH_MAX + 64], skip_path[PLAT_PATH_MAX + 64], skip[16] = "", want[16];
     snprintf(cmd_path, sizeof cmd_path, "%sbuild-cache" SEP "rebuild.txt", dir);
     snprintf(skip_path, sizeof skip_path, "%sbuild-cache" SEP "rebuild.skip", dir);
@@ -472,7 +474,8 @@ static void rebuild_if_needed(const char *dir) {
     char *cmd = why ? NULL : read_text(cmd_path);
     if (!why && !cmd) why = "no build-cache/rebuild.txt (a build without the setup)";
     if (why) {
-        rt_log("cheats: %d code cheats are not built into the game; no rebuild: %s", need, why);
+        rt_log("cheats: %d code cheats and %d ExeFS patch files are not built into the game; no rebuild: %s", need,
+               patches, why);
         free(cmd);
         return;
     }
@@ -488,11 +491,13 @@ static void rebuild_if_needed(const char *dir) {
     }
     argv[argc] = NULL;
     if (argc < 2 || !plat_file_write(skip_path, want, strlen(want))) {
-        rt_log("cheats: %d code cheats are not built into the game; cannot start the rebuild (%s)", need, cmd_path);
+        rt_log("cheats: %d code cheats and %d ExeFS patch files are not built into the game; cannot start the "
+               "rebuild (%s)", need, patches, cmd_path);
         free(cmd);
         return;
     }
-    rt_log("cheats: %d code cheats are not built into the game; starting the rebuild: %s", need, argv[0]);
+    rt_log("cheats: %d code cheats and %d ExeFS patch files are not built into the game; starting the rebuild: %s",
+           need, patches, argv[0]);
     int ok = plat_spawn(argv, dir);
     free(cmd);
     if (!ok) {
@@ -528,6 +533,7 @@ void cheats_init(void) {
     }
     if (!g_files) {
         rt_log("cheats: no enabled mod holds cheats/%s", g_file);
+        rebuild_if_needed(dir);   // an enabled mod's ExeFS patches may still wait for it
         return;
     }
     snprintf(path, sizeof path, "%sbuild-cache" SEP "cheats.status", dir);
@@ -592,9 +598,10 @@ void cheats_init(void) {
 int cheats_rebuild_pending(void) {
     char path[PLAT_PATH_MAX + 64];
     snprintf(path, sizeof path, "%sbuild-cache" SEP "rebuild.txt", g_dir);
-    for (int i = 0; i < g_n; i++)
-        if (g_cheats[i].info.kind == CHEAT_REBUILD) return g_dir[0] && plat_file_exists(path);
-    return 0;
+    uint32_t key = 0;
+    int need = mods_exefs_pending(&key);
+    for (int i = 0; i < g_n && !need; i++) need = g_cheats[i].info.kind == CHEAT_REBUILD;
+    return need && g_dir[0] && plat_file_exists(path);
 }
 
 void cheats_rebuild_allow(void) {
