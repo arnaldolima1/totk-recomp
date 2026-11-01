@@ -24,6 +24,10 @@ enum {
     HEARD_MS = 400,                 // a friend counts as speaking this long after their last frame
 };
 static const float GATE_RMS = 0.012f;   // open microphone: about -38 dBFS, over a quiet room's noise
+// Each friend's voice is levelled on arrival: microphones differ a lot and most send quiet speech, which the game's
+// audio covered. Frames over SILENCE_RMS update the speech level; the gain brings it to SPEECH_RMS (about -18 dBFS),
+// at most MAX_GAIN, and a soft limiter (tanh) keeps loud words from clipping.
+static const float SPEECH_RMS = 0.13f, SILENCE_RMS = 0.004f, MAX_GAIN = 10.0f;
 
 // ---- what the connection sends
 static PlatMutex out_lock = PLAT_MUTEX_INIT;
@@ -42,6 +46,7 @@ typedef struct {
     double pos;         // fractional read position for an output rate other than 48 kHz
     int playing;
     uint64_t heard_ms;
+    float level, gain;  // the voice's speech level (smoothed RMS) and the gain that brings it to SPEECH_RMS
 } Speaker;
 static PlatMutex in_lock = PLAT_MUTEX_INIT;
 static Speaker speakers[VOICE_SPEAKERS];
@@ -188,10 +193,18 @@ void voice_receive(const char *from, const uint8_t *data, int n) {
             return;
         }
         snprintf(s->name, sizeof s->name, "%s", from);
-        s->rd = s->wr = 0, s->pos = 0, s->playing = 0;
+        s->rd = s->wr = 0, s->pos = 0, s->playing = 0, s->level = 0, s->gain = 1;
     }
     int got = opus_decode_float(s->dec, data, n, pcm, FRAME * 6, 0);
-    for (int i = 0; i < got; i++) s->ring[s->wr++ % RING] = pcm[i];
+    double sq = 0;
+    for (int i = 0; i < got; i++) sq += (double)pcm[i] * pcm[i];
+    float rms = got > 0 ? (float)sqrt(sq / got) : 0;
+    if (rms > SILENCE_RMS) s->level = s->level > 0 ? s->level * 0.9f + rms * 0.1f : rms;
+    float want = s->level > 0 ? fminf(MAX_GAIN, fmaxf(1.0f, SPEECH_RMS / s->level)) : 1.0f;
+    for (int i = 0; i < got; i++) {
+        s->gain += (want - s->gain) * 0.002f;   // about 10 ms to follow a change, so no step is heard
+        s->ring[s->wr++ % RING] = tanhf(pcm[i] * s->gain);
+    }
     if (s->wr - s->rd > RING) s->rd = s->wr - RING;   // more than a second behind: the oldest goes
     s->heard_ms = plat_now_ms();
     plat_mutex_unlock(&in_lock);
