@@ -785,6 +785,14 @@ def resolve(cond, gd, lists):
     raise CompileError(f'unknown condition kind {k}')
 
 
+# The progress figures a multiplayer room shows: the same conditions as the presets, compiled as S lines.
+STATS = {
+    'shrines': PRESETS['shrines']['cond'], 'lightroots': PRESETS['lightroots']['cond'],
+    'towers': PRESETS['towers']['cond'], 'koroks': PRESETS['korok_seeds']['cond'],
+    'hearts': dict(PRESETS['hearts']['cond'], preset='hearts'),
+}
+
+
 def _clean(s):
     return str(s).replace('\t', ' ').replace('\r', ' ').replace('\n', ' ')
 
@@ -820,13 +828,18 @@ def compile_definitions(dest, romfs=None, log=print):
         (folder / 'icons' / f'{a["id"]}.rgba').write_bytes(small.to_rgba8())
         lines.append('\t'.join(['A', a['id'], a['rarity'], kind, *args, '1' if a.get('hidden') else '0',
                                 _clean(a['name']), _clean(a['description'])]))
+    count = len(lines)
+    # The progress the multiplayer room shows (runtime/net_mp.c): S lines, a stat name and a condition as on A lines.
+    for stat, cond in STATS.items():
+        kind, *args = resolve(dict(cond, min=0), gd, lists)
+        lines.append('\t'.join(['S', stat, kind, *args]))
     out = [f'# {FORMAT}: written by tools/achievements.py from achievements.json; the editor rewrites it',
            *lines, *(f'{lid}\t{key}' for key, lid in lists.items())]
     tmp = folder / 'compiled.tsv.tmp'
     tmp.write_text('\n'.join(out) + '\n', encoding='utf-8', newline='\n')
     os.replace(tmp, folder / 'compiled.tsv')
-    log(f'achievements: {len(lines)} compiled, {len(lists)} flag lists')
-    return len(lines)
+    log(f'achievements: {count} compiled, {len(lists)} flag lists')
+    return count
 
 
 def read_compiled(path):
@@ -839,7 +852,7 @@ def read_compiled(path):
         if f[0] == 'A':
             items.append(dict(id=f[1], rarity=f[2], kind=f[3], a=f[4], b=f[5], c=f[6], d=f[7], hidden=f[8] == '1',
                               name=f[9], description=f[10]))
-        else:
+        elif f[0].startswith('L'):
             lists[f[0]] = [int(h, 16) for h in f[1].split(',')]
     return items, lists
 

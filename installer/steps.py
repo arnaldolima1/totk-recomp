@@ -739,9 +739,9 @@ class Prepare(Step):
 
 
 def editor_shortcuts(ctx):
-    """Shortcuts to the achievements editor (tools/achievements_editor.py, run by the release's pythonw) in the install
-    folder and in the Start menu, written on every install so they point at the newest release folder. Windows only;
-    a shortcut that cannot be made is logged and skipped."""
+    """Shortcuts to the achievements editor (tools/achievements_editor.py, run by the release's pythonw) and to the
+    multiplayer server (tools/mp_server.py) in the install folder and in the Start menu, written on every install so
+    they point at the newest release folder. Windows only; a shortcut that cannot be made is logged and skipped."""
     if os.name != 'nt':
         return
     layout, dest = ctx.layout, ctx.dest
@@ -750,21 +750,27 @@ def editor_shortcuts(ctx):
     if not pythonw.is_file() or not editor.is_file():
         return
     start = Path(os.environ.get('APPDATA', '')) / 'Microsoft' / 'Windows' / 'Start Menu' / 'Programs' / 'TotK Recomp'
-    links = [dest / 'Editor de Conquistas.lnk', start / 'Editor de Conquistas.lnk']
     script = ('$s = New-Object -ComObject WScript.Shell; foreach ($p in $env:TOTK_LINKS.Split("|")) { '
               '$l = $s.CreateShortcut($p); $l.TargetPath = $env:TOTK_PYW; $l.Arguments = $env:TOTK_ARGS; '
               '$l.WorkingDirectory = $env:TOTK_DEST; $l.IconLocation = $env:TOTK_ICON; '
-              '$l.Description = "Editor de Conquistas do TotK Recomp"; $l.Save() }')
+              '$l.Description = $env:TOTK_DESC; $l.Save() }')
+    # the editor (a window: pythonw), and the multiplayer room's server (tools/mp_server.py: a console that shows
+    # the address friends join)
+    shortcuts = [('Editor de Conquistas', pythonw, f'"{editor}" --dest "{dest}"', 'Editor de Conquistas do TotK Recomp')]
+    server = layout.tools / 'mp_server.py'
+    if server.is_file():
+        shortcuts.append(('Servidor Multijogador', layout.python, f'"{server}"', 'Sala multijogador do TotK Recomp'))
     try:
         start.mkdir(parents=True, exist_ok=True)
-        env = dict(os.environ, TOTK_LINKS='|'.join(map(str, links)), TOTK_PYW=str(pythonw),
-                   TOTK_ARGS=f'"{editor}" --dest "{dest}"', TOTK_DEST=str(dest),
-                   TOTK_ICON=f'{dest / ("totk" + EXE)},0')
-        subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', script], env=env, check=True,
-                       capture_output=True, timeout=60, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-        ctx.reporter.log('achievements editor shortcuts: ' + ', '.join(map(str, links)))
+        for name, target, args, desc in shortcuts:
+            links = [dest / f'{name}.lnk', start / f'{name}.lnk']
+            env = dict(os.environ, TOTK_LINKS='|'.join(map(str, links)), TOTK_PYW=str(target), TOTK_ARGS=args,
+                       TOTK_DEST=str(dest), TOTK_ICON=f'{dest / ("totk" + EXE)},0', TOTK_DESC=desc)
+            subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', script], env=env, check=True,
+                           capture_output=True, timeout=60, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            ctx.reporter.log(f'{name} shortcuts: ' + ', '.join(map(str, links)))
     except (OSError, subprocess.SubprocessError) as e:
-        ctx.reporter.log(f'achievements editor shortcuts not made: {e}')
+        ctx.reporter.log(f'shortcuts not made: {e}')
 
 
 # ---- 6. clean up

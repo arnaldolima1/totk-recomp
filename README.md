@@ -13,6 +13,7 @@ Added on top of the original, merged with each of its releases:
 - **Brazilian Portuguese** for the in-game menu, and the game's own language shown as Português (Brasil) with the launcher's translation
 - **Menu look**: a panel from the left with tab icons and the keys on its bottom line
 - **Achievements** ([docs/achievements.md](docs/achievements.md)): 64 achievements read from the game's own save progress, a notice with a chime, an *Achievements* tab, a platinum trophy, an editor for making your own with imported pictures, and unlocks that count only for progress made in play
+- **Multiplayer rooms** ([docs/multiplayer.md](docs/multiplayer.md)): friends each in their own world share progress, achievement unlocks, a chat and group challenges, through a small server one of them runs (or one online)
 - **PlayStation button prompts** ([docs/controls.md](docs/controls.md)): ✕ ○ □ △ in place of the letters, drawn by the setup from the game's own files
 - **DualSense**: adaptive triggers and the light bar
 - Smoother mouse camera, borderless window and a notice while shaders compile

@@ -31,6 +31,12 @@ typedef struct {
 
 static Ach *achs;
 static int nach;
+// The progress figures of the S lines (shrines, lightroots...), in ACH_STAT order, and how often they were read.
+static const char *const stat_names[ACH_STATS] = {"shrines", "lightroots", "towers", "koroks", "hearts"};
+static Ach stats[ACH_STATS];
+static int stat_found[ACH_STATS];
+static unsigned stats_gen;
+
 static HashList *lists;
 static int nlists;
 static PlatMutex lock = PLAT_MUTEX_INIT;
@@ -45,8 +51,10 @@ static uint64_t slot_print[SLOTS];
 static int slot_known[SLOTS];
 
 // Announcements: unlocks in batches, one batch per evaluation.
-enum { NOTICE_CAP = 256 };
+enum { NOTICE_CAP = 256, NOTICE_NET_CAP = 64 };
 static int notice[NOTICE_CAP], notice_batch[NOTICE_CAP], notice_head, notice_tail;
+// Unlocks for the multiplayer room (net_mp.c), apart from the notices the menu takes.
+static int net_unlock[NOTICE_NET_CAP], net_head, net_tail;
 
 static char *dup_str(const char *s) {
     size_t n = strlen(s) + 1;
@@ -189,6 +197,31 @@ static int slot_prints(const char *save_dir, uint64_t *print, int *present) {
     return found;
 }
 
+// The condition fields of an A or S line (f[3] the kind, f[4..7] its arguments) into a; 0 for an unknown kind.
+static int parse_condition(Ach *a, char **f) {
+    a->kind = kind_of(f[3]);
+    if (a->kind < 0) return 0;
+    a->unit = 1, a->list = -1;
+    switch (a->kind) {
+    case K_BOOL: a->a = (uint32_t)strtoul(f[4], NULL, 16), a->min = 1; break;
+    case K_ENUM: a->a = (uint32_t)strtoul(f[4], NULL, 16), a->want = (uint32_t)strtoul(f[5], NULL, 16), a->min = 1; break;
+    case K_NUM:
+        a->a = (uint32_t)strtoul(f[4], NULL, 16), a->min = atof(f[5]);
+        a->unit = atof(f[6]) > 0 ? atof(f[6]) : 1;
+        break;
+    case K_ARRSUM: a->a = (uint32_t)strtoul(f[4], NULL, 16), a->min = atof(f[5]); break;
+    case K_COUNT:
+        a->list = atoi(f[4] + 1), a->min = atof(f[5]), a->want = (uint32_t)strtoul(f[6], NULL, 16);
+        if (!a->want) a->want = 1;   // a list of bools: true
+        break;
+    case K_POUCH:
+        a->a = (uint32_t)strtoul(f[4], NULL, 16), a->b = (uint32_t)strtoul(f[5], NULL, 16), a->min = atof(f[6]);
+        a->item = dup_str(f[7]);
+        break;
+    }
+    return 1;
+}
+
 static void load(void *arg) {
     (void)arg;
     char dir[1024], path[1200], tsv[1200];
@@ -221,31 +254,19 @@ static void load(void *arg) {
                 if (*p == ',') p++;
             }
             if (id >= nlists) nlists = id + 1;
+        } else if (!strcmp(f[0], "S") && n >= 7) {   // S stat kind a b c d: a progress figure for the room
+            int k = -1;
+            for (int j = 0; j < ACH_STATS; j++)
+                if (!strcmp(f[1], stat_names[j])) k = j;
+            if (k < 0) continue;
+            char *g[11] = {"A", f[1], "common", f[2], f[3], f[4], f[5], f[6], "0", "", ""};
+            if (parse_condition(&stats[k], g)) stat_found[k] = 1;
         } else if (!strcmp(f[0], "A") && n >= 11) {   // A id rarity kind a b c d hidden name description
             Ach *a = &achs[nach];
-            a->kind = kind_of(f[3]);
-            if (a->kind < 0) continue;
+            if (!parse_condition(a, f)) continue;
             a->id = dup_str(f[1]), a->name = dup_str(f[9]), a->desc = dup_str(f[10]);
             a->rarity = rarity_of(f[2]);
             a->hidden = atoi(f[8]);
-            a->unit = 1, a->list = -1;
-            switch (a->kind) {
-            case K_BOOL: a->a = (uint32_t)strtoul(f[4], NULL, 16), a->min = 1; break;
-            case K_ENUM: a->a = (uint32_t)strtoul(f[4], NULL, 16), a->want = (uint32_t)strtoul(f[5], NULL, 16), a->min = 1; break;
-            case K_NUM:
-                a->a = (uint32_t)strtoul(f[4], NULL, 16), a->min = atof(f[5]);
-                a->unit = atof(f[6]) > 0 ? atof(f[6]) : 1;
-                break;
-            case K_ARRSUM: a->a = (uint32_t)strtoul(f[4], NULL, 16), a->min = atof(f[5]); break;
-            case K_COUNT:
-                a->list = atoi(f[4] + 1), a->min = atof(f[5]), a->want = (uint32_t)strtoul(f[6], NULL, 16);
-                if (!a->want) a->want = 1;   // a list of bools: true
-                break;
-            case K_POUCH:
-                a->a = (uint32_t)strtoul(f[4], NULL, 16), a->b = (uint32_t)strtoul(f[5], NULL, 16), a->min = atof(f[6]);
-                a->item = dup_str(f[7]);
-                break;
-            }
             snprintf(path, sizeof path, "%sachievements/icons/%s.rgba", dir, a->id);
             uint64_t isize = 0;
             a->icon = plat_file_read(path, &isize);
@@ -257,6 +278,10 @@ static void load(void *arg) {
         }
     }
     free(text);
+    for (int k = 0; k < ACH_STATS; k++)
+        if (stat_found[k] && stats[k].kind == K_COUNT &&
+            (stats[k].list < 0 || stats[k].list >= nlists || !lists[stats[k].list].h))
+            stat_found[k] = 0;
     for (int i = 0; i < nach; i++)
         if (achs[i].kind == K_COUNT && (achs[i].list < 0 || achs[i].list >= nlists || !lists[achs[i].list].h)) {
             rt_log("achievements: %s names a missing flag list; it stays locked", achs[i].id);
@@ -414,11 +439,15 @@ static void evaluate(const char *save_dir, int trusted) {
     double vals[1024];
     int n = nach < 1024 ? nach : 1024;
     for (int i = 0; i < n; i++) vals[i] = achs[i].kind == K_ALL || achs[i].kind < 0 ? 0 : value_of(&achs[i], &s);
+    double stat_vals[ACH_STATS];
+    for (int k = 0; k < ACH_STATS; k++) stat_vals[k] = stat_found[k] ? value_of(&stats[k], &s) / stats[k].unit : 0;
     save_free(&s);
 
     plat_mutex_lock(&lock);
     int fresh[1024], nfresh = 0, others = 0, others_done = 0, changed = 0, blocked = 0;
     int64_t now = (int64_t)time(NULL);
+    for (int k = 0; k < ACH_STATS; k++) stats[k].cur = stat_vals[k];
+    stats_gen++;
     for (int i = 0; i < n; i++) {
         Ach *a = &achs[i];
         if (a->kind == K_ALL || a->kind < 0) continue;
@@ -451,6 +480,12 @@ static void evaluate(const char *save_dir, int trusted) {
         notice[notice_tail] = fresh[k], notice_batch[notice_tail] = nfresh;
         notice_tail = next;
         rt_log("achievements: unlocked %s (%s)", achs[fresh[k]].id, achs[fresh[k]].name);
+    }
+    for (int k = 0; k < nfresh; k++) {   // and to the room
+        int next = (net_tail + 1) % NOTICE_NET_CAP;
+        if (next == net_head) break;
+        net_unlock[net_tail] = fresh[k];
+        net_tail = next;
     }
     if (nfresh) save_unlocked();
     if (blocked) rt_log("achievements: the save at start was not written by this game here; %d achievements it already "
@@ -505,6 +540,36 @@ int ach_get(int i, AchView *out) {
                      a->unlocked && a->cur < a->min ? a->min / unit : a->cur / unit, a->min / unit, a->icon};
     plat_mutex_unlock(&lock);
     return 1;
+}
+
+unsigned ach_stats(AchStats *out) {
+    ensure_loaded();
+    plat_mutex_lock(&lock);
+    for (int k = 0; k < ACH_STATS; k++) out->v[k] = stat_found[k] ? (int)stats[k].cur : -1;
+    int done = 0;
+    for (int i = 0; i < nach; i++) done += achs[i].unlocked;
+    out->achievements = done;
+    unsigned gen = stats_gen;
+    plat_mutex_unlock(&lock);
+    return gen;
+}
+
+int ach_take_net_unlock(void) {
+    plat_mutex_lock(&lock);
+    int idx = -1;
+    if (net_head != net_tail) {
+        idx = net_unlock[net_head];
+        net_head = (net_head + 1) % NOTICE_NET_CAP;
+    }
+    plat_mutex_unlock(&lock);
+    return idx;
+}
+
+int ach_find(const char *id) {
+    ensure_loaded();
+    for (int i = 0; i < nach; i++)
+        if (!strcmp(achs[i].id, id)) return i;
+    return -1;
 }
 
 int ach_blocked_count(void) {

@@ -34,6 +34,17 @@ void ach_save_committed(const char *save_dir);
 void ach_save_opened(const char *save_dir);
 int ach_blocked_count(void);         // locked achievements a save from elsewhere already held
 
+// The progress figures the multiplayer room shows, read with the achievements after each save: shrines done,
+// lightroots lit, towers opened, Korok seeds in the pouch, heart containers; -1 for one the compiled file lacks.
+enum { ACH_STAT_SHRINES, ACH_STAT_LIGHTROOTS, ACH_STAT_TOWERS, ACH_STAT_KOROKS, ACH_STAT_HEARTS, ACH_STATS };
+typedef struct {
+    int v[ACH_STATS];
+    int achievements;   // unlocked
+} AchStats;
+unsigned ach_stats(AchStats *out);   // returns a count that grows with every evaluation (0: no save read yet)
+int ach_take_net_unlock(void);       // the next unlock to tell the room (an index for ach_get), -1 when none
+int ach_find(const char *id);        // the index of an achievement id, -1 when this install has none
+
 int ach_count(void);                 // achievements loaded (0 without compiled.tsv); loads them on the first call
 int ach_get(int i, AchView *out);    // 1 when i is in range; the strings live until exit
 int ach_unlocked_count(void);

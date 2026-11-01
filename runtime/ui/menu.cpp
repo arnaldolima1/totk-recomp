@@ -37,6 +37,7 @@ static int g_font_bad;
 
 extern "C" {
 #include "achievements.h"
+#include "net_mp.h"
 #include "amiibo.h"
 #include "cfg.h"
 #include "input.h"
@@ -412,7 +413,8 @@ extern "C" void menu_vk_release(void) {
 // TOTK_MENU_TEST_SET=<frame>:<key>=<value>[,<key>=<value>...][;<frame>:...]: cfg_set of each key (TOTK_ prefix
 // optional) at that presented frame; changes live settings with no input, menu open or not. totk.ini is written only by
 // the pseudo-key SAVE=1 (cfg_save, as a row change does; a failed write shows the menu's save note).
-enum { TAB_SCREEN, TAB_GAME, TAB_SOUND, TAB_CONTROLS, TAB_AMIIBO, TAB_MENU, TAB_ADVANCED, TAB_ACHIEVEMENTS, TAB_COUNT };
+enum { TAB_SCREEN, TAB_GAME, TAB_SOUND, TAB_CONTROLS, TAB_AMIIBO, TAB_MENU, TAB_ADVANCED, TAB_ACHIEVEMENTS,
+       TAB_MULTIPLAYER, TAB_COUNT };
 enum { TEST_PAGE_FRAMES = 30, TEST_SETS = 16 };
 struct TestSet { uint64_t frame; char key[64], value[64]; };
 static struct {
@@ -1131,9 +1133,237 @@ static void tab_achievements(float scale) {
     ImGui::EndChild();
 }
 
+// ---- the Multiplayer tab (net_mp.c): the room's settings and state, the players' progress, the group challenge and
+// the chat. The text fields write totk.ini when they lose the keyboard.
+static void mp_field(const char *key, UiTextId label, char *buf, size_t cap, ImGuiInputTextFlags flags, float w) {
+    ImGui::PushID(key);
+    ImGui::TextColored(kUiMuted, "%s", menu_text(label));
+    ImGui::SetNextItemWidth(w);
+    ImGui::InputText("##v", buf, cap, flags);
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        cfg_set(key, buf);
+        cfg_save();
+        mp_reconnect();
+    }
+    ImGui::PopID();
+}
+
+static void tab_multiplayer(float scale) {
+    static char name[32], server[128], password[64], chat[300];
+    static unsigned seen = ~0u;
+    if (cfg_version() != seen && !ImGui::GetIO().WantTextInput) {   // the fields follow totk.ini unless being typed in
+        seen = cfg_version();
+        snprintf(name, sizeof name, "%s", cfg_value("TOTK_MP_NAME"));
+        snprintf(server, sizeof server, "%s", cfg_value("TOTK_MP_SERVER"));
+        snprintf(password, sizeof password, "%s", cfg_value("TOTK_MP_PASSWORD"));
+    }
+    MpView v;
+    mp_view(&v);
+    ImVec2 avail = ImGui::GetContentRegionAvail();
+    float h = fmaxf(avail.y - g_page_bottom, 120 * scale), left = avail.x * 0.66f, gap = 18 * scale;
+    ImGui::BeginChild("##mp_left", ImVec2(left, h), ImGuiChildFlags_NavFlattened);
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextColored(kUiMuted, "%s", menu_text(UI_MENU_MP_INTRO));
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    float fw = (left - gap * 2) / 3;
+    ImGui::BeginGroup();
+    mp_field("TOTK_MP_NAME", UI_MENU_MP_NAME, name, sizeof name, 0, fw);
+    ImGui::EndGroup();
+    ImGui::SameLine(0, gap);
+    ImGui::BeginGroup();
+    mp_field("TOTK_MP_SERVER", UI_MENU_MP_SERVER, server, sizeof server, 0, fw);
+    ImGui::EndGroup();
+    ImGui::SameLine(0, gap);
+    ImGui::BeginGroup();
+    mp_field("TOTK_MP_PASSWORD", UI_MENU_MP_PASSWORD, password, sizeof password, ImGuiInputTextFlags_Password, fw);
+    ImGui::EndGroup();
+    ImGui::Spacing();
+    bool on = cfg_bool("TOTK_MP");
+    if (ImGui::Button(menu_text(on ? UI_MENU_MP_DISCONNECT : UI_MENU_MP_CONNECT))) {
+        cfg_set("TOTK_MP", on ? "0" : "1");
+        cfg_save();
+        mp_reconnect();
+    }
+    ImGui::SameLine(0, gap);
+    char state[256];
+    ImVec4 sc = kUiMuted;
+    switch (v.state) {
+    case MP_CONNECTING: snprintf(state, sizeof state, menu_text(UI_MENU_MP_STATE_CONNECTING), v.server); break;
+    case MP_CONNECTED: snprintf(state, sizeof state, menu_text(UI_MENU_MP_STATE_CONNECTED), v.room), sc = kUiZonai; break;
+    case MP_RETRYING: snprintf(state, sizeof state, menu_text(UI_MENU_MP_STATE_RETRYING), v.server), sc = kUiWarn; break;
+    case MP_REFUSED: snprintf(state, sizeof state, menu_text(UI_MENU_MP_STATE_REFUSED), v.error), sc = kUiDanger; break;
+    default: snprintf(state, sizeof state, "%s", menu_text(UI_MENU_MP_STATE_OFF));
+    }
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextColored(sc, "%s", state);
+    ImGui::Dummy(ImVec2(1, 8 * scale));
+    // the players, the most achievements first
+    if (v.state == MP_CONNECTED && v.nplayers) {
+        int order[MP_MAX_PLAYERS];
+        for (int i = 0; i < v.nplayers; i++) order[i] = i;
+        for (int i = 1; i < v.nplayers; i++)
+            for (int j = i; j > 0 && v.players[order[j]].stats[MP_STAT_ACHIEVEMENTS] >
+                                       v.players[order[j - 1]].stats[MP_STAT_ACHIEVEMENTS]; j--) {
+                int t = order[j];
+                order[j] = order[j - 1], order[j - 1] = t;
+            }
+        static const UiTextId cols[] = {UI_MENU_MP_COL_NAME, UI_MENU_MP_COL_SHRINES, UI_MENU_MP_COL_LIGHTROOTS,
+                                        UI_MENU_MP_COL_TOWERS, UI_MENU_MP_COL_KOROKS, UI_MENU_MP_COL_HEARTS,
+                                        UI_MENU_MP_COL_ACH};
+        if (ImGui::BeginTable("##mp_players", 7, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+            for (int c = 0; c < 7; c++) ImGui::TableSetupColumn(menu_text(cols[c]), 0, c ? 1.0f : 1.5f);
+            ImGui::TableHeadersRow();
+            static const int stat_of[] = {MP_STAT_SHRINES, MP_STAT_LIGHTROOTS, MP_STAT_TOWERS, MP_STAT_KOROKS,
+                                          MP_STAT_HEARTS, MP_STAT_ACHIEVEMENTS};
+            for (int i = 0; i < v.nplayers; i++) {
+                const MpPlayer &p = v.players[order[i]];
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::TextColored(i == 0 ? kUiGoldHi : kUiCream, "%s", p.name);
+                for (int k = 0; k < 6; k++) {
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%d", p.stats[stat_of[k]]);
+                }
+            }
+            ImGui::EndTable();
+        }
+        ImGui::Dummy(ImVec2(1, 10 * scale));
+        ImGui::TextColored(kUiGold, "%s", menu_text(UI_MENU_MP_CHALLENGE));
+        if (v.challenges_done) {
+            ImGui::TextColored(kUiZonai, "%s", menu_text(UI_MENU_MP_CHALLENGES_DONE));
+        } else if (v.challenge_target > 0) {
+            ImGui::TextUnformatted(v.challenge);
+            char over[32];
+            snprintf(over, sizeof over, "%d / %d", v.challenge_total, v.challenge_target);
+            ImGui::PushStyleColor(ImGuiCol_PlotHistogram, kUiZonai);
+            ImGui::ProgressBar(fminf(1.0f, (float)v.challenge_total / (float)v.challenge_target), ImVec2(-1, 0), over);
+            ImGui::PopStyleColor();
+        }
+    } else if (v.state != MP_CONNECTED) {
+        ImGui::TextColored(kUiMuted, "%s", menu_text(UI_MENU_MP_NOBODY));
+    }
+    ImGui::EndChild();
+    // the chat
+    ImGui::SameLine(0, gap);
+    ImGui::BeginChild("##mp_chat", ImVec2(0, h), ImGuiChildFlags_Borders);
+    ImGui::TextColored(kUiGold, "%s", menu_text(UI_MENU_MP_CHAT));
+    float input_h = ImGui::GetFrameHeightWithSpacing() + 4 * scale;
+    ImGui::BeginChild("##mp_log", ImVec2(0, ImGui::GetContentRegionAvail().y - input_h));
+    static MpLine lines[80];
+    int n = mp_lines(lines, 80);
+    static int last_n = -1;
+    ImGui::PushTextWrapPos(0);
+    for (int i = 0; i < n; i++) {
+        const MpLine &l = lines[i];
+        if (l.kind == MP_LINE_CHAT) {
+            ImGui::TextColored(kUiGoldHi, "%s:", l.from);
+            ImGui::SameLine();
+            ImGui::TextUnformatted(l.text);
+        } else if (l.kind == MP_LINE_ACH) {
+            char t[160];
+            snprintf(t, sizeof t, menu_text(UI_MENU_MP_FRIEND_ACH), l.from);
+            ImGui::TextColored(kUiZonai, "%s: %s", t, l.text);
+        } else {
+            ImGui::TextColored(kUiMuted, "%s", l.text);
+        }
+    }
+    ImGui::PopTextWrapPos();
+    if (n != last_n) ImGui::SetScrollHereY(1.0f);   // a new line: follow the bottom
+    last_n = n;
+    ImGui::EndChild();
+    float bw = ImGui::CalcTextSize(menu_text(UI_MENU_MP_SEND)).x + ImGui::GetStyle().FramePadding.x * 4;
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - bw - ImGui::GetStyle().ItemSpacing.x);
+    bool send = ImGui::InputText("##mp_say", chat, sizeof chat, ImGuiInputTextFlags_EnterReturnsTrue);
+    if (send) ImGui::SetKeyboardFocusHere(-1);   // keep typing after Enter
+    ImGui::SameLine();
+    if ((ImGui::Button(menu_text(UI_MENU_MP_SEND)) || send) && chat[0] && mp_send_chat(chat)) chat[0] = 0;
+    ImGui::EndChild();
+}
+
+// ---- the room's notices (net_mp.c mp_take_toast): chat lines, friends' unlocks and the room's events, stacked at
+// the bottom left for a few seconds each; a friend's unlock shows its icon when this install has that achievement.
+enum { MP_NOTES = 4 };
+static struct { MpLine l; double at; } g_mp_notes[MP_NOTES];
+static int g_mp_nnotes;
+static const double kMpNoteSecs = 6.0;
+
+static bool mp_notes_tick(void) {
+    double now = plat_now_ns() / 1e9;
+    int w = 0;
+    for (int i = 0; i < g_mp_nnotes; i++)
+        if (now - g_mp_notes[i].at < kMpNoteSecs) g_mp_notes[w++] = g_mp_notes[i];
+    g_mp_nnotes = w;
+    MpLine l;
+    while (mp_take_toast(&l)) {
+        if (g_mp_nnotes == MP_NOTES) {   // the oldest goes
+            memmove(g_mp_notes, g_mp_notes + 1, sizeof g_mp_notes[0] * (MP_NOTES - 1));
+            g_mp_nnotes--;
+        }
+        g_mp_notes[g_mp_nnotes].l = l, g_mp_notes[g_mp_nnotes].at = now;
+        g_mp_nnotes++;
+    }
+    return g_mp_nnotes > 0;
+}
+
+static void mp_notes_draw(const MenuTarget *t, float scale) {
+    if (!g_mp_nnotes) return;
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    ImFont *font = ImGui::GetFont();
+    // above the menu's bottom row while the menu is open
+    float fs = ImGui::GetFontSize() * 0.8f, pad = 10 * scale, icon = 40 * scale,
+          y = (float)t->height - (g_open.load(std::memory_order_relaxed) ? 96 : 24) * scale;
+    double now = plat_now_ns() / 1e9;
+    for (int i = g_mp_nnotes - 1; i >= 0; i--) {
+        const MpLine &l = g_mp_notes[i].l;
+        double age = now - g_mp_notes[i].at;
+        float a = (float)fmin(1.0, fmin(age / 0.25, (kMpNoteSecs - age) / 0.5));
+        if (a <= 0) continue;
+        char head[160], body[340];
+        ImVec4 col = kUiCream;
+        int idx = -1;
+        if (l.kind == MP_LINE_ACH) {
+            snprintf(head, sizeof head, menu_text(UI_MENU_MP_FRIEND_ACH), l.from);
+            snprintf(body, sizeof body, "%s", l.text);
+            static const char *const rar[] = {"common", "rare", "epic", "legendary", "platinum"};
+            for (int r = 0; r < 5; r++)
+                if (!strcmp(l.rarity, rar[r])) col = ach_rarity_col(r);
+            idx = ach_find(l.ach_id);
+        } else if (l.kind == MP_LINE_CHAT) {
+            snprintf(head, sizeof head, "%s", l.from);
+            snprintf(body, sizeof body, "%s", l.text);
+            col = kUiGoldHi;
+        } else {
+            head[0] = 0;
+            snprintf(body, sizeof body, "%s", l.text);
+            col = kUiZonai;
+        }
+        float maxw = (float)t->width * 0.32f;
+        ImVec2 hs = font->CalcTextSizeA(fs, FLT_MAX, 0, head);
+        ImVec2 bs = font->CalcTextSizeA(fs, FLT_MAX, maxw, body);
+        float tw = fmaxf(hs.x, bs.x), th = (head[0] ? hs.y + 2 * scale : 0) + bs.y;
+        float ic = idx >= 0 ? icon + pad : 0, w = pad * 2 + ic + tw, h = fmaxf(pad * 2 + th, idx >= 0 ? icon + pad * 2 : 0);
+        float x0 = (g_open.load(std::memory_order_relaxed) ? 124 : 24) * scale;   // past the rail while it shows
+        ImVec2 p(x0, y - h), q(p.x + w, y);
+        dl->AddRectFilled(p, q, ui_col(kUiPanel, 0.88f * a), 10 * scale);
+        dl->AddRect(p, q, ui_col(col, 0.6f * a), 10 * scale, 0, 1.2f * scale);
+        if (idx >= 0) {
+            AchView v;
+            if (ach_get(idx, &v)) ach_icon(dl, idx, v, ImVec2(p.x + pad, p.y + (h - icon) / 2), icon, true, a);
+        }
+        float tx = p.x + pad + ic, ty = p.y + (h - th) / 2;
+        if (head[0]) {
+            dl->AddText(font, fs, ImVec2(tx, ty), ui_col(col, a), head);
+            ty += hs.y + 2 * scale;
+        }
+        dl->AddText(font, fs, ImVec2(tx, ty), ui_col(kUiCream, a), body, nullptr, maxw);
+        y -= h + 8 * scale;
+    }
+}
+
 static const UiTextId kTabNames[TAB_COUNT] = {UI_MENU_TAB_SCREEN, UI_MENU_TAB_GAME, UI_MENU_TAB_SOUND,
                                               UI_MENU_TAB_CONTROLS, UI_MENU_TAB_AMIIBO, UI_MENU_TAB_MENU,
-                                              UI_MENU_TAB_ADVANCED, UI_MENU_TAB_ACHIEVEMENTS};
+                                              UI_MENU_TAB_ADVANCED, UI_MENU_TAB_ACHIEVEMENTS, UI_MENU_TAB_MULTIPLAYER};
 static int g_tab;               // the tab shown
 static int g_tab_request = -1;  // select this tab at the next layout; -1 none
 static int g_focus_page = -1;   // this tab's first row takes the cursor once it is shown; -1 none
@@ -1195,6 +1425,14 @@ static void tab_icon(ImDrawList *dl, int tab, ImVec2 c, float r, ImU32 col, floa
         dl->AddEllipse(ImVec2(c.x, c.y + r * 0.62f), ImVec2(r * 0.72f, r * 0.24f), col, 0, 20, th);
         break;
     }
+    case TAB_MULTIPLAYER:   // two figures side by side
+        for (int k = -1; k <= 1; k += 2) {
+            float x = c.x + k * r * 0.42f;
+            dl->AddCircle(ImVec2(x, c.y - r * 0.38f), r * 0.24f, col, 14, th);
+            dl->PathArcTo(ImVec2(x, c.y + r * 0.62f), r * 0.42f, 3.14159f, 6.28318f, 12);
+            dl->PathStroke(col, 0, th);
+        }
+        break;
     case TAB_ACHIEVEMENTS: {   // a trophy: the cup, its handles, the stem and the base
         ImVec2 cup[] = {{c.x - r * 0.62f, c.y - r * 0.82f}, {c.x + r * 0.62f, c.y - r * 0.82f}, {c.x + r * 0.5f, c.y - r * 0.1f},
                         {c.x, c.y + r * 0.22f}, {c.x - r * 0.5f, c.y - r * 0.1f}};
@@ -1307,7 +1545,7 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
     bg->AddRectFilledMultiColor(ImVec2(x + pw, 0), ImVec2(x + pw + 56 * scale, H), ui_col(ImVec4(0, 0, 0, 1), 0.5f * k),
                                 0, 0, ui_col(ImVec4(0, 0, 0, 1), 0.5f * k));
 
-    int step = g_modal || binds_modal()                                                                  ? 0
+    int step = g_modal || binds_modal() || ImGui::GetIO().WantTextInput                                  ? 0
              : ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) || ImGui::IsKeyPressed(ImGuiKey_E, false) ? 1
              : ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) || ImGui::IsKeyPressed(ImGuiKey_Q, false) ? -1
                                                                                                          : 0;
@@ -1373,6 +1611,7 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
         break;
     case TAB_ADVANCED: tab_advanced(scale); break;
     case TAB_ACHIEVEMENTS: tab_achievements(scale); break;
+    case TAB_MULTIPLAYER: tab_multiplayer(scale); break;
     }
     ImGui::PopStyleVar();
 
@@ -1766,6 +2005,8 @@ extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const cha
     bool toast = toast_tick(toast_now, toast_last ? (float)((toast_now - toast_last) / 1e9) : 0);
     toast_last = toast_now;
     toast = note_tick() || toast;   // an achievement notice needs the overlay's frame as the shader notice does
+    mp_tick();
+    toast = mp_notes_tick() || toast;
     amiibo_tick();
     bool open = g_open.load(std::memory_order_relaxed);
     if (!open) {
@@ -1828,6 +2069,7 @@ extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const cha
     perf_draw(t, scale);
     toast_draw(t, scale);
     note_draw(t, scale);
+    mp_notes_draw(t, scale);
     ImGui::Render();
     if (open) g_save_pending = opt_save_tick(0);
     g_cost_ns += plat_now_ns() - t0;
