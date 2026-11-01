@@ -708,6 +708,23 @@ def mib(n):
     return f'{n / (1 << 20):,.1f} MiB'
 
 
+def compiler_identity():
+    """The object cache's --id: the compiler's --version text without the paths in it. clang prints its own folder
+    (InstalledDir) and its configuration file's path, which hold the release folder, and each release unpacks to a
+    folder of its own: with them in the key no object of the last update was ever reused. The configuration file
+    counts by its content, which can add flags."""
+    text = subprocess.run([str(CLANG), '--version'], capture_output=True, text=True).stdout
+    kept = []
+    for line in text.splitlines():
+        if line.startswith('InstalledDir:'):
+            continue
+        if line.startswith('Configuration file:'):
+            cfg = Path(line.split(':', 1)[1].strip())
+            line = 'Configuration file: ' + (file_sha256(cfg) if cfg.is_file() else 'missing')
+        kept.append(line)
+    return hashlib.sha256((objcache.FORMAT + '\n'.join(kept)).encode()).hexdigest()[:32]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--version', default='v121', help='game version (default v121)')
@@ -852,8 +869,7 @@ def main():
     if args.object_cache and mods and pairs is None:
         cache_dir = args.object_cache.resolve()
         (cache_dir / 'entries').mkdir(parents=True, exist_ok=True)
-        version = subprocess.run([str(CLANG), '--version'], capture_output=True, text=True).stdout
-        OBJECT_CACHE = (cache_dir, hashlib.sha256((objcache.FORMAT + version).encode()).hexdigest()[:32])
+        OBJECT_CACHE = (cache_dir, compiler_identity())
         cache_before = {e.name: e.read_bytes() for e in (cache_dir / 'entries').glob('*.json')}
     text, objs, exe = ninja_file(gen, out, mods, jobs, skip, pairs is not None, runtime_lib,
                                  args.make_runtime_lib)
