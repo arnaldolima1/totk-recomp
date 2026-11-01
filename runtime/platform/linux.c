@@ -1181,8 +1181,10 @@ size_t plat_getenv(const char *name, char *out, size_t cap) {
 
 // Cached per thread: plat_rmutex_lock asks on every acquire, hundreds of thousands of times a second in play, and
 // gettid is a full syscall on Linux (Windows reads GetCurrentThreadId from the TEB). A thread's id never changes, and
-// the runtime starts child processes with posix_spawn only, so no forked copy inherits a stale id.
-uint32_t plat_thread_id(void) {
+// the runtime starts child processes with posix_spawn only, so no forked copy inherits a stale id. noinline: a fiber
+// may resume on another thread (platform.h), and a caller that inlined this could keep the address of tid it computed
+// before a plat_fiber_switch; as a call it reads the slot of the thread it runs on.
+__attribute__((noinline)) uint32_t plat_thread_id(void) {
     static __thread uint32_t tid;
     if (!tid) tid = (uint32_t)syscall(SYS_gettid);
     return tid;
