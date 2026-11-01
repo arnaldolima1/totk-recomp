@@ -806,8 +806,6 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_PREEMPT_OFF] = "Desligado", [UI_MENU_PREEMPT_ON] = "Ligado", [UI_MENU_PREEMPT_INHERIT] = "Só herança",
     [UI_MENU_REPLAY_ASYNC] = "Preparo de quadro da GPU em thread própria",
     [UI_MENU_REPLAY_ASYNC_DESC] = "Prepara os quadros para a GPU numa thread separada em vez da thread do jogo. Adiciona até um quadro de latência.",
-    [UI_MENU_FREE_CORES] = "Trava de núcleo virtual",
-    [UI_MENU_FREE_CORES_DESC] = "Deixa só uma thread rodar por núcleo virtual, como no console.",
     [UI_MENU_TIMER_1MS] = "Timer do Windows de 1 ms",
     [UI_MENU_TIMER_1MS_DESC] = "Aumenta a resolução do timer do sistema para 1 ms, para um ritmo de quadros mais estável.",
     [UI_MENU_PIPE_WAIT] = "Tratamento de desenhos em espera",
