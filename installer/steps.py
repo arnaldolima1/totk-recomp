@@ -6,8 +6,8 @@ tools/prepare_shaders.py, whose output goes to <temp>/logs/<step>-<tool>.log and
 here: the host check is a small C program built with the bundled clang (hostcheck.c).
 
 Install folder: exefs/, romfs/ (romfs.bin, index.json), profile/, totk.exe and its DLLs, romfs-index.bin,
-romfs-patches/, romfs-patches-xbox/, totk_xlate.exe, the shader state of totk.exe --prepare-shaders, totk.ini,
-totk-install.json.
+romfs-patches/, romfs-patches-xbox/, romfs-patches-xbox-label/, totk_xlate.exe, the shader state of totk.exe
+--prepare-shaders, totk.ini, totk-install.json.
 Temp folder (<temp>/<dest name>-<hash>): check/ (ExeFS of both inputs, the host check), gen/ (C), build/ (objects),
 logs/ (kept by the cleanup).
 """
@@ -240,9 +240,19 @@ class Check(Step):
     id = 'check'
     always = True
 
+    def key(self, ctx):
+        # The compile step fingerprints the CPU level, and every key is computed before a step runs: probe the host
+        # here, once, so both steps see the same answer (the check step itself is always run). A failed probe is
+        # reported by run(), where the error names this step.
+        try:
+            self.host(ctx)
+        except InstallError:
+            pass
+        return ''
+
     def run(self, ctx):
         layout, rep, dest = ctx.layout, ctx.reporter, ctx.dest
-        missing = layout.missing()
+        missing = layout.missing(getattr(ctx, 'cpu', 'v3'))
         if missing:
             raise InstallError('check.release_incomplete', paths=missing[:5])
         if dest.exists() and not dest.is_dir():
@@ -275,6 +285,8 @@ class Check(Step):
         return {}
 
     def host(self, ctx):
+        if getattr(ctx, 'host', None) is not None:
+            return
         layout, work = ctx.layout, ctx.temp / 'check'
         glibc = linux_glibc()
         if glibc and glibc < GLIBC_NEEDED and not layout.dev:
@@ -299,8 +311,10 @@ class Check(Step):
         except ValueError:
             raise InstallError('check.host_probe_failed', code=r.returncode) from None
         ctx.reporter.log(f'host: {r.stdout.strip()}')
-        if not host['x86_64_v3']:
-            raise InstallError('check.cpu_no_avx2')
+        if not host['x86_64_v2']:
+            raise InstallError('check.cpu_too_old')
+        # v3 is the faster build; v2 runs on CPUs without AVX2/FMA (runtime/fma.c supplies the fused multiply-add).
+        ctx.cpu = 'v3' if host['x86_64_v3'] else 'v2'
         if not host['loader']:
             raise InstallError('check.vulkan_missing')
         devices = host['devices']
@@ -593,11 +607,12 @@ class Compile(Step):
     id = 'compile'
 
     def key(self, ctx):
-        layout = ctx.layout
+        layout, cpu = ctx.layout, getattr(ctx, 'cpu', 'v3')
         clang = subprocess.run([str(layout.clang), '--version'], capture_output=True, text=True).stdout
         tools = [layout.tools / n for n in ('build_game.py', 'romfs_index.py', 'check_content.py')]
-        return fingerprint('compile-1', ctx.keys['lift'], layout.runtime, layout.runtime_lib, layout.deps or 'system',
-                           layout.sysroot or 'host', *tools, clang, *[d.name for d in layout.dlls])
+        return fingerprint('compile-2', cpu, layout.runtime_lib_for(cpu), ctx.keys['lift'], layout.runtime,
+                           layout.deps or 'system', layout.sysroot or 'host', *tools, clang,
+                           *[d.name for d in layout.dlls])
 
     def current(self, ctx, record):
         exe = ctx.dest / ('totk' + EXE)
@@ -621,10 +636,12 @@ class Compile(Step):
                 rep.progress('compile', 'link', force=True)
 
         rep.progress('compile', 'compile', force=True)
+        cpu = getattr(ctx, 'cpu', 'v3')
+        lib = layout.runtime_lib_for(cpu)
         code, log = run_tool(ctx, 'compile', layout.tools / 'build_game.py', [
-            '--gen', ctx.temp / 'gen', '--out', build, '--toolchain', layout.llvm,
+            '--gen', ctx.temp / 'gen', '--out', build, '--toolchain', layout.llvm, '--cpu', cpu,
             *(['--deps', layout.deps] if layout.deps else []), *(['--sysroot', layout.sysroot] if layout.sysroot else []),
-            '--runtime', layout.runtime, '--runtime-lib', layout.runtime_lib, '--ninja', layout.ninja,
+            '--runtime', layout.runtime, *(['--runtime-lib', lib] if lib else ()), '--ninja', layout.ninja,
             '--version', version_tag(game_version(ctx)), '--expected', layout.expected(game_version(ctx)),
             '--exefs', dest / 'exefs', '--romfs', dest / 'romfs',
             '--profile', dest / 'profile'], parse)
@@ -638,7 +655,7 @@ class Compile(Step):
         replace_file(build / 'romfs-index.bin', dest / 'romfs-index.bin')
         for dll in layout.dlls:
             replace_file(dll, dest / dll.name)
-        return {'exe_sha256': file_sha256(dest / exe.name)}
+        return {'exe_sha256': file_sha256(dest / exe.name), 'cpu': cpu}
 
 
 # ---- 5. prepare
@@ -662,7 +679,7 @@ class Prepare(Step):
         layout = ctx.layout
         xlate_id = layout.xlate.with_suffix('.id')
         tools = [layout.tools / n for n in ('prepare_shaders.py', 'shader_census.py', 'make_romfs_patches.py',
-                                            'pack_shader_cache.py', 'ultrawide_layout.py')]
+                                            'pack_shader_cache.py', 'ultrawide_layout.py', 'button_icons.py')]
         return fingerprint('prepare-1', ctx.keys['compile'], layout.xlate, xlate_id, shader_list_text(layout), *tools)
 
     def current(self, ctx, record):
@@ -702,16 +719,23 @@ class Prepare(Step):
                                   dest / f'romfs-patches-{size}', '--aspect', size])
             if code:
                 raise InstallError('prepare.romfs_patches_failed', code=code, log=str(log))
-        # romfs-patches-xbox: the same with the A/B and X/Y prompts swapped, for pad_layout = xbox_prompts (written on
-        # every install, so the menu choice works without another run of the setup). Optional: when it fails, the game
-        # keeps the Switch prompts and the menu says the files are missing, so the setup warns and goes on.
-        remove(dest / 'romfs-patches-xbox')
-        code, log = run_tool(ctx, 'prepare-xbox', layout.tools / 'make_romfs_patches.py',
-                             ['--version', version_tag(game_version(ctx)), '--romfs', dest / 'romfs', '--out',
-                              dest / 'romfs-patches-xbox', '--xbox-prompts'])
-        if code:
-            remove(dest / 'romfs-patches-xbox')
-            rep.warning('warn.xbox_prompts_failed', code=code, log=str(log))
+        # The same with Xbox button icons in the prompts, for prompts = xbox (make_romfs_patches.py --prompts):
+        # romfs-patches-xbox for the Nintendo pad layout, romfs-patches-xbox-label for xbox and auto (runtime/input_map.c
+        # input_prompts_folder). Both are written on every install, so the menu choices work without another run of
+        # the setup. Optional: when one fails, the game keeps the Switch prompts with that layout and the menu says the
+        # files are missing, so the setup warns once and goes on.
+        failed = None
+        for style in ('xbox', 'xbox-label'):
+            out = dest / f'romfs-patches-{style}'
+            remove(out)
+            code, log = run_tool(ctx, f'prepare-{style}', layout.tools / 'make_romfs_patches.py',
+                                 ['--version', version_tag(game_version(ctx)), '--romfs', dest / 'romfs', '--out', out,
+                                  '--prompts', style])
+            if code:
+                remove(out)
+                failed = failed or (code, log)
+        if failed:
+            rep.warning('warn.xbox_prompts_failed', code=failed[0], log=str(failed[1]))
 
         shader_list = layout.shader_list
         if not shader_list:

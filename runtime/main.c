@@ -260,11 +260,22 @@ static double now_s(void) { return (double)plat_now_ns() / 1e9; }
 static volatile int host_probe_hits;
 static void host_probe(Cpu *c) { host_probe_hits++; c->x[0] = 42; }
 
+// The instruction set build_game.py --cpu compiled for: v3 (AVX2/FMA/BMI2, the default) or v2 (SSE4.2/POPCNT).
+#ifndef RT_CPU_LEVEL
+#define RT_CPU_LEVEL 3
+#endif
+
 static void check_cpu(void) {
     __builtin_cpu_init();
+#if RT_CPU_LEVEL >= 3
     int ok = __builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma") && __builtin_cpu_supports("bmi2");
     printf("cpu: x86-64-v3 (AVX2, FMA, BMI2) %s\n", ok ? "present" : "MISSING");
     CHECK(ok, "the lifted code is built for x86-64-v3");
+#else
+    int ok = __builtin_cpu_supports("sse4.2") && __builtin_cpu_supports("popcnt");
+    printf("cpu: x86-64-v2 (SSE4.2, POPCNT) %s\n", ok ? "present" : "MISSING");
+    CHECK(ok, "the lifted code is built for x86-64-v2");
+#endif
 }
 
 // Layout: ascending, no overlap, below 2^39, and inside the window mem_init reserved.
@@ -469,6 +480,9 @@ static void portable_paths(RtConfig *c) {
 
 int main(int argc, char **argv) {
     mem_init();   // first: claim the guest address space before anything else can land there; reads totk.ini
+    // A restart from the settings menu (gfx_present.c gfx_window_closed) starts this process while the one it replaces
+    // is still exiting: its log, RomFS and saves are free once it is gone.
+    if (plat_restart_wait(30000) < 0) rt_log("restart: the previous process still runs after 30 s; starting anyway");
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
     plat_crash_hook(crash_handler);

@@ -146,6 +146,10 @@
 # Field of view, in percent of the game's own: 70 to 140, 100 (the default) leaves the camera as it is. Higher shows
 # more of the world around Link. Game version 1.4.3 only. Changes while the game runs take effect at once.
 # fov = 100
+# Anisotropic filtering of surface textures: game (the level the game asks for, as on the Switch) or 2, 4, 8, 16. Keeps
+# ground, roads and walls seen at a shallow angle sharp into the distance. Only filtered, mipmapped textures that tile
+# are raised; shadow maps, data maps and screen-sized buffers keep the game's setting. Read at start.
+# aniso = game
 # Colour adjustment of the picture, HUD included, before it is scaled to the window: brightness (-30 to 30, added in %),
 # contrast and saturation (70 to 150 and 50 to 200 %), gamma (0.8 to 1.2, below 1 brightens dark tones). At 0, 100,
 # 100 and 1 nothing runs. color_preset is the menu's profile (default, vivid, clarity, custom), which sets the four.
@@ -160,14 +164,23 @@
 # Read at start.
 # shadow_res = game
 
+# HDR output: hdr = 1 sends the picture as HDR10 (needs HDR on in Windows, "Use HDR", or a Wayland compositor with
+# colour management; without it the picture stays SDR). The game's tonemap keeps highlights up to hdr_peak_nits (your
+# display's peak); hdr_game_nits is the picture's white (paper white, 203 is the HDR reference) and hdr_ui_nits the
+# HUD's and the menu's. hdr is read at start, the nits at once. The colour profile above is for SDR only.
+# hdr = 0
+# hdr_peak_nits = 1000
+# hdr_game_nits = 203
+# hdr_ui_nits = 203
+
 [language]
 # Language: a Windows locale such as de-DE, or a Switch code (en-US, ja, zh-Hant, ...). Default: the Windows locale.
 # locale = en-US
 # lang = en-US
 # System mode reported to the game: docked or handheld.
 # operation_mode = docked
-# Language of the settings menu and the overlay: en or ru. Default: the Windows display language, English if it is
-# neither.
+# Language of the settings menu and the overlay: en, ru, pt-BR or zh-Hans. Default: the Windows display language, English if
+# it is none of them.
 # menu_lang = en
 
 [audio]
@@ -189,13 +202,20 @@
 # rumble_triggers = 0
 # Which gamepad button is Switch A: nintendo (by position: east A, south B, west Y, north X), xbox (south A, east B,
 # west X, north Y, as an Xbox pad labels them; cross A on a PlayStation pad) or auto (nintendo for a pad with Nintendo
-# labels, xbox for the others). xbox_prompts: the buttons as nintendo, and the game's prompts swapped to the Xbox
-# labels (A with B, X with Y; it loads romfs-patches-xbox, docs/controls.md, "Xbox button prompts"). The bind_ lines
-# below apply on top. Changes while the game runs take effect at once; the xbox_prompts prompts at the next start.
+# labels, xbox for the others). The bind_ lines below apply on top. Changes while the game runs take effect at once.
+# 0.1.9's xbox_prompts is read as nintendo with prompts = xbox.
 # pad_layout = auto
+# The buttons the game's prompts show: nintendo (the game's own) or xbox (LB RB LT RT, Menu, View and a d-pad cross,
+# and A B X Y as labelled on the button pad_layout presses: with nintendo, A shows as B and X as Y). Read at start
+# (docs/controls.md, "Xbox button prompts").
+# prompts = nintendo
 # Gamepad stick dead zone in percent of full deflection (0 to 50). Raise it for a stick that drifts: inside the circle
 # the stick reads centred, and the rest of its travel is scaled to start there.
 # stick_deadzone = 8
+# Right-stick camera speed (0.1 to 3): multiplies the game's own camera turn rates, top speed included, at each of the
+# five camera sensitivities in the game's Options. Keys bound to the right stick follow it; the mouse keeps mouse_sens.
+# Read at start.
+# stick_sens = 1
 # Mouse camera sensitivity (0 to 10; 0 = no mouse camera and no cursor capture).
 # mouse_sens = 1
 # The keyboard's sticks are all or nothing, so the game only sees a full tilt from them; while this key is held the

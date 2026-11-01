@@ -19,10 +19,12 @@ Report problems as issues, following [CONTRIBUTING.md](CONTRIBUTING.md).
 - Game updates 1.1.1, 1.2.1 and 1.4.3; 1.2.1 and 1.4.3 saves carry over between them
 - 60 fps by default; up to 144 fps or the monitor's refresh rate (experimental)
 - Custom resolutions (1080p, 2k...), supersampling and AMD FSR 1 upscaling
+- HDR10 output with peak, game and HUD brightness settings
 - 16:10 (Steam Deck, handhelds), 21:9 and 32:9 (ultrawide) game resolutions, with the camera and the interface in that shape
+- Anisotropic texture filtering up to 16x, for sharp ground into the distance
 - In-game settings menu (F1) and performance overlay (F10)
 - Keyboard, mouse and gamepad with remapping, rumble and gyro
-- Xbox button prompts: a layout that keeps the Switch button positions and shows the Xbox labels
+- Xbox button prompts: LB, RB, LT, RT, Menu and View, and A, B, X and Y as labelled on the button to press, with either button layout
 - Shaders prepared at install instead of during play
 
 ## Planned
@@ -34,7 +36,7 @@ Report problems as issues, following [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Windows
 
-Requirements: Windows 10 or later, an x86-64 CPU with AVX2, a GPU with Vulkan 1.3 and `VK_EXT_external_memory_host`, about 36 GiB free during setup (20 GiB after).
+Requirements: Windows 10 or later, an x86-64 CPU with SSE4.2 (AVX2/FMA machines get a faster build), a GPU with Vulkan 1.3 and `VK_EXT_external_memory_host`, about 36 GiB free during setup (20 GiB after).
 
 1. Download `TotK-Setup-<version>-windows.zip` from [Releases](../../releases/latest) and unpack it.
 2. Start `TotK-Setup.exe`. If SmartScreen warns about an unsigned app, choose *More info*, then *Run anyway*.
