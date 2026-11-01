@@ -114,6 +114,13 @@ PRESETS = {
     'bargainer': dict(label='Encontros com a Estátua do Barganhista',
                       cond={'kind': 'number', 'name': 'DemonStatue_MeetCount'}, max=20),
 }
+# Numbers the prologue inflates: under Hyrule Castle Link has 30 hearts and three stamina wheels, and the game saves
+# them (MaxLife 120, MaxStamina 3000) before setting 3 hearts and one wheel when he wakes in the Room of Awakening. A
+# number condition on these counts only once that flag is true; the compiler adds it whatever the definition says, so
+# sets made before this rule follow it too.
+COUNT_AFTER = {'PlayerStatus.MaxLife': 'SageOfSky_IsOpenShutterInWakeUpRoom',
+               'PlayerStatus.MaxStamina': 'SageOfSky_IsOpenShutterInWakeUpRoom'}
+
 # The armor sets: the base id of each (the first of its five ids; the other four are its upgrade levels), whose head,
 # body and legs pieces each have a flag IsGet.Armor_<id>_<Head|Upper|Lower> that turns true when the piece is first
 # obtained. Labels are ours.
@@ -747,10 +754,13 @@ def resolve(cond, gd, lists):
     if k == 'flag':
         h, _ = _flag(gd, cond['name'], ('Bool',))
         return ('bool', f'{h:08x}', '', '', '')
-    if k == 'number':   # c: what one shown unit is in the flag (hearts are four quarters, a wheel 1000 stamina)
+    if k == 'number':   # c: what one shown unit is in the flag (hearts are four quarters, a wheel 1000 stamina);
+        # d: a bool that must be true for the number to count (COUNT_AFTER), empty when none
         h, _ = _flag(gd, cond['name'], ('Int', 'UInt', 'Float'))
         unit = PRESETS.get(cond.get('preset'), {}).get('unit', 1)
-        return ('num', f'{h:08x}', str(int(cond['min'])), str(unit), '')
+        after = COUNT_AFTER.get(cond['name'])
+        gate = f'{_flag(gd, after, ("Bool",))[0]:08x}' if after else ''
+        return ('num', f'{h:08x}', str(int(cond['min'])), str(unit), gate)
     if k == 'array_sum':
         h, _ = _flag(gd, cond['name'], ('IntArray', 'UIntArray'))
         return ('arrsum', f'{h:08x}', str(int(cond['min'])), '', '')
@@ -907,7 +917,8 @@ def progress(items, lists, save, unlocked=()):
         elif k == 'enum':
             out[a['id']] = (int(vals.get(int(a['a'], 16), (0, 0))[1] == int(a['b'], 16)), 1)
         elif k == 'num':
-            out[a['id']] = (num(int(a['a'], 16)), int(a['b']))
+            gated = a['d'] and vals.get(int(a['d'], 16), (0, 0))[1] != 1
+            out[a['id']] = (0 if gated else num(int(a['a'], 16)), int(a['b']))
         elif k == 'arrsum':
             out[a['id']] = (sum(x for x in ints(int(a['a'], 16)) if x > 0), int(a['b']))
         elif k == 'count':

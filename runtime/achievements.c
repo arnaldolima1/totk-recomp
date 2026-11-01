@@ -16,6 +16,8 @@ typedef struct {
     char *id, *name, *desc, *item;
     int rarity, kind, hidden, list;
     uint32_t a, b, want;   // flag hashes (a; b the stock array of a pouch, want the enum value of enum and count)
+    uint32_t after;        // num: a bool that must be true for the number to count, 0 none (tools/achievements.py
+                           // COUNT_AFTER: the prologue's 30 hearts and three wheels are saved before Link wakes)
     double min, unit;
     uint8_t *icon;
     int unlocked;
@@ -208,6 +210,7 @@ static int parse_condition(Ach *a, char **f) {
     case K_NUM:
         a->a = (uint32_t)strtoul(f[4], NULL, 16), a->min = atof(f[5]);
         a->unit = atof(f[6]) > 0 ? atof(f[6]) : 1;
+        a->after = f[7][0] ? (uint32_t)strtoul(f[7], NULL, 16) : 0;
         break;
     case K_ARRSUM: a->a = (uint32_t)strtoul(f[4], NULL, 16), a->min = atof(f[5]); break;
     case K_COUNT:
@@ -368,6 +371,7 @@ static double value_of(const Ach *a, const Save *s) {
     case K_BOOL: return save_find(s, a->a, &v, &t) && t == T_BOOL && v == 1;
     case K_ENUM: return save_find(s, a->a, &v, &t) && t == T_ENUM && v == a->want;
     case K_NUM:
+        if (a->after && !(save_find(s, a->after, &v, &t) && t == T_BOOL && v == 1)) return 0;
         if (!save_find(s, a->a, &v, &t)) return 0;
         if (t == T_INT) return (int32_t)v;
         if (t == T_UINT) return v;

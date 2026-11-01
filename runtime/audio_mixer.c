@@ -169,7 +169,7 @@ static void chime_note(float *buf, int frames, int rate, double at_s, double fre
     double l = amp * sqrt((1 - pan) / 2), r = amp * sqrt((1 + pan) / 2);
     for (int i = start; i < frames; i++) {
         double t = (double)(i - start) / rate, env = exp(-t / decay_s) * (t < 0.004 ? t / 0.004 : 1.0), s = 0;
-        if (env < 1e-4) break;
+        if (t > 0.004 && env < 1e-4) break;   // faded out (not the attack, which starts at zero)
         for (int k = 0; k < 4; k++) s += partials[k][1] * sin(2 * M_PI * freq * partials[k][0] * t) * exp(-t * k * 1.5);
         buf[2 * i] += (float)(s * env * l);
         buf[2 * i + 1] += (float)(s * env * r);
