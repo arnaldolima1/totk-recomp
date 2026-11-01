@@ -59,6 +59,8 @@
  "check.ticket_personalized": "O arquivo de {input} tem um ticket personalizado; é preciso um ticket comum.",
  "check.ticket_missing": "O arquivo de {input} não tem o ticket de que o conteúdo precisa.",
  "check.base_not_totk": "O arquivo do jogo base não é The Legend of Zelda: Tears of the Kingdom ({detail}).",
+ "check.base_is_update": "O arquivo do jogo base é uma atualização. Escolha aqui o NSP ou XCI do jogo base (versão 1.0.0) e este arquivo como a atualização.",
+ "check.base_combined": "O arquivo do jogo base contém vários pacotes (jogo base, atualização ou DLC em um só arquivo). Escolha um dump do jogo base que contenha só o jogo.",
  "check.update_not_nsp": "A atualização precisa ser um arquivo NSP.",
  "check.update_is_base": "O arquivo de atualização contém um jogo base. Escolha o NSP da atualização 1.2.1 ou 1.4.3.",
  "check.update_not_totk": "O arquivo de atualização não é uma atualização de Tears of the Kingdom ({detail}).",
@@ -84,6 +86,7 @@
  "warn.lang_needs_fonts": "Textos em {lang} precisam das fontes de sistema do Switch, que o instalador não extrai; parte do texto pode não aparecer.",
  "warn.npdm_differs": "O main.npdm difere do dump de referência da versão {version}; só os módulos de código são usados.",
  "warn.xbox_prompts_failed": "Não foi possível preparar os ícones de botão do Xbox (código de saída {code}); o jogo mantém os ícones do Switch. Detalhes: {log}",
+ "warn.shaders_skipped": "O driver gráfico travou ao compilar alguns shaders, então {count} ficaram fora da preparação. O jogo os compila quando precisar deles pela primeira vez, e o driver pode travar ali também; uma atualização do driver pode resolver. Detalhes: {log}",
  "warn.kernel_old": "O Linux {version} não tem o rastreamento de escrita de que o jogo depende (6.7 ou mais novo); o jogo pode rodar muito devagar. Atualizar o sistema resolve.",
 
  "ui.title": "Instalação do TotK",
