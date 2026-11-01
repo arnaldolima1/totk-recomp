@@ -28,6 +28,7 @@ bundles it; it stays out of the repository), else from refs/ through git with th
 import argparse
 import hashlib
 import json
+import os
 import struct
 import subprocess
 import sys
@@ -139,10 +140,17 @@ def main():
     t0 = time.monotonic()
     variants, prio = parse_list(read_list(a.list))
     extracted = ROOT / 'build' / 'extracted' / a.version
-    shaders, _ = inventory(a.romfs or extracted / 'romfs', a.exefs or extracted / 'exefs')
+    listed = len(variants)
+    shaders, _ = inventory(a.romfs or extracted / 'romfs', a.exefs or extracted / 'exefs', everything=False)
+    # A missing list row says nothing about the walk: the list covers several versions, and 1.1.1 holds 17,587 of its
+    # 41,414 rows, so most rows are absent because the game does not have them, not because the walk missed them. A walk
+    # that found next to nothing does say something: the shader directories have moved.
+    if len(shaders) < max(64, listed // 20):
+        print(f'only {len(shaders)} shaders found of the {listed} listed variants: reading every RomFS file instead',
+              flush=True)
+        shaders, _ = inventory(a.romfs or extracted / 'romfs', a.exefs or extracted / 'exefs')
     t1 = time.monotonic()
     progs, recs, seen, skipped = {}, [], set(), {'not in this version': 0, 'stage': 0}
-    listed = len(variants)
     variants += [(key, DEFAULT) for key in sorted(shaders)]
     for key, deps in variants:
         s = shaders.get(key)
@@ -183,7 +191,7 @@ def main():
           f'seed written in {time.monotonic() - t0:.1f} s', flush=True)
     if a.no_run:
         return 0
-    exe = out / 'totk.exe'
+    exe = out / ('totk.exe' if os.name == 'nt' else 'totk')
     r = subprocess.run([str(exe), '--prepare-shaders'], cwd=str(out))
     print(f'totk.exe --prepare-shaders: rc={r.returncode}; total {time.monotonic() - t0:.1f} s')
     return r.returncode

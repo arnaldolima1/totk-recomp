@@ -1,6 +1,6 @@
 // The in-game menu core: Dear ImGui state, the event queue the window adapter fills, gamepad navigation, the Vulkan back
 // end on our device and the menu's pages. Free of any window system (menu.h). ImGui runs on the present path only,
-// under gfx_window.c's present lock; the event functions only queue.
+// under gfx_present.c's present lock; the event functions only queue.
 //
 // The Vulkan set-up follows LAS Recomp's runtime/nvn/vulkan/imgui_glue.cpp (https://github.com/peiikai/LASRecomp @
 // da35b83a9611d046a9a681aae668d7085954d37f, MIT, Copyright (c) 2026 Peiikai): dynamic rendering into the swapchain
@@ -11,6 +11,7 @@
 // 575ad88e02f9a89a9a885d90039d48af33c982f4, MIT, Copyright (c) 2026 Revivedx and the Savage Wind Recomp contributors,
 // Copyright (c) 2026 Peiikai); the pages are rows of option_rows.cpp.
 #include <atomic>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +20,16 @@
 #include "imgui.h"
 #include "imgui_internal.h"   // SetFocusID, NavCursorVisible
 #include "backends/imgui_impl_vulkan.h"
+// A private copy of stb_truetype, the parser Dear ImGui builds its font atlas with, to check a system font before the
+// atlas gets it (font_usable). Its asserts only mark the font bad here.
+static int g_font_bad;
+#define STBTT_STATIC
+#define STB_TRUETYPE_IMPLEMENTATION
+#define STBTT_assert(x) ((x) ? (void)0 : (void)(g_font_bad = 1))
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-function"
+#include "imstb_truetype.h"
+#pragma clang diagnostic pop
 #include "ui/binds_page.h"
 #include "ui/option_rows.h"
 
@@ -242,7 +253,7 @@ static int vk_up(const MenuTarget *t) {
     ii.Queue = t->queue;
     ii.DescriptorPoolSize = 16;
     ii.MinImageCount = 2;
-    ii.ImageCount = 4;   // vertex buffers rotate per recorded frame: more than gfx_window.c's 2 frames in flight
+    ii.ImageCount = 4;   // vertex buffers rotate per recorded frame: more than gfx_present.c's 2 frames in flight
     ii.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
     ii.UseDynamicRendering = true;
     g_vk_fmt = t->format;
@@ -264,6 +275,43 @@ static const struct { const char *lang; UiTextId name; } kCjk[] = {
     {"zh-Hant", UI_MENU_LANGNAME_ZH_HANT},
 };
 
+static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3]; }
+
+// 1 when Dear ImGui can take this font file: more than the 100 bytes AddFontFromMemoryTTF asserts on, every table of its
+// directory inside the file (stb_truetype reads tables without bounds checks, so a cut-off file faults when the glyphs
+// are made), and stb_truetype parses it. ImGui asserts on a font it cannot parse, and an assert ends the process with
+// 0xc0000409 and no line in the log.
+static int font_usable(const uint8_t *d, uint64_t n) {
+    if (!d || n <= 100 || n > INT_MAX) return 0;
+    int off = stbtt_GetFontOffsetForIndex(d, 0);
+    if (off < 0 || (uint64_t)off + 12 > n) return 0;
+    uint32_t tables = (uint32_t)d[off + 4] << 8 | d[off + 5];
+    if ((uint64_t)off + 12 + 16ull * tables > n) return 0;
+    for (uint32_t i = 0; i < tables; i++) {
+        const uint8_t *r = d + off + 12 + 16 * i;
+        if ((uint64_t)be32(r + 8) + be32(r + 12) > n) return 0;
+    }
+    stbtt_fontinfo fi;
+    g_font_bad = 0;
+    return stbtt_InitFont(&fi, d, off) && !g_font_bad;
+}
+
+extern "C" int menu_font_check(void) {
+    uint64_t n = sizeof roboto_ttf;
+    uint8_t *bad = (uint8_t *)malloc(n);
+    if (!bad) return 0;
+    memcpy(bad, roboto_ttf, n);
+    uint32_t tables = (uint32_t)bad[4] << 8 | bad[5];
+    for (uint32_t i = 0; i < tables; i++)
+        if (!memcmp(bad + 12 + 16 * i, "cmap", 4)) memset(bad + 12 + 16 * i, 0, 4);   // no character map
+    int ok = font_usable(roboto_ttf, n) && !font_usable(roboto_ttf, 4096) && !font_usable(roboto_ttf, 100) &&
+             !font_usable(bad, n);
+    memset(bad, 0, 4);             // an unknown font tag
+    ok = ok && !font_usable(bad, n);
+    free(bad);
+    return ok;
+}
+
 static int fonts_up(float scale) {
     enum { N = sizeof kCjk / sizeof *kCjk };
     ImFontAtlas *fa = ImGui::GetIO().Fonts;
@@ -278,6 +326,13 @@ static int fonts_up(float scale) {
         char path[512];
         uint64_t size = 0;
         if (!plat_font_path(kCjk[i].lang, path, sizeof path) || !(data[i] = plat_file_read(path, &size))) continue;
+        if (!font_usable(data[i], size)) {
+            rt_log("menu: system font %s left out: the font parser cannot read it (%llu bytes)", path,
+                   (unsigned long long)size);
+            free(data[i]);
+            data[i] = NULL;
+            continue;
+        }
         merged++;
         ImFontGlyphRangesBuilder b;
         b.AddText(ui_text_in("en", kCjk[i].name));
@@ -419,12 +474,14 @@ static void row_window_size(void) {
     opt_choice_list("TOTK_WINDOW_SIZE", UI_MENU_WINDOW_SIZE, pv, pn, n, UI_MENU_WINDOW_SIZE_DESC);
 }
 
-// The game resolution (resolution.c): 16:9 sizes from its smallest, 1280x720 (for weak GPUs), up, the common 21:9
-// monitor sizes (the camera and the HUD follow a wider shape, resolution.c res_init), and the current value when it is
-// another size.
+// The game resolution (resolution.c): 16:9 sizes from its smallest, 1280x720 (for weak GPUs), up, the common 21:9 and
+// 32:9 monitor sizes and the 16:10 screens of the Steam Deck, handhelds and laptops (the camera and the HUD follow
+// another shape, resolution.c res_init; the installer lays the HUD out for each, installer/steps.py ASPECT_SIZES), and
+// the current value when it is another size.
 static void row_output_res(void) {
     static const char *const vals[] = {"1280x720", "1600x900", "1920x1080", "2560x1440", "3200x1800", "3840x2160",
-                                       "2560x1080", "3440x1440", "3840x1600", "5120x2160"};
+                                       "2560x1080", "3440x1440", "3840x1600", "5120x2160", "3840x1080", "5120x1440",
+                                       "1280x800", "1680x1050", "1920x1200", "2560x1600"};
     enum { N = sizeof vals / sizeof *vals };
     char shown[N][32];
     const char *names[N];
@@ -488,9 +545,10 @@ static void row_game_lang(void) {
 
 // The frame limit (frame_rate.c): unset, the older fps60 = 0 still means 30. The monitor choice shows the rate it gives.
 static void row_fps_limit() {
-    static const char *const vals[] = {"30", "60", "90", "120", "144", "display"};
-    static const UiTextId ids[] = {UI_MENU_FPS_30, UI_MENU_FPS_60, UI_MENU_FPS_90, UI_MENU_FPS_120, UI_MENU_FPS_144,
-                                    UI_MENU_FPS_DISPLAY};
+    // 40 and 45: the Steam Deck's screen runs at 40 to 60 Hz (the OLED to 90); 40 divides 40 and 120 Hz evenly
+    static const char *const vals[] = {"30", "40", "45", "60", "90", "120", "144", "display"};
+    static const UiTextId ids[] = {UI_MENU_FPS_30, UI_MENU_FPS_40,  UI_MENU_FPS_45,  UI_MENU_FPS_60,
+                                   UI_MENU_FPS_90, UI_MENU_FPS_120, UI_MENU_FPS_144, UI_MENU_FPS_DISPLAY};
     enum { N = sizeof vals / sizeof *vals };
     const char *names[N];
     for (int i = 0; i < N; i++) names[i] = menu_text(ids[i]);
@@ -526,6 +584,35 @@ static const char *present_note(void) {
 }
 
 // ---- the tabs
+// Colour adjustment (vk_color.c): a profile writes the four values (STS78721's presets, issue #136); moving one of them
+// makes the profile Custom.
+static void rows_color(void) {
+    static const struct { const char *name, *b, *c, *s, *g; } presets[] = {
+        {"default", "0", "100", "100", "1"}, {"vivid", "0", "115", "135", "0.95"}, {"clarity", "2", "110", "115", "1"}};
+    static const UiTextId names[] = {UI_MENU_COLOR_DEFAULT, UI_MENU_COLOR_VIVID, UI_MENU_COLOR_CLARITY,
+                                     UI_MENU_COLOR_CUSTOM};
+    opt_group(UI_MENU_COLOR);
+    if (opt_choice("TOTK_COLOR_PRESET", UI_MENU_COLOR_PRESET, names, 4, UI_MENU_COLOR_PRESET_DESC)) {
+        const char *p = cfg_value("TOTK_COLOR_PRESET");
+        for (const auto &e : presets)
+            if (!strcmp(p, e.name)) {
+                cfg_set("TOTK_COLOR_BRIGHTNESS", e.b), cfg_set("TOTK_COLOR_CONTRAST", e.c);
+                cfg_set("TOTK_COLOR_SATURATION", e.s), cfg_set("TOTK_COLOR_GAMMA", e.g);
+                cfg_save();
+            }
+    }
+    bool moved = opt_slider("TOTK_COLOR_BRIGHTNESS", UI_MENU_COLOR_BRIGHTNESS, -30, 30, UI_MENU_COLOR_BRIGHTNESS_DESC, 1,
+                            "%+.0f %%");
+    moved |= opt_slider("TOTK_COLOR_CONTRAST", UI_MENU_COLOR_CONTRAST, 70, 150, UI_MENU_COLOR_CONTRAST_DESC, 5, "%.0f %%");
+    moved |= opt_slider("TOTK_COLOR_SATURATION", UI_MENU_COLOR_SATURATION, 50, 200, UI_MENU_COLOR_SATURATION_DESC, 5,
+                        "%.0f %%");
+    moved |= opt_slider("TOTK_COLOR_GAMMA", UI_MENU_COLOR_GAMMA, 0.8f, 1.2f, UI_MENU_COLOR_GAMMA_DESC, 0.02f, "%.2f");
+    if (moved && strcmp(cfg_value("TOTK_COLOR_PRESET"), "custom")) {
+        cfg_set("TOTK_COLOR_PRESET", "custom");
+        cfg_save();
+    }
+}
+
 static void tab_screen(float scale) {
     opt_begin("##screen", scale);
     opt_toggle("TOTK_FULLSCREEN", UI_MENU_FULLSCREEN, UI_MENU_FULLSCREEN_DESC);
@@ -543,6 +630,8 @@ static void tab_screen(float scale) {
     opt_slider("TOTK_SHARPNESS", UI_MENU_SHARPNESS, 0, 100, UI_MENU_SHARPNESS_DESC, 5, "%.0f %%");
     static const UiTextId aspect[] = {UI_MENU_ASPECT_FIT, UI_MENU_ASPECT_STRETCH};
     opt_choice("TOTK_ASPECT", UI_MENU_ASPECT, aspect, 2, UI_MENU_ASPECT_DESC);
+    opt_slider("TOTK_FOV", UI_MENU_FOV, 70, 140, UI_MENU_FOV_DESC, 5, "%.0f %%");
+    rows_color();
     opt_end();
 }
 
@@ -555,6 +644,7 @@ static void tab_game(float scale) {
     row_game_lang();
     static const UiTextId mode[] = {UI_MENU_MODE_DOCKED, UI_MENU_MODE_HANDHELD};
     opt_choice("TOTK_OPERATION_MODE", UI_MENU_OPERATION_MODE, mode, 2, UI_MENU_OPERATION_MODE_DESC);
+    opt_toggle("TOTK_ASSUME_FOCUS", UI_MENU_ASSUME_FOCUS, UI_MENU_ASSUME_FOCUS_DESC);
     opt_end();
 }
 
@@ -569,7 +659,7 @@ static void tab_sound(float scale) {
 // romfs-patches-xbox, "prompts change after restart" while the prompts in use differ from the choice. Automatic with a
 // gamepad connected: "in use: Xbox". NULL otherwise.
 static const char *pad_layout_note(void) {
-    bool want = !_stricmp(cfg_value("TOTK_PAD_LAYOUT"), "xbox_prompts");
+    bool want = !strcasecmp(cfg_value("TOTK_PAD_LAYOUT"), "xbox_prompts");
     if (want && !romfs_xbox_prompts_ready()) return menu_text(UI_MENU_PAD_LAYOUT_PROMPTS_MISSING);
     if (want != (romfs_xbox_prompts_active() != 0)) return menu_text(UI_MENU_PAD_LAYOUT_PROMPTS_RESTART);
     int got = input_pad_layout();
@@ -713,7 +803,6 @@ static void tab_advanced(float scale) {
     static const UiTextId preempt[] = {UI_MENU_PREEMPT_OFF, UI_MENU_PREEMPT_ON, UI_MENU_PREEMPT_INHERIT};   // 0|1|2
     opt_choice("TOTK_ASYNC_PREEMPT", UI_MENU_ASYNC_PREEMPT, preempt, 3, UI_MENU_ASYNC_PREEMPT_DESC);
     opt_toggle("TOTK_REPLAY_ASYNC", UI_MENU_REPLAY_ASYNC, UI_MENU_REPLAY_ASYNC_DESC);
-    opt_toggle("TOTK_FREE_CORES", UI_MENU_FREE_CORES, UI_MENU_FREE_CORES_DESC);
     opt_toggle("TOTK_TIMER_1MS", UI_MENU_TIMER_1MS, UI_MENU_TIMER_1MS_DESC);
 
     opt_group(UI_MENU_GROUP_SHADERS);
@@ -754,6 +843,7 @@ static void tab_advanced(float scale) {
     opt_toggle("TOTK_VK_VALIDATION", UI_MENU_VK_VALIDATION, UI_MENU_VK_VALIDATION_DESC);
     static const UiTextId dyn[] = {UI_MENU_AUTO, UI_MENU_OFF, UI_MENU_ON};   // unset, 0, 1
     opt_choice("TOTK_VK_DYN_VERTEX", UI_MENU_VK_DYN_VERTEX, dyn, 3, UI_MENU_VK_DYN_VERTEX_DESC);
+    opt_choice("TOTK_VK_DYN_A2C", UI_MENU_VK_DYN_A2C, dyn, 3, UI_MENU_VK_DYN_A2C_DESC);
     opt_toggle("TOTK_VK_SUBGROUP_PIN", UI_MENU_VK_SUBGROUP_PIN, UI_MENU_VK_SUBGROUP_PIN_DESC);
 
     opt_group(UI_MENU_GROUP_DIAG);
@@ -763,7 +853,7 @@ static void tab_advanced(float scale) {
     static char rec_path[600];   // the recording goes beside the log
     if (!rec_path[0]) {
         char dir[512];
-        snprintf(rec_path, sizeof rec_path, "%s\\input-record.txt", sysinfo_log_folder(dir, sizeof dir) ? dir : ".");
+        snprintf(rec_path, sizeof rec_path, "%s/input-record.txt", sysinfo_log_folder(dir, sizeof dir) ? dir : ".");
     }
     row_set_or_not("TOTK_INPUT_RECORD", UI_MENU_INPUT_RECORD, UI_MENU_INPUT_RECORD_DESC, rec_path);
     if (opt_button("##open_log", UI_MENU_OPEN_LOG, UI_MENU_OPEN_LOG_DESC, action_value(log_note, UI_MENU_OPEN_LOG))) {
@@ -1010,7 +1100,7 @@ static void perf_label(UiTextId label, const ImVec4 &c) {
 static float perf_gb(float mb) { return mb < 0 ? -1 : mb / 1024; }
 
 // The picture lines: the window, the game image the present shows and the 3D scene it holds (resolution.c), how the
-// present scales the image to the window (gfx_window.c, the last present), the frame limit and the presentation mode
+// present scales the image to the window (gfx_present.c, the last present), the frame limit and the presentation mode
 // in use.
 static void perf_picture(const MenuTarget *t, const ImVec4 &c) {
     unsigned out[2], scene[2];

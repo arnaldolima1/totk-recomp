@@ -1,6 +1,6 @@
 # Adapted from MacNativeGames games/totk/scripts/make_romfs_patches.py @ ebe621d (MIT, Copyright (c) 2026
 # MacNativeGames contributors).
-"""Build the 60 fps RomFS overlay for TotK 1.2.1 or 1.4.3 (runtime/romfs.c, TOTK_ROMFS_PATCHES).
+"""Build the 60 fps RomFS overlay for TotK 1.1.1, 1.2.1 or 1.4.3 (runtime/romfs.c, TOTK_ROMFS_PATCHES).
 
 UI/LayoutArchive/Common.Product.<110 or 140>.Nin_NX_NVN.blarc.zs: the weapon / shield / material quick menus capture the game
 picture for their background when the panes C_CaptureBG_00, C_CaptureClearBG_00 and P_CaptureClearBG_00 become
@@ -8,13 +8,14 @@ visible at animation frame 1.0 (anim/ShortCutBG_00_In.bflan), AutoBuilder the sa
 (anim/AutoBuilder_00_In.bflan). UI animations advance 0.5 frames per game frame at 60 fps, so the capture lands after
 the world stopped drawing and the background can be black. The visibility keys move to frame 0.0: the live world is
 captured at once (upstream checked weapon, shield, material and ability wheel at 60 fps, and 30 fps).
-The game-over flow fix of the same upstream script is 1.0.0 only (1.2.1 and 1.4.3 run DmF_SY_GameOver.110) and is
+The game-over flow fix of the same upstream script is 1.0.0 only (1.1.1, 1.2.1 and 1.4.3 run DmF_SY_GameOver.110) and is
 left out.
 
---aspect <w>x<h> (a game resolution wider than 16:9, such as 3440x1440) also lays the UI out for that shape
-(tools/ultrawide_layout.py): menus stay 16:9 in the middle, full-screen backgrounds cover the width and the HUD moves
-to the screen's corners. totk.exe loads that overlay from romfs-patches-<w>x<h> when the game resolution is that size
-(runtime/romfs.c overlay_init); the camera's side of it is the patch set aspect (recomp/patches-v143.txt).
+--aspect <w>x<h> (a game resolution of another shape than 16:9, such as 3440x1440 or 1280x800) also lays the UI out
+for that shape (tools/ultrawide_layout.py): menus keep their 16:9 proportions in the middle, full-screen backgrounds
+cover the screen and the HUD moves to the screen's corners (wider) or its top and bottom edges (narrower). totk.exe
+loads that overlay from romfs-patches-<w>x<h> when the game resolution is that size (runtime/romfs.c overlay_init);
+the camera's side of it is the patch set aspect (recomp/patches-v121.txt, patches-v143.txt).
 
 --xbox-prompts: the same overlay with the A and B, and the X and Y button prompts swapped, for pad_layout = xbox_prompts
 (runtime/romfs.c overlay_init loads romfs-patches-xbox in place of romfs-patches). That layout plays an Xbox pad by
@@ -43,11 +44,11 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
 ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-ap.add_argument('--version', choices=('v121', 'v143'), default='v121')
+ap.add_argument('--version', choices=('v111', 'v121', 'v143'), default='v121')
 ap.add_argument('--romfs', type=Path, help='default build/extracted/<version>/romfs')
 ap.add_argument('--out', type=Path,
                 help='default build/<version>/romfs-patches (romfs-patches-xbox with --xbox-prompts)')
-ap.add_argument('--aspect', help='<w>x<h> of a game resolution wider than 16:9: also lay the UI out for it')
+ap.add_argument('--aspect', help='<w>x<h> of a game resolution of another shape than 16:9: also lay the UI out for it')
 ap.add_argument('--xbox-prompts', action='store_true', help='swap the A/B and X/Y button prompts as well')
 args = ap.parse_args()
 args.romfs = args.romfs or root / 'build/extracted' / args.version / 'romfs'
@@ -308,7 +309,7 @@ def sarc_replace(data, new):
     return bytes(out)
 
 
-COMMON = {'v121': '110', 'v143': '140'}   # the version in the name of each game's Common archive
+COMMON = {'v111': '110', 'v121': '110', 'v143': '140'}   # the version in the name of each game's Common archive
 ARCHIVE = f'UI/LayoutArchive/Common.Product.{COMMON[args.version]}.Nin_NX_NVN.blarc.zs'
 MEMBERS = {
     'anim/ShortCutBG_00_In.bflan': ('C_CaptureBG_00', 'C_CaptureClearBG_00', 'P_CaptureClearBG_00'),

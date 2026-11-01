@@ -64,6 +64,8 @@ These tools run on the developer's or player's machine during the build. They ar
 
 | Component | Source | License | Where in the release |
 |---|---|---|---|
+| Tcl/Tk 9.0.4, rebuilt with Xft for the Linux installer | https://github.com/tcltk/tcl and https://github.com/tcltk/tk, tag `core-9-0-4`; archives pinned by SHA-256 in `tools/make_release_linux.py` | Tcl/Tk licence (BSD-style) | `python/lib/`; licence texts in `licenses/tcl-license.terms` and `licenses/tk-license.terms` |
+| libXft 2 and libXrender 1, the sniper SDK sysroot's shared libraries, bundled beside the Xft Tk of the Linux installer; their Debian `copyright` files go into `licenses/` | https://repo.steampowered.com/steamrt-images-sniper/snapshots/3.0.20261021.266025/ | HPND (MIT-style) | `python/lib/`; `licenses/libXft-copyright.txt`, `licenses/libXrender-copyright.txt` |
 | CPython 3.14.9 embeddable package, with `tkinter` and Tcl/Tk 9.0.4 taken from the python.org 3.14.9 installer's component MSI (unpacked, never run); includes `vcruntime140*.dll` (Microsoft, redistributable with Python), OpenSSL, libffi, SQLite, zlib, libtommath | https://www.python.org/downloads/release/python-3149/ | PSF-2.0 (Tcl/Tk: Tcl/Tk licence, BSD-style) | `python/` |
 | numpy 2.5.4 (with its bundled OpenBLAS), lz4 4.4.5, cryptography 50.0.2 (with its bundled OpenSSL), cffi 2.1.1, pycparser 3.11 | PyPI binary wheels, pins in `tools/requirements-installer.txt` | BSD-3-Clause; lz4 BSD-3-Clause; cryptography Apache-2.0 OR BSD-3-Clause; cffi MIT; pycparser BSD-3-Clause | `python/Lib/site-packages/` |
 | llvm-mingw 20261020 (LLVM/Clang/LLD 23, mingw-w64, libc++, libunwind, compiler-rt), x86_64 subset | https://github.com/mstorsjo/llvm-mingw/releases/tag/20261020 | Apache-2.0 with LLVM exception; mingw-w64 ZPL-2.1/BSD/public domain; libc++ and libunwind Apache-2.0 with LLVM exception and MIT/UIUC; winpthreads MIT | `llvm/` |
@@ -74,6 +76,27 @@ These tools run on the developer's or player's machine during the build. They ar
 | Vulkan-Headers and Vulkan-Loader 1.4.363.0 (MSYS2 packages; headers and `libvulkan-1.dll.a` only, no loader DLL) | https://github.com/KhronosGroup | Apache-2.0 OR MIT | `runtime/deps/` |
 | Vulkan Memory Allocator 3.4.0 (MSYS2 package), header | https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator | MIT | `runtime/deps/` |
 | Ninja 1.13.2 (`ninja-win.zip`) | https://github.com/ninja-build/ninja/releases/tag/v1.13.2 | Apache-2.0 | `bin/ninja.exe` |
-| hactool (SciresM @ `1d64a83450e025622f3468c28fc4164dad2c5ef6` plus `tools/hactool/portable.patch`, from MacNativeGames' `build_hactool()`: `MNG_TITLE_KEYS` and relaxed BKTR layout checks; our `tools/hactool/unicode.patch`: an embedded manifest that makes UTF-8 the process code page), built by `tools/build_hactool.py` with MSYS2 UCRT64 gcc; imports only KERNEL32 and the UCRT | https://github.com/SciresM/hactool | ISC | `bin/hactool.exe` |
+| hactool (SciresM @ `1d64a83450e025622f3468c28fc4164dad2c5ef6` plus `tools/hactool/portable.patch`, from MacNativeGames' `build_hactool()`: `MNG_TITLE_KEYS` and relaxed BKTR layout checks; our `tools/hactool/unicode.patch`: an embedded manifest that makes UTF-8 the process code page; our `tools/hactool/mbedtls-asm-clobbers.patch`: the clobbers the bundled mbedtls's x86-64 multiply asm lacks), built by `tools/build_hactool.py` with MSYS2 UCRT64 gcc; imports only KERNEL32 and the UCRT | https://github.com/SciresM/hactool | ISC | `bin/hactool.exe` |
 | `totk_xlate.exe` (Ryujinx shader translator, NativeAOT build of `tools/xlate/`, see the Ryujinx row above) | built by `tools/build_xlate.py` | MIT | `bin/totk_xlate.exe` |
 | MacNativeGames shader variant list | https://github.com/ly05010419/MacNativeGames @ `b75be8cfa704df3701e86130c8ced268e79d6b11` (`games/totk/assets/shader_list.tsv`), Copyright (c) 2026 MacNativeGames contributors | MIT | `data/shader_list.tsv` |
+
+## Distributed in the Linux release (AppImage)
+
+`tools/make_release_linux.py` assembles these into the folder of `docs/installer.md` ("Linux release") and packs it as
+`TotK-Setup-x86_64.AppImage`. Versions and sha256 of every download are pinned in that script; licence texts are in the
+folder's `licenses/` and in each component's own folder.
+
+| Component | Source | License | Where in the release |
+|---|---|---|---|
+| CPython 3.14.10, python-build-standalone 20261026 `install_only` build, with `tkinter` and the libraries it bundles (OpenSSL, libffi, SQLite, zlib, Tcl/Tk and others; their licences ship in the folder) | https://github.com/astral-sh/python-build-standalone/releases/tag/20261026 | PSF-2.0; bundled libraries under their own licences | `python/` |
+| numpy 2.5.4 (with the libraries its manylinux wheel bundles), lz4 4.4.5, cryptography 50.0.2, cffi 2.1.1, pycparser 3.11 | PyPI binary wheels, pins in `tools/requirements-installer.txt` | as in the installer release row above | `python/lib/python3.14/site-packages/` |
+| LLVM 23.1.4 official Linux X64 release: `clang`, `lld`, `llvm-ar`, `llvm-ranlib`, `llvm-objcopy`, `llvm-strip` and the clang resource headers; `llvm-LICENSE.txt` from the `llvmorg-23.1.4` source tag | https://github.com/llvm/llvm-project/releases/tag/llvmorg-23.1.4 | Apache-2.0 with LLVM exception | `llvm/` |
+| Steam Runtime 3 "sniper" SDK sysroot 3.0.20261021.266025 (Debian 11 based), only the headers, libraries and objects a game build reads: glibc 2.31 (headers, `crt*.o`, `libc_nonshared.a`, link libraries), GCC 10 `libstdc++.a` and `libgcc`, SDL 3.4.18, libopus, libvpx 1.9 (static), the Vulkan loader's link library; their Debian `copyright` files go into `licenses/` | https://repo.steampowered.com/steamrt-images-sniper/snapshots/3.0.20261021.266025/ | glibc LGPL-2.1+; libstdc++ and libgcc GPL-3.0 with the GCC Runtime Library Exception; SDL zlib; libopus BSD-3-Clause; libvpx BSD-3-Clause with the WebM patent grant (`libvpx-PATENTS.txt` from the v1.17.0 source tag); Vulkan loader Apache-2.0 | `llvm/sysroot/`, `bin/libSDL3.so.0` (the sysroot's, copied next to the game by the setup), `licenses/` |
+| Vulkan-Headers 1.4.363 (source tag) | https://github.com/KhronosGroup/Vulkan-Headers/tree/v1.4.363 | Apache-2.0 OR MIT | `runtime/deps/include/` |
+| Vulkan Memory Allocator 3.4.0, header (the licence text is its header comment) | https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/tree/v3.4.0 | MIT | `runtime/deps/include/vma/` |
+| Zstandard 1.5.7, built from the release tarball into a static `libzstd.a` with the folder's clang and sysroot | https://github.com/facebook/zstd/releases/tag/v1.5.7 | BSD-3-Clause | `runtime/deps/` |
+| Ninja 1.13.2 (`ninja-linux.zip`) | https://github.com/ninja-build/ninja/releases/tag/v1.13.2 | Apache-2.0 | `bin/ninja` |
+| hactool (as in the installer release row above), built by `tools/build_hactool.py --cc` with the folder's clang and sysroot; includes its bundled mbedtls | https://github.com/SciresM/hactool | ISC; mbedtls Apache-2.0 | `bin/hactool` |
+| `totk_xlate` (NativeAOT linux-x64 build of `tools/xlate/`, linked with the folder's clang, lld and sysroot) | built by `tools/build_xlate.py --llvm --sysroot` | MIT | `bin/totk_xlate` |
+| AppImage type-2 runtime (static; includes libfuse and squashfuse), the AppImage's first part; appimagetool packs the folder and is not distributed | https://github.com/AppImage/type2-runtime | MIT; libfuse LGPL-2.1; squashfuse BSD-2-Clause | the AppImage header |
+| MacNativeGames shader variant list | as in the installer release row above | MIT | `data/shader_list.tsv` |

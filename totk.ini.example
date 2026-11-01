@@ -1,10 +1,11 @@
 # totk.ini: settings for totk.exe. Copy this file to totk.ini next to totk.exe and remove the '#' of a line to change it.
-# Each line shows the default. A TOTK_* environment variable of the same name (TOTK_FPS_LIMIT for fps_limit) overrides the
-# file. Keys are case-insensitive; '#' and ';' start a comment; [sections] only group lines.
+# Each line shows the default; on a Steam Deck the device profile ([display]) changes a few of them. A TOTK_*
+# environment variable of the same name (TOTK_FPS_LIMIT for fps_limit) overrides the file. Keys are case-insensitive;
+# '#' and ';' start a comment; [sections] only group lines.
 
 [frame rate]
-# Frame rate limit: 30, 60, 90, 120, 144, any whole rate from 30 to 360, or display (the refresh rate of the window's
-# monitor). Above 60 is experimental and needs realtime = 1. Changes while the game runs take effect at once.
+# Frame rate limit: 30, 40, 45, 60, 90, 120, 144, any whole rate from 30 to 360, or display (the refresh rate of the
+# window's monitor). Above 60 is experimental and needs realtime = 1. Changes while the game runs take effect at once.
 # fps_limit = 60
 # Older key, read only while fps_limit is unset: fps60 = 0 means a limit of 30.
 # fps60 = 1
@@ -25,7 +26,8 @@
 # async_preempt = 1
 # Replay NVN submissions on their own thread, at most one frame behind the game (1 = on). Adds up to a frame of latency.
 # replay_async = 0
-# 1 lifts the virtual core gate: guest threads run without the console's limit of one thread per core.
+# 1 lifts the virtual core gate: guest threads run without the console's limit of one thread per core. For experiments
+# only: the game keeps per-core data without locks and can crash.
 # free_cores = 0
 # Windows timer resolution of 1 ms for steadier frame pacing (0 = the Windows default).
 # timer_1ms = 1
@@ -87,14 +89,21 @@
 # Vulkan.
 # Vulkan validation layer: checks every call and slows the game down a lot. Needs the layer installed (Vulkan SDK).
 # vk_validation = 0
-# A thread of its own makes the Vulkan calls of each frame, 0 or 1. Default: on, except on AMD GPUs.
+# A thread of its own makes the Vulkan calls of each frame, 0 or 1. Default: on.
 # vk_recorder = 1
 # Dynamic vertex input, 0 or 1. Default: on, except on Intel's older integrated GPU drivers (Vulkan 1.3.215 and older).
 # vk_dyn_vertex = 1
+# Dynamic alpha to coverage, 0 or 1. Default: on, except on AMD's driver for RDNA 2 and older (RX 400 to RX 6000),
+# which applies alpha to coverage while the dynamic state says off and draws the characters black.
+# vk_dyn_a2c = 1
 # Pin the shader subgroup size to 32 when the GPU allows it.
 # vk_subgroup_pin = 1
 
 [display]
+# Device profile: auto (the Steam Deck when this is one), desktop or deck. On a Steam Deck the keys this file does not
+# set default to fullscreen = 1, window_size = 1280x800, output_res = 1280x800, render_scale = game, vk_present = fifo
+# and fps_limit = 40 (starting points, not measured yet). Read at start.
+# device_profile = auto
 # Presentation mode: mailbox (default when the driver offers it, vsync otherwise), fifo (vsync) or immediate.
 # vk_present = mailbox
 # Window client area in screen pixels (640x360 to 7680x4320), and borderless fullscreen. Windows display scaling does
@@ -102,18 +111,23 @@
 # here. Changes while the game runs take effect at once.
 # window_size = 1920x1080
 # fullscreen = 0
+# 1, the default: the game keeps running while you are in another window; the keyboard stays quiet until the window is
+# in front again. 0: it pauses when its window loses focus, as it does on the Switch when Home is pressed; a load
+# interrupted that way can stop for good. Read at each focus change.
+# assume_focus = 1
 # Performance overlay in the top right corner: off, fps, or full (frame rate, mean and longest frame time). F10
-# cycles the modes in game.
+# cycles the modes in game, as do both stick clicks (L3 + R3) on a controller.
 # perf_overlay = off
 # Which GPU to use: its index in the log, or part of its name. Default: the first discrete GPU with Vulkan 1.3.
 # gpu_index = 0
 # gpu_name = NVIDIA
 # Game resolution: the size the game draws its picture and interface in (1280x720 to 7680x4320). Above 1920x1080 the
-# game's texture heap and memory pool grow with it. A size wider than 16:9, such as 3440x1440 on a 21:9 monitor, widens
-# the camera's view to that shape and lays the HUD out for it. That is 1.4.3 only (1.2.1 keeps the 16:9 view), and the
-# installer prepares the UI layout for four sizes: 2560x1080, 3440x1440, 3840x1600 and 5120x2160. Any other shape
-# (16:10, 32:9) gets the camera's view but a 16:9 HUD, stretched over the picture, unless you build its layout with
-# tools/make_romfs_patches.py --aspect WxH (wider than 16:9 only). Read at start.
+# game's texture heap and memory pool grow with it. Another shape than 16:9, such as 3440x1440 on a 21:9 monitor or
+# the Steam Deck's 1280x800 (16:10), gives the camera's view that shape and lays the HUD out for it. The installer
+# prepares the UI layout for ten sizes: 2560x1080, 3440x1440, 3840x1600, 5120x2160 (21:9), 3840x1080, 5120x1440 (32:9),
+# 1280x800, 1680x1050, 1920x1200 and 2560x1600 (16:10). Any other size
+# gets the camera's view but a 16:9 HUD, stretched over the picture, unless you build its layout with
+# tools/make_romfs_patches.py --aspect WxH. Read at start.
 # output_res = 1920x1080
 # 3D render scale: the scene's size relative to the game resolution, game (5/6, the game's own 1600x900 at 1080p) or
 # a percentage (25 to 400, at most 4096 pixels a side); above 100 supersamples the scene (anti-aliasing). Read at start.
@@ -127,6 +141,18 @@
 # window is no longer stretched as it used to be; stretch fills the window. Changes while the game runs take effect at
 # once.
 # aspect = fit
+# Field of view, in percent of the game's own: 70 to 140, 100 (the default) leaves the camera as it is. Higher shows
+# more of the world around Link. Game version 1.4.3 only. Changes while the game runs take effect at once.
+# fov = 100
+# Colour adjustment of the picture, HUD included, before it is scaled to the window: brightness (-30 to 30, added in %),
+# contrast and saturation (70 to 150 and 50 to 200 %), gamma (0.8 to 1.2, below 1 brightens dark tones). At 0, 100,
+# 100 and 1 nothing runs. color_preset is the menu's profile (default, vivid, clarity, custom), which sets the four.
+# Changes while the game runs take effect at once.
+# color_preset = default
+# color_brightness = 0
+# color_contrast = 100
+# color_saturation = 100
+# color_gamma = 1
 
 [language]
 # Language: a Windows locale such as de-DE, or a Switch code (en-US, ja, zh-Hant, ...). Default: the Windows locale.

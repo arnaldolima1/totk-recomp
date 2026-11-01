@@ -32,6 +32,13 @@ site realtime main 2daa70 1e201820 d503201f   # fdiv s0, s1, s0 -> nop
 site realtime main 2daa74 1e2c1001 d503201f   # fmov s1, #0.5 -> nop
 site realtime main 2daa78 1e210800 d503201f   # fmul s0, s0, s1 -> nop
 
+# Equipment-switch cooldown (issue #18, found by JieML1100): the player update (main+0x2b0368) steps the countdown at
+# player state +0x109c through the timer step (main+0x1b0834, value += ratio * rate) only while it is above FLT_EPSILON,
+# but the equipment gate (main+0x31cc7c) blocks weapon, shield and bow changes while it is above 0. Whole 30 Hz steps
+# reach exactly 0; a measured ratio leaves a rounding remainder, and one in (0, FLT_EPSILON] is never stepped again and
+# keeps equipment locked until a load. Stepping while above 0 takes the remainder below 0 like any other last step.
+site realtime main 2b036c 0f016681 0f000401   # movi v1.2s, #0x34, lsl #24 (FLT_EPSILON) -> movi v1.2s, #0
+
 # Hair and cloth: the actor animation update builds a second clock {seconds = factor / 30, ratio = factor} per
 # rendered frame. 1.4.3 inlines it in two actor paths, where the factor was just stored to the ratio slot: the
 # replacement stores measured ratio * factor there and computes measured seconds * factor. Two other callers share the
@@ -84,6 +91,15 @@ site aspect main 628c74 bd414260 f81f0fea @page:x10 bd403940 f84107ea   # ldr s0
 site aspect main b43460 bd406ac0 f81f0fea @page:x10 bd403940 f84107ea   # ldr s0, [x22, #0x68] (camera setup)
 site aspect main 1ff04f4 1e211800 f81f0fea @page:x10 bd403940 f84107ea  # fdiv s0, s0, s1 (viewport)
 site aspect main 253fbb0 1e211800 f81f0fea @page:x10 bd403940 f84107ea  # fdiv s0, s0, s1 (viewport)
+
+# Field of view (runtime/resolution.c res_fov_live writes TOTK_FOV / 100 to page +60 and switches the set). The same two
+# camera routines as the aspect set load the camera's vertical view angle (radians) a few words before the ratio and
+# hand it to sead's perspective projection (+0xa0, then sin / cos / tan of half of it at +0xa4..+0xac). The replacement
+# loads the angle as before and multiplies it by the factor on the page; s8 holds the factor because the next
+# instruction (fmul s8, s0, s1) overwrites it. Zooms the game makes itself (the bow, the scope) scale with it.
+set fov      TOTK_FOV_PATCH      0
+site fov    main 628c3c bd413e60 f81f0fea @page:x10 bd413e60 bd403d48 1e280800 f84107ea   # ldr s0, [x19, #0x13c] (camera update)
+site fov    main b4342c bd4066c0 f81f0fea @page:x10 bd4066c0 bd403d48 1e280800 f84107ea   # ldr s0, [x22, #0x64] (camera setup)
 
 # The game's zstd decoder (BSD zstd, statically linked into main) through the host's libzstd (runtime/ov_zstd.c):
 # every call of ZSTD_decompressMultiFrame (main+0x3a1f0: dctx, dst, capacity, src, size, dict, dict size, ddict) and of
