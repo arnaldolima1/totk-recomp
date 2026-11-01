@@ -1,6 +1,7 @@
 // Amiibo / NFC menu page (Dear ImGui): browser and scan controls.
 #include <algorithm>
 #include <cctype>
+#include <cfloat>
 #include <filesystem>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +12,7 @@
 
 #include "imgui.h"
 #include "ui/amiibo_page.h"
+#include "ui/option_rows.h"
 
 extern "C" {
 #include "amiibo.h"
@@ -70,18 +72,13 @@ static void refresh_dir(void) {
     std::error_code ec;
     fs::path dir_path(g_current_dir);
 
-    // Fall back to "." if directory does not exist or is not a directory
-    if (!fs::exists(dir_path, ec) || !fs::is_directory(dir_path, ec)) {
-        if (g_current_dir != ".") {
-            set_current_dir(".");
-            dir_path = fs::path(g_current_dir);
-        }
-    }
-
+    // A missing folder lists nothing and says so; it is not replaced by another one, and opening the tab writes no
+    // setting (the folder is saved only when the player sets one).
     if (!fs::exists(dir_path, ec) || !fs::is_directory(dir_path, ec)) {
         set_status(UI_MENU_AMIIBO_NO_DIR, g_current_dir);
         return;
     }
+    if (g_status_id == UI_MENU_AMIIBO_NO_DIR) set_status(UI_MENU_AMIIBO_READY);
 
     // Add parent navigation if not at root
     if (dir_path.has_parent_path() && dir_path != dir_path.parent_path()) {
@@ -116,6 +113,7 @@ static void refresh_dir(void) {
 }
 
 void tab_amiibo(float scale) {
+    (void)scale;   // the rows take ImGui's own sizes, already scaled with the font
     static bool s_inited = false;
     if (!s_inited) {
         const char *cfg_dir = cfg_get("TOTK_AMIIBO_DIR");
@@ -130,13 +128,13 @@ void tab_amiibo(float scale) {
     }
 
     // Two panes: Left (Directory Browser & Tag List), Right (Amiibo Tag Details & Controls)
-    const float content_h = ImGui::GetContentRegionAvail().y - 20.0f;
+    const float content_h = ImGui::GetContentRegionAvail().y - opt_bottom();   // Continue and Quit stay visible
     const float left_w = ImGui::GetContentRegionAvail().x * 0.58f;
     const float right_w = ImGui::GetContentRegionAvail().x - left_w - ImGui::GetStyle().ItemSpacing.x;
 
     // ---- Left Pane: Explorer & List ----
     ImGui::BeginChild("##amiibo_explorer", ImVec2(left_w, content_h), true);
-    ImGui::TextColored(ImVec4(0.93f, 0.76f, 0.33f, 1.0f), menu_text(UI_MENU_AMIIBO_DIR));
+    ImGui::TextColored(ImVec4(0.93f, 0.76f, 0.33f, 1.0f), "%s", menu_text(UI_MENU_AMIIBO_DIR));
 
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
     if (ImGui::InputText("##amiibo_dir_input", g_dir_input, sizeof(g_dir_input), ImGuiInputTextFlags_EnterReturnsTrue)) {
@@ -197,7 +195,7 @@ void tab_amiibo(float scale) {
 
     // ---- Right Pane: Controls & Status ----
     ImGui::BeginChild("##amiibo_controls", ImVec2(right_w, content_h), true);
-    ImGui::TextColored(ImVec4(0.93f, 0.76f, 0.33f, 1.0f), menu_text(UI_MENU_AMIIBO_READER));
+    ImGui::TextColored(ImVec4(0.93f, 0.76f, 0.33f, 1.0f), "%s", menu_text(UI_MENU_AMIIBO_READER));
     ImGui::Separator();
 
     AmiiboDeviceState state = amiibo_get_device_state();
@@ -221,17 +219,17 @@ void tab_amiibo(float scale) {
     if (g_selected_entry >= 0 && g_selected_entry < (int)g_entries.size() && !g_entries[g_selected_entry].is_dir) {
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.4f, 1.0f), "%s", g_entries[g_selected_entry].name.c_str());
 
-        if (ImGui::Button(menu_text(UI_MENU_AMIIBO_TAP), ImVec2(ImGui::GetContentRegionAvail().x, 32 * scale)))
+        if (ImGui::Button(menu_text(UI_MENU_AMIIBO_TAP), ImVec2(ImGui::GetContentRegionAvail().x, 0)))
             tap(g_current_dir, g_entries[g_selected_entry].name);
     } else {
         ImGui::TextDisabled("%s", menu_text(UI_MENU_AMIIBO_NO_FILE));
         ImGui::BeginDisabled();
-        ImGui::Button(menu_text(UI_MENU_AMIIBO_TAP), ImVec2(ImGui::GetContentRegionAvail().x, 32 * scale));
+        ImGui::Button(menu_text(UI_MENU_AMIIBO_TAP), ImVec2(ImGui::GetContentRegionAvail().x, 0));
         ImGui::EndDisabled();
     }
 
     ImGui::Spacing();
-    if (ImGui::Button(menu_text(UI_MENU_AMIIBO_REMOVE), ImVec2(ImGui::GetContentRegionAvail().x, 28 * scale))) {
+    if (ImGui::Button(menu_text(UI_MENU_AMIIBO_REMOVE), ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
         amiibo_remove_tag();
         set_status(UI_MENU_AMIIBO_REMOVED);
     }
@@ -244,7 +242,9 @@ void tab_amiibo(float scale) {
     }
     if (auto_remove) {
         float delay = amiibo_get_auto_remove_delay_s();
-        if (ImGui::SliderFloat(menu_text(UI_MENU_AMIIBO_HOLD), &delay, 1.0f, 6.0f, menu_text(UI_MENU_AMIIBO_SECONDS))) {
+        ImGui::TextUnformatted(menu_text(UI_MENU_AMIIBO_HOLD));   // above the slider: beside it the text is cut off
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        if (ImGui::SliderFloat("##amiibo_hold", &delay, 1.0f, 6.0f, menu_text(UI_MENU_AMIIBO_SECONDS))) {
             amiibo_set_auto_remove_delay_s(delay);
         }
     }

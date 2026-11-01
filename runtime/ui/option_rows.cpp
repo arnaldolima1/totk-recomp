@@ -56,6 +56,7 @@ void opt_focus_first(void) { g_focus_req = true; }
 void opt_focus_key(const char *key) { snprintf(g_focus_key, sizeof g_focus_key, "%s", key); }
 
 void opt_reserve_bottom(float h) { g_bottom = h; }
+float opt_bottom(void) { return g_bottom; }
 
 void opt_disable_next(UiTextId note) {
     g_disable_next = true;
