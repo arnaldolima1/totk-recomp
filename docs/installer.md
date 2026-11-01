@@ -56,6 +56,9 @@ loads the saves 1.4.3 wrote.
    writes the translations it makes in play as loose files; running the tool again with the game closed folds those in.
    The patches are written twice: `romfs-patches` and `romfs-patches-xbox` (`--xbox-prompts`, the A/B and X/Y prompts
    swapped for `pad_layout = xbox_prompts`).
+   When the graphics driver crashes while building the shaders, `prepare_shaders.py` runs that part again without the
+   variants it was building ([building.md](building.md), step 6), and the setup finishes with a warning that names how
+   many were left out.
 6. **Clean up** the temp folder (generated C and objects, about 1.3 GB).
 
 A cancelled or failed setup resumes from the last finished step (`totk-install.json`).

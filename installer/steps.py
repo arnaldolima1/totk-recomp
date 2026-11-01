@@ -644,6 +644,9 @@ class Compile(Step):
 # ---- 5. prepare
 
 TRANSLATED = re.compile(r'gfx_shader: prepare: (\d+) of (\d+) pairs')
+# runtime/vk_pipeline.c lb_warm_prepared: variants the driver crashed on in an earlier run (tools/prepare_shaders.py
+# runs the driver step again after such a crash)
+SKIPPED = re.compile(r'prepare-shaders: (\d+) variants skipped: the graphics driver crashed')
 
 
 # The game resolutions of another shape than 16:9 that runtime/ui/menu.cpp row_output_res lists: 21:9 and 32:9 monitors,
@@ -715,10 +718,14 @@ class Prepare(Step):
             shader_list = ctx.temp / 'shader_list.tsv'
             shader_list.write_text(shader_list_text(layout), encoding='utf-8', newline='\n')
 
+        skipped = [0]
+
         def parse(line):
             m = TRANSLATED.search(line)
             if m:
                 rep.progress('prepare', 'translate', int(m.group(1)), int(m.group(2)), 'shaders')
+            elif SKIPPED.search(line):
+                skipped[0] = int(SKIPPED.search(line).group(1))
             elif 'listed variants' in line:
                 rep.progress('prepare', 'translate', force=True)
             elif 'gfx_shader: prepare:' in line and 'translated' in line and 'programs' in line:
@@ -730,6 +737,8 @@ class Prepare(Step):
                               dest / 'exefs', '--list', shader_list], parse)
         if code or not (dest / 'shader-prepared.bin').is_file():
             raise InstallError('prepare.shaders_failed', code=code, log=str(log))
+        if skipped[0]:
+            rep.warning('warn.shaders_skipped', count=skipped[0], log=str(log))
 
         # One shader-cache.pack instead of four files per shader (~117,000): totk.exe reads the pack first.
         rep.progress('prepare', 'pack', force=True)
