@@ -677,7 +677,7 @@ def main():
             if r['error']:
                 errors.append(r['error'])
             done_at[r['module']] = time.perf_counter() - t_emit
-            if (i + 1) % 200 == 0 or i + 1 == len(tasks):
+            if (i + 1) % 5 == 0 or i + 1 == len(tasks):   # the setup shows it: often enough on a slow machine
                 print(f'emitted {i + 1}/{len(tasks)} chunks, {time.perf_counter() - t_emit:.0f}s', file=sys.stderr,
                       flush=True)
 
