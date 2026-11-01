@@ -407,9 +407,10 @@ int probe_cfg(void) {
         int ok = 0;
         if (!m->values) ok = 1;
         else if (strstr(m->values, "..")) {
-            long lo = strtol(m->values, NULL, 10), hi = strtol(strstr(m->values, "..") + 2, NULL, 10);
+            // decimal bounds too ("0.2..0.9", the walk scale): strtol would read them as 0..0
+            double lo = strtod(m->values, NULL), hi = strtod(strstr(m->values, "..") + 2, NULL);
             double d = strtod(m->def, NULL);
-            ok = d >= (double)lo && d <= (double)hi;
+            ok = d >= lo && d <= hi;
         } else {
             size_t dl = strlen(m->def);
             for (const char *v = m->values; *v;) {

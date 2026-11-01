@@ -361,8 +361,16 @@ static void probe_applet(void) {
     CHECK((uint32_t)CALL("nfp.ListDevices", U(handles), U(&count), 4) == 0 && count == 1, "nfp ListDevices");
     uint64_t ev = U(guest_alloc(0x100));
     CHECK(CALL("nfp.AttachAvailabilityChangeEvent", ev) == 0, "AttachAvailabilityChangeEvent");
-    int nfp_event = event_works(ev, 0);
-    CHECK(nfp_event, "the nfp availability event does not work as a manual-clear system event");
+    // The reader is available from the start (Amiibo, ov_system.c ov_nfp_availability signals the event as it binds it),
+    // so the event is already signalled, and stays so: a manual-clear event.
+    static uint64_t try_wait;
+    if (!try_wait && !(try_wait = ldr_symbol(TRY_WAIT_SYSTEM_EVENT))) rt_fatal("probe-services: no %s", TRY_WAIT_SYSTEM_EVENT);
+    int nfp_event = (uint8_t)rt_call(gc, try_wait, 1, ev) && (uint8_t)rt_call(gc, try_wait, 1, ev);
+    CHECK(nfp_event, "the nfp availability event is not signalled and kept as a manual-clear system event");
+    uint64_t act = U(guest_alloc(0x100)), deact = U(guest_alloc(0x100));
+    CHECK(CALL("nfp.AttachActivateEvent", act, U(handles)) == 0 && CALL("nfp.AttachDeactivateEvent", deact, U(handles)) == 0,
+          "nfp AttachActivateEvent / AttachDeactivateEvent");
+    CHECK(event_works(act, 0) && event_works(deact, 0), "the nfp activate / deactivate events do not work without a tag");
     CHECK((uint32_t)CALL("nfp.GetDeviceState", U(handles)) == 0, "nfp device state");
     static const char *const none[] = {"nfp.Mount", "nfp.GetTagInfo", "nfp.GetModelInfo"};
     uint8_t out[0x100];
