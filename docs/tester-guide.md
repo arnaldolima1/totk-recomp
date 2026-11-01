@@ -52,6 +52,26 @@ A laptop with an iGPU and a discrete GPU, or two cards, lists every GPU at the t
 
 The line `vk: using gpu N: <name>` says which one ran.
 
+## Mods
+
+Mods made for emulators go into `mods/` next to `totk.exe`, one folder per mod, unpacked as they come:
+`mods/<name>/romfs/...` (the Atmosphere layout `mods/<name>/atmosphere/contents/0100F2C0115B6000/romfs` works
+too). The game loads them at the next start. The Mods tab of the in-game menu (F1) lists them: switch a mod off, or move
+it up or down. When two mods change the same file, the higher one wins.
+
+- RomFS mods (textures, models, text, gameplay files) work.
+- Mods packaged for TKMM (`.tkcl`, "TKMM only") and mods that change the same files: merge them in TKMM and set an
+  export location to an empty folder inside `mods/` (for example `mods/TKMM`). That folder is then one mod here.
+- Files made for another game version (names with `.Product.<number>.` that this version does not have) are left out;
+  the Mods tab counts them. Look for the mod's release for your game version.
+- Mods that patch the game code (`exefs/*.ips`, `exefs/*.pchtxt`) are listed but not applied yet; a mod with both kinds
+  of files stays off as a whole until they are.
+- Mods with their own code (`exefs/subsdk*` or a replaced `exefs/main`, such as UltraCam) never load, their RomFS files
+  included.
+- Cheat files (`<name>/cheats/<build id>.txt`) are listed but not loaded yet.
+
+The log names every mod at the start (`mods: <name>: ...`) and how many of its files it serves.
+
 ## What to send back
 
 1. `logs\totk.log` from each run. It contains no keys and no game files. The lines that matter most start with

@@ -26,6 +26,7 @@ The install folder (`main.c` `portable_paths()` reads this layout; it stays port
   exefs/, romfs/                 extracted from the player's files
   shared-fonts/                  the Switch system fonts, with Chinese, Korean or Traditional Chinese text
   profile/                       saves
+  mods/                          the player's mods, one folder per mod (created by the menu's "Open mods folder")
   logs/                          totk.log of the last run, totk.1.log to totk.4.log of the runs before it
   shader and pipeline caches     prepared by the setup; shader-cache/shader-cache.pack holds the translations
   totk-install.json              what built this folder: release version, input hashes, finished steps

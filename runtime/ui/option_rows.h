@@ -47,6 +47,11 @@ bool opt_choice_list(const char *key, UiTextId label, const char *const *values,
 // A row that runs an action: true on A or a click. id: unique on the page and not a setting ("##copy_info"); value:
 // shown on the right ("" none).
 bool opt_button(const char *id, UiTextId label, UiTextId desc, const char *value = "");
+// A row whose label, value, note (under the value) and description are text, not catalog ids: a mod's folder name.
+// Returns 2 (A / click), -1 / +1 (left / right), 3 / 4 (move up / down: the top / left face buttons, Ctrl+Up /
+// Ctrl+Down, the drawn arrows; movable rows only) or 0.
+int opt_text_row(const char *id, const char *label, const char *value, const char *note, const char *desc,
+                 bool movable);
 // lo..hi in steps of step (left and right held for a second go ten times as fast); fmt formats the value ("%.0f %%").
 // note: a short line under the value in place of the "default" mark (NULL: none). fallback: the setting that applies
 // while key is unset; the row shows its value then, and a change sets key.
