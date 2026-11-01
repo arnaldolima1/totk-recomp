@@ -105,7 +105,7 @@ static const CfgMeta metas[] = {
     {"COLOR_CONTRAST", "100", "70..150", LIVE}, {"COLOR_SATURATION", "100", "50..200", LIVE},
     {"COLOR_GAMMA", "1", "0.8..1.2", LIVE},
     {"DEVICE_PROFILE", "auto", "auto|desktop|deck", RESTART},
-    {"SHADOW_RES", "1024", "game|512|768|1024|1536|2048", RESTART},
+    {"SHADOW_RES", "game", "game|512|768|1024|1536|2048", RESTART},
     // Game
     {"FPS_LIMIT", "60", "30|40|45|60|90|120|144|display", LIVE}, {"FPS60", "1", "0|1", LIVE},
     {"REALTIME", "1", "0|1", RESTART}, {"CLOTH_REALTIME", "1", "0|1", RESTART},
