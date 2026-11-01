@@ -91,6 +91,14 @@ static void add_line(int kind, const char *from, const char *text, const char *a
     }
 }
 
+// The prologue is over: Link has woken on the Great Sky Island in the newest save. Rooms are for the open game, so
+// the client waits until then (MP_LOCKED). Without achievements loaded no save is read: the gate stays open.
+static int island_reached(void) {
+    AchStats st;
+    ach_stats(&st);
+    return st.awake == 1 || (st.awake < 0 && ach_count() == 0);
+}
+
 static void set_state(int state, const char *error) {
     plat_mutex_lock(&lock);
     view.state = state;
@@ -265,12 +273,21 @@ static void on_line(char *line, Sock s) {
         view.nplayers = 0;
         for (int i = 0; i < count && i < MP_MAX_PLAYERS && at + 2 + MP_STATS <= n; i++) {
             MpPlayer *p = &view.players[view.nplayers++];
+            p->slot = -1;   // the SLOTS line after the roster fills it
             field(p->name, sizeof p->name, f[at]);
             field(p->place, sizeof p->place, f[at + 1]);
             for (int k = 0; k < MP_STATS; k++) p->stats[k] = atoi(f[at + 2 + k]);
             at += 2 + MP_STATS;
         }
         ach_mp_max("players", view.nplayers);
+    } else if (!strcmp(f[0], "SLOTS") && n >= 2) {   // SLOTS count (name slot)...: each player's colour slot
+        for (int i = 0, at = 2; i < atoi(f[1]) && at + 1 < n; i++, at += 2) {
+            char who[MP_NAME_MAX];
+            field(who, sizeof who, f[at]);
+            int slot = atoi(f[at + 1]);
+            for (int k = 0; k < view.nplayers; k++)
+                if (!strcmp(view.players[k].name, who)) view.players[k].slot = slot >= 0 && slot < MP_SLOTS ? slot : -1;
+        }
     } else if (!strcmp(f[0], "CHALLENGES") && n >= 2) {   // CHALLENGES count (stat total done t1 t2 t3 t4)...
         static const char *const stat_names[MP_STATS] = {"shrines", "lightroots", "towers", "koroks", "hearts",
                                                          "achievements"};
@@ -338,13 +355,17 @@ static void session(const char *server) {
     unsigned sent_gen = 0, sent_look = 0, ver = cfg_version();
     char settings[512], now_settings[512];
     conn_settings(settings, sizeof settings);
-    uint64_t last_ping = plat_now_ms(), minute_at = 0, pos_at = 0;
+    uint64_t last_ping = plat_now_ms(), minute_at = 0, pos_at = 0, gate_at = plat_now_ms();
     float sent_pos[3] = {0, 0, 0};
     int voice_frames = 0;
     char buf[16384];
     size_t have = 0;
     int alive = 1;
     while (alive && plat_cas32(&kick, 0, 0) == 0) {
+        if (plat_now_ms() - gate_at > 2000) {   // a new game went back to the prologue: leave the room
+            gate_at = plat_now_ms();
+            if (!island_reached()) break;
+        }
         if (cfg_version() != ver) {
             ver = cfg_version();
             conn_settings(now_settings, sizeof now_settings);
@@ -520,6 +541,11 @@ static void thread_main(void *arg) {
             plat_sleep_ms(500);
             continue;
         }
+        if (!island_reached()) {
+            set_state(MP_LOCKED, NULL);
+            plat_sleep_ms(1000);
+            continue;
+        }
         session(server);
         plat_mutex_lock(&lock);
         refused = view.state == MP_REFUSED;
@@ -566,6 +592,15 @@ void mp_view(MpView *out) {
     }
     out->nmarkers = w;
     plat_mutex_unlock(&lock);
+}
+
+int mp_slot_of(const char *name) {
+    int slot = -1;
+    plat_mutex_lock(&lock);
+    for (int i = 0; i < view.nplayers; i++)
+        if (!strcmp(view.players[i].name, name)) slot = view.players[i].slot;
+    plat_mutex_unlock(&lock);
+    return slot;
 }
 
 int mp_mark(void) {

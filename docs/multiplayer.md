@@ -1,18 +1,27 @@
 # Multiplayer
 
-Friends play side by side, each in their own world: a room shares everyone's progress, their achievement unlocks,
-a text chat and a voice chat, and keeps a group challenge the players reach together. No game state crosses between the games; seeing the
-others in the world is later work (layers 2 and 3 below).
+Up to four friends play side by side, each in their own world, as the four Links of Four Swords: a room shares
+everyone's progress, their achievement unlocks, a text chat and a voice chat, keeps group challenges the players reach
+together, and shows each friend in the world as a Link whose hair is their room colour (green, red, blue, purple). No
+game state crosses between the games.
+
+Rooms open once the prologue is over: the game joins only after Link has woken on the Great Sky Island in the newest
+save (the flag `SageOfSky_IsOpenShutterInWakeUpRoom`, read by `runtime/achievements.c` with the other save figures;
+`runtime/net_mp.c` `island_reached`). Until then the tab says so (state `MP_LOCKED`); a new game started later leaves
+the room again.
 
 ## Playing
 
-1. One player opens the room with the *Servidor Multijogador* shortcut the setup puts in the install folder and the
-   Start menu (`tools/mp_server.py` in a console window). The window lists the addresses friends can join. Friends in
+1. One player opens the room on the launcher's *Multijogador* tab (`launcher/src-tauri/src/room.rs`, which runs the
+   release's `tools/mp_server.py` and lists the addresses to share: home network, Radmin, Tailscale, ZeroTier), or
+   with the *Servidor Multijogador* shortcut the setup puts in the install folder and the Start menu (the same script
+   in a console window). The tab shows only for a release that has the server. The same tab sets the game's name,
+   address and password and tests whether a room answers. Friends in
    another house reach it through a VPN that joins the machines (Radmin VPN, Tailscale, ZeroTier) or a forwarded TCP
    port (5577 by default). The same script runs on any server with Python 3.10 or later:
    `python3 mp_server.py --port 5577 --password SECRET --name "My room"`.
 2. Every player opens the menu (F1) on the *Multiplayer* tab, sets a name, the server (`address:port`) and the room's
-   password, and presses *Connect*. The settings are `mp`, `mp_server`, `mp_name` and `mp_password` in `totk.ini`.
+   password, and presses *Connect*. The page shows the room's four slots in their colours with who holds each. The settings are `mp`, `mp_server`, `mp_name` and `mp_password` in `totk.ini`.
 3. The tab lists the players with their shrines, lightroots, towers, Korok seeds, hearts and achievements, the group
    challenge with its progress, and the chat. Chat lines, friends' unlocks and the room's events also show at the
    bottom left of the screen for a few seconds; a friend's unlock shows its icon when this install has that
@@ -57,6 +66,7 @@ space. Nothing is encrypted or authenticated beyond the room's password: rooms a
 | room | `WELCOME` | protocol, room name |
 | room | `ERROR` | code (`version`, `password`, `name`, `full`), text |
 | room | `ROSTER` | count, then per player: name, place and the six figures of `STATUS` |
+| room | `SLOTS` | count, then per player: name, slot (0 green, 1 red, 2 blue, 3 purple); right after each `ROSTER` |
 | room | `CHAT` | player, text |
 | room | `ACH` | player, achievement id, name, rarity |
 | room | `VOICE` | player, the frame as received (to everyone but its sender) |
@@ -66,6 +76,12 @@ space. Nothing is encrypted or authenticated beyond the room's password: rooms a
 | room | `CHALLENGES` | count, then per track: figure, the room's total, tiers reached, four targets |
 | room | `CHALLENGE` | figure (or `done`), the room's total, target, text (the closest tier, for older games) |
 | room | `PONG` | |
+
+A room holds four players (`MAX_PLAYERS`); a fifth gets `ERROR full`. Each player gets a slot when they join: the
+one they had last time when it is free, else the lowest free one (kept in the room's state by name). The slot picks
+the player's colour in every game: their name, dots, chat lines and their figure's hair (`runtime/ui/menu.cpp`
+`kSlotCol`). Games ignore message kinds they do not know, so an older game in a newer room just keeps colours from
+the name.
 
 The room keeps, per player name, the best figures each has reported; a group challenge counts the sum of those, so a
 player leaving does not undo the room's progress. There is one track per figure with four tiers (bronze, silver, gold,
@@ -108,6 +124,11 @@ sky over 900 m, depths under -200 m). The mark key (`mp_mark_key`, G) sends a `M
 minutes. The player cards show each friend's layer and distance. Two multiplayer achievements count meetings (within
 30 m in the same layer) and markers.
 
-## Later layers
+## Figures
 
-3. Friends in the world: an actor per friend, moved by the position and animation the room relays.
+Each friend is drawn in the world as a textured, animated Link of the game's own models, into the game's G-buffer
+(`runtime/vk_figure.c`, `docs/maxwell.md` section 9), so the game lights, shadows and fogs them like its own
+characters. The figure, `profile/link-figure.bin`, is built at install time from the player's own RomFS
+(`installer/steps.py` `link_figure`, `tools/link_figure.py`): the parts' `.bfres.mc` models through McSharp's
+MeshCodec decoder (the release's `bin/mcsharp`), the textures from TexToGo, and the walk, run, dash and idle
+animations. Without it friends show as outlines.

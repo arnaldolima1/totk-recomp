@@ -11,8 +11,11 @@
 extern "C" {
 #endif
 
-enum { MP_OFF, MP_CONNECTING, MP_CONNECTED, MP_RETRYING, MP_REFUSED };   // MP_REFUSED: the room said no; no retry
-enum { MP_MAX_PLAYERS = 32, MP_NAME_MAX = 32 };
+// MP_REFUSED: the room said no; no retry. MP_LOCKED: the save is still in the prologue (Link has not woken on the
+// Great Sky Island yet, achievements.h AchStats.awake): the game joins once it is over.
+enum { MP_OFF, MP_CONNECTING, MP_CONNECTED, MP_RETRYING, MP_REFUSED, MP_LOCKED };
+// A room holds four players, as in Four Swords (tools/mp_server.py): each has a slot, 0..3, that picks their colour.
+enum { MP_MAX_PLAYERS = 32, MP_NAME_MAX = 32, MP_SLOTS = 4 };
 enum { MP_STAT_SHRINES, MP_STAT_LIGHTROOTS, MP_STAT_TOWERS, MP_STAT_KOROKS, MP_STAT_HEARTS, MP_STAT_ACHIEVEMENTS,
        MP_STATS };
 
@@ -22,6 +25,7 @@ typedef struct {
     int has_pos;            // a position came from the room in the last few seconds
     float pos[3];           // x east, y up, z south (metres; game_player_pos)
     char look[3][48];       // the armor pieces the player wears (head, upper, lower; "" none), from LOOK lines
+    int slot;               // 0..MP_SLOTS-1 from the room's SLOTS line, -1 before it came (an older server)
 } MpPlayer;
 
 // A shared marker: a point a player marked (the mark key), one per player, for MP_MARK_MS.
@@ -71,6 +75,7 @@ int mp_take_toast(MpLine *out);        // the next line to show as a notice, 1 w
 int mp_send_chat(const char *text);    // queued for the thread; 0 when not connected
 void mp_reconnect(void);               // after the settings changed: drop the connection and try again now
 int mp_mark(void);                     // marks where the player stands, for everyone in the room; 0 when not possible
+int mp_slot_of(const char *name);      // that player's slot in the room, -1 when unknown
 
 // The layer of the world a height is in, for the radar and the player cards.
 enum { MP_LAYER_SURFACE, MP_LAYER_SKY, MP_LAYER_DEPTHS };

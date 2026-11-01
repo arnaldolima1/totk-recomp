@@ -10,7 +10,9 @@ What it does (runtime/net_mp.c is the game's side; docs/multiplayer.md the proto
 - keeps a scoreboard and the room's group challenges: six tracks of four tiers the players reach together (shrines
   done by the whole room, say), each tier announced to everyone when it is reached;
 - relays voice frames to everyone but their sender;
-- relays positions, markers and what each player wears (LOOK), and hands a newcomer the last of each.
+- relays positions, markers and what each player wears (LOOK), and hands a newcomer the last of each;
+- holds four players at most, as in Four Swords: each gets one of four slots (SLOTS), which picks their colour in the
+  games (green, red, blue, purple), and keeps it while the slot is free when they come back.
 
 The protocol is UTF-8 text over TCP, one message per line, fields separated by tabs (a tab or a line break inside a
 field is sent as a space). Nothing is encrypted: it is for friends, not for strangers on the internet.
@@ -28,7 +30,8 @@ from pathlib import Path
 PROTOCOL = 1
 STATS = ('shrines', 'lightroots', 'towers', 'koroks', 'hearts', 'achievements')
 MAX_LINE = 4096
-MAX_PLAYERS = 32
+MAX_PLAYERS = 4      # named players: the four slots
+MAX_CONNECTIONS = 8  # connections, those still saying HELLO included
 # Group challenges: one track per figure, four tiers each (bronze, silver, gold, legendary) over the room's sum of
 # the best each player reported. Every track advances at once; the game names the tiers in its own language.
 TRACKS = [
@@ -60,6 +63,7 @@ class Player:
         self.last = time.time()
         self.pos = None   # the last POS line's fields (x, y, z)
         self.look = None  # the last LOOK line's fields (head, upper, lower armor names)
+        self.slot = -1    # 0..3 once named (Room.free_slot)
 
 
 class Room:
@@ -68,7 +72,7 @@ class Room:
         self.players = []
         self.marks = {}   # player name: ((x, y, z), time), the newest marker of each
         self.state_path = state_path
-        self.state = {'tiers': {}, 'best': {}}
+        self.state = {'tiers': {}, 'best': {}, 'slots': {}}
         if state_path and state_path.is_file():
             try:
                 self.state.update(json.loads(state_path.read_text(encoding='utf-8')))
@@ -94,11 +98,24 @@ class Room:
                 await self.send(p, data)
 
     def roster(self):
-        out = ['ROSTER', str(len([p for p in self.players if p.name]))]
-        for p in self.players:
-            if p.name:
-                out += [p.name, p.place] + [str(p.stats[k]) for k in STATS]
-        return line(*out)
+        """ROSTER count (name place stats...)..., then SLOTS count (name slot)...: the games colour each player by slot."""
+        named = [p for p in self.players if p.name]
+        out = ['ROSTER', str(len(named))]
+        for p in named:
+            out += [p.name, p.place] + [str(p.stats[k]) for k in STATS]
+        slots = ['SLOTS', str(len(named))]
+        for p in named:
+            slots += [p.name, str(p.slot)]
+        return line(*out) + line(*slots)
+
+    def free_slot(self, name):
+        """The slot for a player joining: the one they had last time when it is free, else the lowest free one; None
+        when all four are taken."""
+        taken = {p.slot for p in self.players if p.name}
+        last = self.state.setdefault('slots', {}).get(name.lower())
+        if isinstance(last, int) and 0 <= last < MAX_PLAYERS and last not in taken:
+            return last
+        return next((k for k in range(MAX_PLAYERS) if k not in taken), None)
 
     def total(self, stat):
         # the best each player has reported, so leaving the room keeps the group's progress
@@ -147,8 +164,8 @@ class Room:
 async def handle(room, reader, writer):
     p = Player(writer)
     peer = writer.get_extra_info('peername')
-    if len(room.players) >= MAX_PLAYERS:
-        writer.write(line('ERROR', 'full', 'A sala está cheia.'))
+    if len(room.players) >= MAX_CONNECTIONS:
+        writer.write(line('ERROR', 'full', 'A sala está cheia (no máximo 4 jogadores).'))
         writer.close()
         return
     room.players.append(p)
@@ -173,7 +190,12 @@ async def handle(room, reader, writer):
                 if not name or any(q.name.lower() == name.lower() for q in room.players):
                     await room.send(p, line('ERROR', 'name', 'Esse nome já está na sala ou está vazio.'))
                     break
-                p.name = name
+                slot = room.free_slot(name)
+                if slot is None:
+                    await room.send(p, line('ERROR', 'full', 'A sala está cheia: no máximo 4 jogadores, como em Four Swords.'))
+                    break
+                p.name, p.slot = name, slot
+                room.state['slots'][name.lower()] = slot
                 await room.send(p, line('WELCOME', str(PROTOCOL), room.name))
                 await room.broadcast(line('EVENT', 'join', f'{name} entrou na sala.'), skip=p)
                 for q in room.players:   # where everyone stands and their markers, for the newcomer
@@ -186,7 +208,7 @@ async def handle(room, reader, writer):
                     if time.time() - at < 15 * 60:
                         await room.send(p, line('MARK', who, *mark))
                 await room.progress_changed()
-                print(f'{time.strftime("%H:%M:%S")} {name} entrou ({peer[0]})', flush=True)
+                print(f'{time.strftime("%H:%M:%S")} {name} entrou ({peer[0]}) na vaga {slot + 1}', flush=True)
             elif not p.name:
                 break
             elif kind == 'STATUS' and len(f) >= 2 + len(STATS):

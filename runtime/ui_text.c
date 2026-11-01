@@ -80,8 +80,9 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     
 
     [UI_MENU_TAB_MULTIPLAYER] = "Multiplayer",
-    [UI_MENU_MP_INTRO] = "Play alongside friends, each in your own world: the room shares your progress, your "
-        "achievements and a chat. One of you runs the room (the Servidor Multijogador shortcut), or you all join a server online.",
+    [UI_MENU_MP_INTRO] = "Play alongside up to three friends, each in your own world, as the four Links of Four Swords: "
+        "the room shares your progress, achievements, voice and a chat, and shows each friend as a Link "
+        "of their colour.",
     [UI_MENU_MP_NAME] = "Your name",
     [UI_MENU_MP_SERVER] = "Server (address:port)",
     [UI_MENU_MP_PASSWORD] = "Room password",
@@ -155,6 +156,22 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_MP_LAYER_DEPTHS] = "depths",
     [UI_MENU_MP_HINT_MARK] = "%s: mark your spot on the friends' radar",
     [UI_MENU_MP_MARK_PLACED] = "Marker placed on the friends' radar",
+    [UI_MENU_MP_STATE_LOCKED] = "Waiting for the Great Sky Island",
+    [UI_MENU_MP_PILL_LOCKED] = "locked",
+    [UI_MENU_MP_LOCKED_TITLE] = "Reach the Great Sky Island first",
+    [UI_MENU_MP_LOCKED_BODY] = "Rooms open once Link wakes up on the Great Sky Island, after the opening under the castle. The "
+        "game joins by itself as soon as it saves there.",
+    [UI_MENU_MP_SLOTS_TITLE] = "Up to four players, each in their own colour",
+    [UI_MENU_MP_SLOT_FREE] = "free",
+    [UI_MENU_MP_COLOR_GREEN] = "Green",
+    [UI_MENU_MP_COLOR_RED] = "Red",
+    [UI_MENU_MP_COLOR_BLUE] = "Blue",
+    [UI_MENU_MP_COLOR_PURPLE] = "Purple",
+    [UI_MENU_MP_NAME_HINT] = "How your friends see you.",
+    [UI_MENU_MP_SERVER_HINT] = "The address the host gives you. The host opens the room in the launcher's Multiplayer tab.",
+    [UI_MENU_MP_PASSWORD_HINT] = "Only if the room has one.",
+    [UI_MENU_MP_RETRY_HINT] = "Check the address and that the host has the room open. Away from the same network, both need the "
+        "same VPN (Radmin, Tailscale or ZeroTier).",
     [UI_MENU_ACH_POPUP] = "Achievement notices",
     [UI_MENU_ACH_POPUP_DESC] = "A notice at the top of the screen when an achievement unlocks. Achievements are checked "
                                "each time the game saves, so the notice comes with the next save after the feat.",
@@ -643,8 +660,8 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     
 
     [UI_MENU_TAB_MULTIPLAYER] = "Мультиплеер",
-    [UI_MENU_MP_INTRO] = "Играйте рядом с друзьями, каждый в своём мире: комната делится прогрессом, достижениями и "
-        "чатом. Комнату запускает один из вас (ярлык Servidor Multijogador), или все подключаются к серверу в сети.",
+    [UI_MENU_MP_INTRO] = "Играйте вместе с тремя друзьями, каждый в своём мире, как четыре Линка из Four Swords: комната "
+        "делится прогрессом, достижениями, голосом и чатом и показывает каждого друга Линком его цвета.",
     [UI_MENU_MP_NAME] = "Ваше имя",
     [UI_MENU_MP_SERVER] = "Сервер (адрес:порт)",
     [UI_MENU_MP_PASSWORD] = "Пароль комнаты",
@@ -718,6 +735,22 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_MP_LAYER_DEPTHS] = "глубины",
     [UI_MENU_MP_HINT_MARK] = "%s: отметить место на радаре друзей",
     [UI_MENU_MP_MARK_PLACED] = "Метка поставлена на радаре друзей",
+    [UI_MENU_MP_STATE_LOCKED] = "Ждём Великий небесный остров",
+    [UI_MENU_MP_PILL_LOCKED] = "закрыто",
+    [UI_MENU_MP_LOCKED_TITLE] = "Сначала доберитесь до Великого небесного острова",
+    [UI_MENU_MP_LOCKED_BODY] = "Комнаты открываются, когда Линк просыпается на Великом небесном острове, после пролога под "
+        "замком. Игра подключится сама, как только сохранится там.",
+    [UI_MENU_MP_SLOTS_TITLE] = "До четырёх игроков, у каждого свой цвет",
+    [UI_MENU_MP_SLOT_FREE] = "свободно",
+    [UI_MENU_MP_COLOR_GREEN] = "Зелёный",
+    [UI_MENU_MP_COLOR_RED] = "Красный",
+    [UI_MENU_MP_COLOR_BLUE] = "Синий",
+    [UI_MENU_MP_COLOR_PURPLE] = "Фиолетовый",
+    [UI_MENU_MP_NAME_HINT] = "Так вас увидят друзья.",
+    [UI_MENU_MP_SERVER_HINT] = "Адрес, который даёт хозяин. Хозяин открывает комнату на вкладке «Мультиплеер» лаунчера.",
+    [UI_MENU_MP_PASSWORD_HINT] = "Только если у комнаты есть пароль.",
+    [UI_MENU_MP_RETRY_HINT] = "Проверьте адрес и что хозяин открыл комнату. Не в одной сети обоим нужен один VPN (Radmin, "
+        "Tailscale или ZeroTier).",
     [UI_MENU_ACH_POPUP] = "Уведомления о достижениях",
     [UI_MENU_ACH_POPUP_DESC] = "Уведомление вверху экрана, когда открывается достижение. Достижения проверяются при "
                                "каждом сохранении игры, поэтому уведомление приходит со следующим сохранением.",
@@ -1620,8 +1653,9 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
                                   "compilados, que é quando o jogo pode engasgar por um instante.",
     [UI_MENU_TOAST_SHADERS] = "Compilando shaders (%u)",
     [UI_MENU_TAB_MULTIPLAYER] = "Multijogador",
-    [UI_MENU_MP_INTRO] = "Jogue junto com amigos, cada um no seu mundo: a sala compartilha o progresso, as conquistas e "
-        "um chat. Um de vocês abre a sala (atalho Servidor Multijogador), ou todos entram num servidor na internet.",
+    [UI_MENU_MP_INTRO] = "Jogue junto com até três amigos, cada um no seu mundo, como os quatro Links de Four Swords: a "
+        "sala compartilha o progresso, as conquistas, a voz e um chat, e mostra cada amigo como um Link "
+        "da cor dele.",
     [UI_MENU_MP_NAME] = "Seu nome",
     [UI_MENU_MP_SERVER] = "Servidor (endereço:porta)",
     [UI_MENU_MP_PASSWORD] = "Senha da sala",
@@ -1695,6 +1729,22 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_MP_LAYER_DEPTHS] = "profundezas",
     [UI_MENU_MP_HINT_MARK] = "%s: marcar o lugar no radar dos amigos",
     [UI_MENU_MP_MARK_PLACED] = "Marcador colocado no radar dos amigos",
+    [UI_MENU_MP_STATE_LOCKED] = "Esperando a Ilha do Céu",
+    [UI_MENU_MP_PILL_LOCKED] = "bloqueado",
+    [UI_MENU_MP_LOCKED_TITLE] = "Chegue à Ilha do Céu primeiro",
+    [UI_MENU_MP_LOCKED_BODY] = "As salas abrem quando o Link acorda na Grande Ilha do Céu, depois do começo embaixo do castelo. "
+        "O jogo entra sozinho assim que salvar lá.",
+    [UI_MENU_MP_SLOTS_TITLE] = "Até quatro jogadores, cada um com sua cor",
+    [UI_MENU_MP_SLOT_FREE] = "livre",
+    [UI_MENU_MP_COLOR_GREEN] = "Verde",
+    [UI_MENU_MP_COLOR_RED] = "Vermelho",
+    [UI_MENU_MP_COLOR_BLUE] = "Azul",
+    [UI_MENU_MP_COLOR_PURPLE] = "Roxo",
+    [UI_MENU_MP_NAME_HINT] = "Como os amigos vão te ver.",
+    [UI_MENU_MP_SERVER_HINT] = "O endereço que o anfitrião te passar. Quem hospeda abre a sala no launcher, aba Multijogador.",
+    [UI_MENU_MP_PASSWORD_HINT] = "Só se a sala tiver senha.",
+    [UI_MENU_MP_RETRY_HINT] = "Confira o endereço e se o anfitrião está com a sala aberta. Fora da mesma rede, os dois precisam "
+        "da mesma VPN (Radmin, Tailscale ou ZeroTier).",
     [UI_MENU_ACH_POPUP] = "Avisos de conquista",
     [UI_MENU_ACH_POPUP_DESC] = "Um aviso no alto da tela quando uma conquista é desbloqueada. As conquistas são "
                                "verificadas a cada salvamento do jogo, então o aviso chega com o próximo salvamento.",

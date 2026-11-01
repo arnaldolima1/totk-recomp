@@ -1471,9 +1471,21 @@ static void mp_voice_line(float scale) {
 // ---- the Multiplayer tab (net_mp.c): a banner with the room and its state over sub-pages (players, group
 // challenges, multiplayer achievements, chat, connection); before joining, the connection page alone. The text fields
 // write totk.ini when they lose the keyboard.
-static void mp_field(const char *key, UiTextId label, char *buf, size_t cap, ImGuiInputTextFlags flags, float w) {
+// A numbered field of the connection page: the step's number in a ring, its label, the box and a hint under it.
+static void mp_field(const char *key, int step, UiTextId label, UiTextId hint, char *buf, size_t cap,
+                     ImGuiInputTextFlags flags, float w, float scale) {
     ImGui::PushID(key);
-    ImGui::TextColored(kUiMuted, "%s", menu_text(label));
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImFont *font = ImGui::GetFont();
+    float fs = ImGui::GetFontSize(), r = fs * 0.5f;
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    char num[4];
+    snprintf(num, sizeof num, "%d", step);
+    ImVec2 c(p.x + r, p.y + fs * 0.5f), ns = font->CalcTextSizeA(fs * 0.7f, FLT_MAX, 0, num);
+    dl->AddCircle(c, r, ui_col(kUiGold, 0.7f), 20, 1.4f * scale);
+    dl->AddText(font, fs * 0.7f, ImVec2(c.x - ns.x / 2, c.y - ns.y / 2), ui_col(kUiGoldHi), num);
+    dl->AddText(font, fs, ImVec2(p.x + r * 2 + 8 * scale, p.y), ui_col(kUiCream), menu_text(label));
+    ImGui::Dummy(ImVec2(w, fs + 6 * scale));
     ImGui::SetNextItemWidth(w);
     ImGui::InputText("##v", buf, cap, flags);
     if (ImGui::IsItemDeactivatedAfterEdit()) {
@@ -1481,6 +1493,13 @@ static void mp_field(const char *key, UiTextId label, char *buf, size_t cap, ImG
         cfg_save();
         mp_reconnect();
     }
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + w);
+    ImGui::PushStyleColor(ImGuiCol_Text, kUiMuted);
+    ImGui::SetWindowFontScale(0.8f);
+    ImGui::TextWrapped("%s", menu_text(hint));
+    ImGui::SetWindowFontScale(1.0f);
+    ImGui::PopStyleColor();
+    ImGui::PopTextWrapPos();
     ImGui::PopID();
 }
 
@@ -1537,7 +1556,14 @@ static void mp_stat_icon(ImDrawList *dl, int stat, ImVec2 c, float r, ImU32 col)
 }
 
 // A colour of its own for each name (the avatars).
+// A player's colour: their room slot's, as the four Links of Four Swords wear them (green, red, blue, purple); it is
+// also their figure's hair. Before the room names the slots (an older server), one from a hash of the name.
+static const ImVec4 kSlotCol[MP_SLOTS] = {{0.36f, 0.80f, 0.33f, 1}, {0.93f, 0.31f, 0.27f, 1}, {0.32f, 0.53f, 0.98f, 1},
+                                          {0.70f, 0.42f, 0.93f, 1}};
+
 static ImVec4 mp_name_col(const char *name) {
+    int slot = mp_slot_of(name);
+    if (slot >= 0 && slot < MP_SLOTS) return kSlotCol[slot];
     uint32_t h = 2166136261u;
     for (const char *p = name; *p; p++) h = (h ^ (uint8_t)*p) * 16777619u;
     float hue = (h % 360) / 360.0f, r, g, b;
@@ -1566,6 +1592,45 @@ static bool mp_speaking(const char *name) {
 }
 
 // The connection page: the fields, the button, the state and the shortcuts.
+// The room's four slots, as the four Links of Four Swords: a shield per slot in its colour, with the player who holds it
+// (this game's own outlined brighter), or "free".
+static void mp_slots_row(const MpView &v, float scale) {
+    static const UiTextId kColName[MP_SLOTS] = {UI_MENU_MP_COLOR_GREEN, UI_MENU_MP_COLOR_RED, UI_MENU_MP_COLOR_BLUE,
+                                                UI_MENU_MP_COLOR_PURPLE};
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImFont *font = ImGui::GetFont();
+    float fs = ImGui::GetFontSize(), small = fs * 0.78f, w = ImGui::GetContentRegionAvail().x;
+    ImGui::TextColored(kUiMuted, "%s", menu_text(UI_MENU_MP_SLOTS_TITLE));
+    float gap = 12 * scale, cw = (w - gap * (MP_SLOTS - 1)) / MP_SLOTS, ch = fs * 2.9f, rr = 10 * scale;
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    for (int k = 0; k < MP_SLOTS; k++) {
+        const char *who = nullptr;
+        for (int i = 0; v.state == MP_CONNECTED && i < v.nplayers; i++)
+            if (v.players[i].slot == k) who = v.players[i].name;
+        bool mine = who && !strcmp(who, v.me);
+        ImVec4 col = kSlotCol[k];
+        ImVec2 a(p.x + k * (cw + gap), p.y), b(a.x + cw, a.y + ch);
+        dl->AddRectFilled(a, b, ui_col(col, who ? 0.17f : 0.05f), rr);
+        dl->AddRect(a, b, ui_col(col, mine ? 0.95f : who ? 0.55f : 0.28f), rr, 0, (mine ? 2.4f : 1.2f) * scale);
+        // the shield: a flat top, straight sides and a point, with a smaller one inside
+        float sx = a.x + ch * 0.42f, sy = a.y + ch * 0.5f, sr = ch * 0.3f;
+        ImVec2 sh[] = {{sx - sr, sy - sr}, {sx + sr, sy - sr}, {sx + sr, sy + sr * 0.15f}, {sx, sy + sr * 1.05f},
+                       {sx - sr, sy + sr * 0.15f}};
+        dl->AddConvexPolyFilled(sh, 5, ui_col(col, who ? 0.85f : 0.3f));
+        dl->AddPolyline(sh, 5, ui_col(kUiCream, who ? 0.7f : 0.25f), ImDrawFlags_Closed, 1.2f * scale);
+        float tx = sx + sr + 12 * scale, tw = b.x - tx - 8 * scale;
+        ImVec4 clip(tx, a.y, b.x - 6 * scale, b.y);
+        dl->AddText(font, fs, ImVec2(tx, a.y + ch * 0.5f - fs * 0.95f), who ? ui_col(kUiCream) : ui_col(kUiMuted, 0.8f),
+                    who ? who : menu_text(UI_MENU_MP_SLOT_FREE), nullptr, tw, &clip);
+        dl->AddText(font, small, ImVec2(tx, a.y + ch * 0.5f + fs * 0.08f), ui_col(col, who ? 1.0f : 0.6f),
+                    menu_text(kColName[k]), nullptr, tw, &clip);
+    }
+    ImGui::Dummy(ImVec2(w, ch + 12 * scale));
+}
+
+// The connection page: a notice while the save is still in the prologue, the room's slots, the three fields (name,
+// address, password) with a hint each, the join / leave button and the state, with what to check when the room
+// cannot be reached; then the voice line.
 static void mp_connection(const MpView &v, float scale) {
     static char name[32], server[128], password[64];
     static unsigned seen = ~0u;
@@ -1575,32 +1640,51 @@ static void mp_connection(const MpView &v, float scale) {
         snprintf(server, sizeof server, "%s", cfg_value("TOTK_MP_SERVER"));
         snprintf(password, sizeof password, "%s", cfg_value("TOTK_MP_PASSWORD"));
     }
-    float w = ImGui::GetContentRegionAvail().x, gap = 18 * scale;
-    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + w * 0.8f);
-    ImGui::TextColored(kUiMuted, "%s", menu_text(UI_MENU_MP_INTRO));
-    ImGui::PopTextWrapPos();
-    ImGui::Dummy(ImVec2(1, 6 * scale));
-    float fw = fminf((w - gap * 2) / 3, 360 * scale);
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImFont *font = ImGui::GetFont();
+    float w = ImGui::GetContentRegionAvail().x, gap = 18 * scale, fs = ImGui::GetFontSize();
+    if (v.state == MP_LOCKED) {   // the prologue: a card in the warning colour
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        float pad = 16 * scale, bw = w - pad * 2;
+        const char *body = menu_text(UI_MENU_MP_LOCKED_BODY);
+        float bh = font->CalcTextSizeA(fs * 0.85f, FLT_MAX, bw, body).y, h = pad * 2 + fs * 1.4f + bh;
+        dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ui_col(kUiWarn, 0.10f), 10 * scale);
+        dl->AddRect(p, ImVec2(p.x + w, p.y + h), ui_col(kUiWarn, 0.55f), 10 * scale, 0, 1.4f * scale);
+        dl->AddText(font, fs, ImVec2(p.x + pad, p.y + pad), ui_col(kUiWarn), menu_text(UI_MENU_MP_LOCKED_TITLE));
+        dl->AddText(font, fs * 0.85f, ImVec2(p.x + pad, p.y + pad + fs * 1.4f), ui_col(kUiCream), body, nullptr, bw);
+        ImGui::Dummy(ImVec2(w, h + 12 * scale));
+    } else {
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + w * 0.9f);
+        ImGui::TextColored(kUiMuted, "%s", menu_text(UI_MENU_MP_INTRO));
+        ImGui::PopTextWrapPos();
+        ImGui::Dummy(ImVec2(1, 6 * scale));
+    }
+    mp_slots_row(v, scale);
+    float fw = fminf((w - gap * 2) / 3, 380 * scale);
     ImGui::BeginGroup();
-    mp_field("TOTK_MP_NAME", UI_MENU_MP_NAME, name, sizeof name, 0, fw);
+    mp_field("TOTK_MP_NAME", 1, UI_MENU_MP_NAME, UI_MENU_MP_NAME_HINT, name, sizeof name, 0, fw, scale);
     ImGui::EndGroup();
     ImGui::SameLine(0, gap);
     ImGui::BeginGroup();
-    mp_field("TOTK_MP_SERVER", UI_MENU_MP_SERVER, server, sizeof server, 0, fw);
+    mp_field("TOTK_MP_SERVER", 2, UI_MENU_MP_SERVER, UI_MENU_MP_SERVER_HINT, server, sizeof server, 0, fw, scale);
     ImGui::EndGroup();
     ImGui::SameLine(0, gap);
     ImGui::BeginGroup();
-    mp_field("TOTK_MP_PASSWORD", UI_MENU_MP_PASSWORD, password, sizeof password, ImGuiInputTextFlags_Password, fw);
+    mp_field("TOTK_MP_PASSWORD", 3, UI_MENU_MP_PASSWORD, UI_MENU_MP_PASSWORD_HINT, password, sizeof password,
+             ImGuiInputTextFlags_Password, fw, scale);
     ImGui::EndGroup();
-    ImGui::Dummy(ImVec2(1, 8 * scale));
+    ImGui::Dummy(ImVec2(1, 10 * scale));
     bool on = cfg_bool("TOTK_MP");
-    ImGui::PushStyleColor(ImGuiCol_Button, on ? ImVec4(0.35f, 0.12f, 0.12f, 1) : ImVec4(0.08f, 0.32f, 0.27f, 1));
-    if (ImGui::Button(menu_text(on ? UI_MENU_MP_DISCONNECT : UI_MENU_MP_CONNECT), ImVec2(fw * 0.6f, 0))) {
+    ImGui::PushStyleColor(ImGuiCol_Button, on ? ImVec4(0.35f, 0.12f, 0.12f, 1) : ImVec4(0.08f, 0.38f, 0.31f, 1));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, on ? ImVec4(0.48f, 0.16f, 0.16f, 1) : ImVec4(0.10f, 0.50f, 0.41f, 1));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(22 * scale, 10 * scale));
+    if (ImGui::Button(menu_text(on ? UI_MENU_MP_DISCONNECT : UI_MENU_MP_CONNECT), ImVec2(fmaxf(fw * 0.7f, 200 * scale), 0))) {
         cfg_set("TOTK_MP", on ? "0" : "1");
         cfg_save();
         mp_reconnect();
     }
-    ImGui::PopStyleColor();
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(2);
     ImGui::SameLine(0, gap);
     char state[256];
     ImVec4 sc = kUiMuted;
@@ -1609,10 +1693,19 @@ static void mp_connection(const MpView &v, float scale) {
     case MP_CONNECTED: snprintf(state, sizeof state, menu_text(UI_MENU_MP_STATE_CONNECTED), v.room), sc = kUiZonai; break;
     case MP_RETRYING: snprintf(state, sizeof state, menu_text(UI_MENU_MP_STATE_RETRYING), v.server), sc = kUiWarn; break;
     case MP_REFUSED: snprintf(state, sizeof state, menu_text(UI_MENU_MP_STATE_REFUSED), v.error), sc = kUiDanger; break;
+    case MP_LOCKED: snprintf(state, sizeof state, "%s", menu_text(UI_MENU_MP_STATE_LOCKED)), sc = kUiWarn; break;
     default: snprintf(state, sizeof state, "%s", menu_text(UI_MENU_MP_STATE_OFF));
     }
-    ImGui::AlignTextToFramePadding();
+    float bh = ImGui::GetFrameHeight();
+    ImVec2 sp = ImGui::GetCursorScreenPos();
+    dl->AddCircleFilled(ImVec2(sp.x + 6 * scale, sp.y + bh * 0.5f), 5 * scale, ui_col(sc));
+    ImGui::SetCursorScreenPos(ImVec2(sp.x + 18 * scale, sp.y + (bh - fs) * 0.5f));
     ImGui::TextColored(sc, "%s", state);
+    if (v.state == MP_RETRYING) {   // what to check, under the state
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + w * 0.9f);
+        ImGui::TextColored(kUiMuted, "%s", menu_text(UI_MENU_MP_RETRY_HINT));
+        ImGui::PopTextWrapPos();
+    }
     ImGui::Dummy(ImVec2(1, 10 * scale));
     mp_voice_line(scale);
 }
@@ -1632,8 +1725,10 @@ static void mp_banner(const MpView &v, float scale) {
     dl->AddText(font, big, ImVec2(p.x + pad, p.y + (h - big) / 2), ui_col(kUiGoldHi), title);
     float tx = p.x + pad + font->CalcTextSizeA(big, FLT_MAX, 0, title).x + 14 * scale;
     // the state pill
-    const char *st = menu_text(v.state == MP_CONNECTED ? UI_MENU_MP_PILL_ON : v.state == MP_CONNECTING || v.state == MP_RETRYING
-                                                                               ? UI_MENU_MP_PILL_TRYING : UI_MENU_MP_PILL_OFF);
+    const char *st = menu_text(v.state == MP_CONNECTED                                 ? UI_MENU_MP_PILL_ON
+                               : v.state == MP_LOCKED                                  ? UI_MENU_MP_PILL_LOCKED
+                               : v.state == MP_CONNECTING || v.state == MP_RETRYING ? UI_MENU_MP_PILL_TRYING
+                                                                                       : UI_MENU_MP_PILL_OFF);
     ImVec4 sc = v.state == MP_CONNECTED ? kUiZonai : v.state == MP_REFUSED ? kUiDanger
               : v.state == MP_OFF ? kUiMuted : kUiWarn;
     float small = fs * 0.78f, pw = font->CalcTextSizeA(small, FLT_MAX, 0, st).x + 30 * scale, ph = small + 10 * scale;
