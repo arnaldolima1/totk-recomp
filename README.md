@@ -24,7 +24,7 @@ Report problems as issues, following [CONTRIBUTING.md](CONTRIBUTING.md).
 - Keyboard, mouse and gamepad with remapping, rumble and gyro
 - Xbox button prompts: a layout that keeps the Switch button positions and shows the Xbox labels
 - Shaders prepared at install instead of during play
-- Atmosphère cheat files: bring your own, switch cheats in the menu ([docs/cheats.md](docs/cheats.md))
+- Atmosphère cheats: files for 1.2.1 and 1.4.3 included, switch them in the menu, or bring your own ([docs/cheats.md](docs/cheats.md))
 
 ## Planned
 

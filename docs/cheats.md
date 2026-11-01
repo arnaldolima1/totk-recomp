@@ -1,8 +1,12 @@
 # Cheats
 
-The port reads Atmosphère cheat files, the format Switch homebrew and the emulators use. No cheats ship with the port: bring your own file for your game update.
+The port reads Atmosphère cheat files, the format Switch homebrew and the emulators use. The setup installs a cheat file for 1.2.1 and for 1.4.3, all cheats off: open the menu (F1) and switch them on the Cheats tab. The switches are saved under `[cheats]` in `totk.ini`.
 
-## Adding a cheat file
+The two files are from [MyNXCheats](https://github.com/Arch9SK7/MyNXCheats) by Skyla Kikari (Arch9SK7) and stay in `tools/data/cheats/` with that credit at the top. Only the 1.4.3 file has been tried in game.
+
+## Adding your own cheat file
+
+A file of your own replaces the one the setup installed. The setup never overwrites a file you changed.
 
 1. Find the cheat file for your update. It is named after the first 8 bytes of the game's build id:
 
@@ -14,7 +18,7 @@ The port reads Atmosphère cheat files, the format Switch homebrew and the emula
    The Cheats tab of the menu names the file the installed game reads, and `logs\totk.log` says `cheats: no cheats\<id>.txt` when it is missing.
 2. Put it in a `cheats` folder next to `totk.exe`: `cheats\277178B7DBA1B6D4.txt`.
 3. Run `TotK-Setup.exe` again on the same folder. It builds the cheats that change the game's code into the game (about three minutes); saves and settings are kept. A file with only data cheats works without this step.
-4. In game, open the menu (F1) and switch cheats on and off on the Cheats tab. The switches are saved under `[cheats]` in `totk.ini`.
+4. Switch the cheats on the Cheats tab of the menu.
 
 ## The file format
 

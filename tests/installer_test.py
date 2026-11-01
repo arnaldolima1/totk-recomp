@@ -239,6 +239,15 @@ class LiftKeyTest(unittest.TestCase):
         self.add_cheats('277178B7DBA1B6D4.txt', '[b]')
         self.assertNotEqual(self.key(), added)
 
+    def test_installed_bundled_file_keeps_the_key(self):
+        (self.dest / 'no-tools' / 'data' / 'cheats').mkdir(parents=True)
+        (self.dest / 'no-tools' / 'data' / 'cheats' / '277178B7DBA1B6D4.txt').write_text('[a]')
+        before = self.key()
+        self.add_cheats('277178B7DBA1B6D4.txt', '[a]')
+        self.assertEqual(self.key(), before)
+        self.add_cheats('277178B7DBA1B6D4.txt', '[edited by the player]')
+        self.assertNotEqual(self.key(), before)
+
     def test_status_file_keeps_the_key(self):
         self.add_cheats('277178B7DBA1B6D4.txt', '[a]')
         before = self.key()
