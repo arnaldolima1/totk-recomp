@@ -893,6 +893,85 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_OV_FMT_SIZE] = "%ux%u", [UI_MENU_OV_FMT_SCENE] = "%ux%u, %.0f%%",
     [UI_MENU_OV_FMT_FSR] = "AMD FSR 1, nitidez %d%%", [UI_MENU_OV_SCALE_NONE] = "nenhuma (1:1)",
     [UI_MENU_OV_SCALE_BILINEAR] = "bilinear",
+    [UI_MENU_FOV] = "Campo de visão",
+    [UI_MENU_FOV_DESC] = "Quanto do mundo a câmera mostra, em porcentagem do original do jogo. Só na versão 1.4.3 do "
+                         "jogo.",
+    [UI_MENU_SHADOW_RES] = "Tamanho do mapa de sombras",
+    [UI_MENU_SHADOW_RES_DESC] = "Tamanho do mapa de sombras do sol. O tamanho do jogo muda com a vista, até cerca de "
+                                "400 perto do chão, então as sombras das folhas ficam quadriculadas e pulam; um "
+                                "tamanho fixo as deixa paradas e mais nítidas. Acima de 1024 as sombras custam mais "
+                                "tempo de GPU e memória de vídeo.",
+    [UI_MENU_SHADOW_RES_GAME] = "Do jogo (varia)",
+    [UI_MENU_ANISO] = "Filtragem de texturas",
+    [UI_MENU_ANISO_DESC] = "Filtragem anisotrópica das texturas de superfície: chão, estradas e paredes vistos em "
+                           "ângulo raso continuam nítidos ao longe em vez de borrar. Jogo: o nível que o jogo pede, "
+                           "como no Switch.",
+    [UI_MENU_ANISO_GAME] = "Jogo",
+    [UI_MENU_COLOR] = "Cor",
+    [UI_MENU_COLOR_PRESET] = "Perfil de cor",
+    [UI_MENU_COLOR_PRESET_DESC] = "Define os quatro valores abaixo. Vívido: mais contraste e saturação, sombras um "
+                                  "pouco mais abertas (feito para telas OLED). Clareza: um pouco mais de contraste, "
+                                  "saturação e brilho. Mexer em um valor torna o perfil Personalizado. O HUD muda com "
+                                  "a imagem; este menu não.",
+    [UI_MENU_COLOR_DEFAULT] = "Do jogo",
+    [UI_MENU_COLOR_VIVID] = "Vívido (OLED)",
+    [UI_MENU_COLOR_CLARITY] = "Clareza",
+    [UI_MENU_COLOR_CUSTOM] = "Personalizado",
+    [UI_MENU_COLOR_BRIGHTNESS] = "Brilho",
+    [UI_MENU_COLOR_BRIGHTNESS_DESC] = "Somado a todas as cores; 0 não muda nada.",
+    [UI_MENU_COLOR_CONTRAST] = "Contraste",
+    [UI_MENU_COLOR_CONTRAST_DESC] = "Afasta as cores do cinza médio (acima de 100 %) ou as aproxima dele; 100 % não "
+                                    "muda nada.",
+    [UI_MENU_COLOR_SATURATION] = "Saturação",
+    [UI_MENU_COLOR_SATURATION_DESC] = "Força da cor em relação ao cinza; 100 % não muda nada.",
+    [UI_MENU_COLOR_GAMMA] = "Gama",
+    [UI_MENU_COLOR_GAMMA_DESC] = "Abaixo de 1 clareia os tons escuros e médios, acima de 1 os escurece; 1 não muda "
+                                 "nada.",
+    [UI_MENU_HDR_GROUP] = "HDR",
+    [UI_MENU_HDR] = "Saída HDR",
+    [UI_MENU_HDR_DESC] = "Realces brilhantes em uma tela HDR. Precisa do HDR ligado no Windows (\"Usar HDR\") ou num "
+                         "compositor Wayland com gerenciamento de cor; sem isso a imagem continua SDR. Vale após "
+                         "reiniciar. O perfil de cor acima é para SDR e não é usado em HDR.",
+    [UI_MENU_HDR_PEAK] = "Brilho máximo",
+    [UI_MENU_HDR_PEAK_DESC] = "O pico da sua tela em nits; os realces mais claros param aí.",
+    [UI_MENU_HDR_GAME] = "Brilho do jogo",
+    [UI_MENU_HDR_GAME_DESC] = "Nits do branco da imagem (branco de papel). 203 é a referência de HDR; aumente num "
+                              "ambiente claro.",
+    [UI_MENU_HDR_UI] = "Brilho do HUD e do menu",
+    [UI_MENU_HDR_UI_DESC] = "Nits do branco do HUD e deste menu.",
+    [UI_MENU_PROMPTS] = "Ícones de botões",
+    [UI_MENU_PROMPTS_DESC] = "Os botões de qual controle os ícones do jogo mostram. Nintendo: os do próprio jogo. "
+                             "Xbox: LB, RB, LT, RT, Menu, Exibir e uma cruz direcional, e A, B, X e Y com a letra do "
+                             "botão que o layout acima aperta (com Nintendo (A à direita) o botão da direita tem a "
+                             "letra B, então os ícones de A mostram B). O jogo lê os ícones ao iniciar, então eles "
+                             "mudam depois de reiniciar. Eles fazem parte dos arquivos do jogo, então um botão "
+                             "remapeado em Controles continua com o ícone antigo na tela.",
+    [UI_MENU_PROMPTS_NINTENDO] = "Nintendo",
+    [UI_MENU_PROMPTS_XBOX] = "Xbox",
+    [UI_MENU_PROMPTS_MISSING] = "faltam os arquivos dos ícones: execute a instalação de novo",
+    [UI_MENU_PROMPTS_FAILED] = "arquivos dos ícones danificados: execute a instalação de novo",
+    [UI_MENU_PROMPTS_RESTART] = "os ícones mudam após reiniciar",
+    [UI_MENU_PROMPTS_OFF_SHAPE] = "desligados numa resolução de jogo que não é 16:9",
+    [UI_MENU_PROMPTS_OFF_MODS] = "desligados: um mod de RomFS substitui os arquivos deles",
+    [UI_MENU_PROMPTS_OFF_PATCHES] = "desligados enquanto TOTK_ROMFS_PATCHES está definido",
+    [UI_MENU_RESTART] = "Reiniciar agora",
+    [UI_MENU_RESTART_DESC] = "Fecha o jogo e o abre de novo com os novos ícones. O progresso desde o último "
+                             "salvamento é perdido.",
+    [UI_MENU_RESTART_CONFIRM] = "Reiniciar o jogo agora? O progresso desde o último salvamento é perdido.",
+    [UI_MENU_RESTART_YES] = "Reiniciar",
+    [UI_MENU_RESTART_SAVING] = "O jogo está salvando: dá para reiniciar em um instante.",
+    [UI_MENU_STICK_SENS] = "Velocidade da câmera (analógico)",
+    [UI_MENU_STICK_SENS_DESC] = "Multiplica a velocidade da câmera do analógico direito do jogo, incluindo a máxima, "
+                                "em cada uma das cinco sensibilidades de câmera do jogo. O mouse mantém a própria "
+                                "configuração.",
+    [UI_MENU_WALK_KEY] = "Tecla de andar",
+    [UI_MENU_WALK_KEY_DESC] = "Segure para inclinar os analógicos do teclado só em parte, assim o teclado anda em vez "
+                              "de correr. A intensidade do andar define quanto. Controle e mouse não são afetados.",
+    [UI_MENU_WALK_KEY_TAKEN] = "também %s",
+    [UI_MENU_WALK_SCALE] = "Intensidade do andar",
+    [UI_MENU_WALK_SCALE_DESC] = "A inclinação dos analógicos do teclado enquanto a tecla de andar está segura. Metade "
+                                "é andar, a inclinação total é correr.",
+    [UI_MENU_OV_SCALE_DOWN] = "bilinear (o FSR só amplia)",
 };
 
 // Simplified Chinese: this row covers the software keyboard and the whole menu, so the menu and the overlay read Chinese
@@ -1302,6 +1381,48 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_OV_FMT_FSR] = "AMD FSR 1，锐度 %d%%",
     [UI_MENU_OV_SCALE_NONE] = "无（1:1）",
     [UI_MENU_OV_SCALE_BILINEAR] = "双线性",
+    [UI_MENU_SHADOW_RES] = "阴影贴图尺寸",
+    [UI_MENU_SHADOW_RES_DESC] = "太阳阴影贴图的尺寸。游戏自身的尺寸随视角变化，靠近地面时降到约 400，因此树叶阴影显得块状并且跳动；固定尺寸能让阴影稳定、更清晰。高于 1024 时阴影会占用更多 "
+                                "GPU 时间和显存。",
+    [UI_MENU_SHADOW_RES_GAME] = "游戏默认（会变化）",
+    [UI_MENU_ANISO] = "纹理过滤",
+    [UI_MENU_ANISO_DESC] = "表面纹理的各向异性过滤：以小角度看到的地面、道路和墙壁在远处依然清晰，而不会模糊。游戏：使用游戏请求的级别，与 Switch 上相同。",
+    [UI_MENU_ANISO_GAME] = "游戏",
+    [UI_MENU_HDR_GROUP] = "HDR",
+    [UI_MENU_HDR] = "HDR 输出",
+    [UI_MENU_HDR_DESC] = "在 HDR 显示器上呈现明亮的高光。需要在 Windows 中开启 HDR（“使用 HDR”），或使用带色彩管理的 Wayland 合成器；否则画面保持 "
+                         "SDR。重启后生效。上方的色彩配置用于 SDR，在 HDR 下不使用。",
+    [UI_MENU_HDR_PEAK] = "峰值亮度",
+    [UI_MENU_HDR_PEAK_DESC] = "显示器的峰值亮度（尼特）；最亮的高光止于此。",
+    [UI_MENU_HDR_GAME] = "游戏亮度",
+    [UI_MENU_HDR_GAME_DESC] = "画面白色（纸白）的尼特值。203 为 HDR 参考值；在明亮的房间里可调高。",
+    [UI_MENU_HDR_UI] = "HUD 和菜单亮度",
+    [UI_MENU_HDR_UI_DESC] = "HUD 和本菜单白色的尼特值。",
+    [UI_MENU_PROMPTS] = "按键提示",
+    [UI_MENU_PROMPTS_DESC] = "游戏的按键提示显示哪种手柄的按键。Nintendo：游戏原有的提示。Xbox：LB、RB、LT、RT、Menu、View 和十字键，以及上方布局所按下的按键上标注的 "
+                             "A、B、X、Y（使用 Nintendo（A 在右）时右侧按键标为 B，因此 A 的提示显示 "
+                             "B）。游戏在启动时读取按键提示，因此重启后才会改变。提示属于游戏文件，在“操作”中重新映射的按键在屏幕上仍显示原来的提示。",
+    [UI_MENU_PROMPTS_NINTENDO] = "Nintendo",
+    [UI_MENU_PROMPTS_XBOX] = "Xbox",
+    [UI_MENU_PROMPTS_MISSING] = "缺少按键提示文件：请重新运行安装程序",
+    [UI_MENU_PROMPTS_FAILED] = "按键提示文件已损坏：请重新运行安装程序",
+    [UI_MENU_PROMPTS_RESTART] = "按键提示重启后生效",
+    [UI_MENU_PROMPTS_OFF_SHAPE] = "游戏分辨率不是 16:9 时关闭",
+    [UI_MENU_PROMPTS_OFF_MODS] = "已关闭：RomFS 模组替换了它们的文件",
+    [UI_MENU_PROMPTS_OFF_PATCHES] = "设置了 TOTK_ROMFS_PATCHES 时关闭",
+    [UI_MENU_RESTART] = "立即重启",
+    [UI_MENU_RESTART_DESC] = "关闭游戏并以新的按键提示重新启动。上次存档之后的进度将会丢失。",
+    [UI_MENU_RESTART_CONFIRM] = "现在重启游戏？上次存档之后的进度将会丢失。",
+    [UI_MENU_RESTART_YES] = "重启",
+    [UI_MENU_RESTART_SAVING] = "游戏正在存档：稍后即可重启。",
+    [UI_MENU_STICK_SENS] = "摇杆镜头速度",
+    [UI_MENU_STICK_SENS_DESC] = "在游戏的五档镜头灵敏度下，按倍数调整右摇杆的镜头转动速度（包括最高速度）。鼠标使用自己的设置。",
+    [UI_MENU_WALK_KEY] = "步行键",
+    [UI_MENU_WALK_KEY_DESC] = "按住时键盘模拟的摇杆只推到一部分，使键盘操作走路而不是奔跑。推动幅度由步行幅度决定。手柄和鼠标不受影响。",
+    [UI_MENU_WALK_KEY_TAKEN] = "同时为 %s",
+    [UI_MENU_WALK_SCALE] = "步行幅度",
+    [UI_MENU_WALK_SCALE_DESC] = "按住步行键时键盘摇杆的推动幅度。一半为走路，推满为奔跑。",
+    [UI_MENU_OV_SCALE_DOWN] = "双线性（FSR 只能放大）",
 };
 
 #define SWKBD_ONLY(name, ...) static const char *const name[UI_TEXT_COUNT] = {SWKBD(__VA_ARGS__)}
