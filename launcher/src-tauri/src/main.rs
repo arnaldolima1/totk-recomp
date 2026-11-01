@@ -7,6 +7,7 @@
 mod ini;
 mod mods;
 mod release;
+mod room;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -52,6 +53,7 @@ struct Status {
     downloading: bool,
     dev: bool,                       // the release is a repository checkout
     repo: String,                    // the GitHub repository the releases come from
+    multiplayer: bool,               // the release has the room server (tools/mp_server.py): the Multiplayer tab shows
 }
 
 #[derive(Serialize, Clone)]
@@ -215,6 +217,7 @@ fn status(app: AppHandle, procs: State<Procs>) -> Status {
         building: procs.build.lock().unwrap().is_some(),
         downloading: procs.downloading.load(Ordering::Relaxed),
         repo: source(&app).repo,
+        multiplayer: release_root(&app).is_some_and(|r| r.join("tools/mp_server.py").is_file()),
         running: procs.game.lock().unwrap().is_some(),
         home: h.to_string_lossy().into_owned(),
     }
@@ -278,6 +281,31 @@ fn custom_art(app: AppHandle) -> Art {
         }
     }
     art
+}
+
+/// The room this launcher hosts (room.rs): its state, the addresses to give friends and who is in it.
+#[tauri::command]
+fn room_info(room: State<room::Room>) -> room::RoomInfo {
+    room.info()
+}
+
+#[tauri::command]
+async fn room_start(app: AppHandle, name: String, port: u16, password: String) -> Result<room::RoomInfo, String> {
+    let release = release_root(&app).ok_or("Escolha o instalador em Instalação primeiro.")?;
+    let py = python(&release).ok_or("O instalador não tem o Python dele (python/).")?;
+    let room = app.state::<room::Room>();
+    room.start(&app, &py, &release, &name, if port == 0 { room::DEFAULT_PORT } else { port }, &password)
+}
+
+#[tauri::command]
+fn room_stop(room: State<room::Room>) {
+    room.stop();
+}
+
+/// Whether a room answers at an address (room.rs test): the milliseconds it took, or why not.
+#[tauri::command]
+async fn mp_test(server: String) -> Result<u64, String> {
+    tauri::async_runtime::spawn_blocking(move || room::test(&server)).await.map_err(|e| e.to_string())?
 }
 
 /// `--view <name>` on the command line: the tab to open on (screenshots, shortcuts).
@@ -1000,6 +1028,7 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(Procs::default())
+        .manage(room::Room::default())
         .setup(|app| {
             pad_thread(app.handle().clone());
             Ok(())
@@ -1007,11 +1036,13 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             status, set_home, set_release, get_source, set_source, installer_text, start_view, custom_art, read_ini, write_ini, releases,
             download_release, cancel_download, find_game_files, mods_list, mods_apply, mods_add, mods_adapt, mods_remove, start_build, cancel_build, launch_game, stop_game, log_tail, open_path,
+            room_info, room_start, room_stop, mp_test,
         ])
         .build(tauri::generate_context!())
         .expect("launcher")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
+                app.state::<room::Room>().stop();   // the room closes with the launcher that opened it
                 stop_build_on_exit(app);
             }
         });

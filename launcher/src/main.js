@@ -94,7 +94,11 @@ function showView(name) {
   $$('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${name}`));
   document.body.classList.toggle('panel-open', name !== 'home');
 }
-$$('.tab').forEach((t) => (t.onclick = () => { showView(t.dataset.view); if (t.dataset.view === 'mods') loadMods(); }));
+$$('.tab').forEach((t) => (t.onclick = () => {
+  showView(t.dataset.view);
+  if (t.dataset.view === 'mods') loadMods();
+  if (t.dataset.view === 'multiplayer') loadRoom();
+}));
 $$('[data-set]').forEach((b) => (b.onclick = () => {
   $$('[data-set]').forEach((x) => x.classList.toggle('active', x === b));
   $$('.set-page').forEach((pg) => pg.classList.toggle('active', pg.id === `set-${b.dataset.set}`));
@@ -124,6 +128,9 @@ async function refresh() {
   renderInstallForm();
   renderRelease();
   renderUpdates();
+  // the Multiplayer tab: only for a release with the room server (main.rs status.multiplayer)
+  $('#tab-mp').classList.toggle('hidden', !status.multiplayer);
+  if (!status.multiplayer && $('#view-multiplayer').classList.contains('active')) showView('home');
 }
 
 // The game files: a first install needs all of them; a folder with totk-install.json resumes or updates with only
@@ -1192,6 +1199,73 @@ function playIntro() {
   addEventListener('keydown', end);
   setTimeout(end, 3600);
 }
+
+// ---------------------------------------------------------------- multiplayer (main.rs room_*, mp_test; room.rs)
+// Hosting runs the release's room server and lists the addresses friends type in the game; joining is the mp_* keys
+// of totk.ini (data-ini above). The four shields are the room's slots, coloured as the four Links of Four Swords.
+const ADDR_KIND = { lan: 'Rede de casa', radmin: 'Radmin VPN', tailscale: 'Tailscale', zerotier: 'ZeroTier', other: 'Outra rede' };
+let room = { running: false, addresses: [], players: [], lines: [] };
+function setMpState(id, cls, text) {
+  const el = $(id);
+  el.className = `mp-state ${cls}`;
+  el.querySelector('span').textContent = text;
+}
+function renderRoom() {
+  const on = room.running;
+  $('#mp-open').classList.toggle('hidden', on);
+  $('#mp-close').classList.toggle('hidden', !on);
+  $('#mp-join-own').classList.toggle('hidden', !on);
+  for (const id of ['#mp-room-name', '#mp-port', '#mp-room-pass']) $(id).disabled = on;
+  const n = room.players.length;
+  setMpState('#mp-host-state', on ? 'on' : '', on ? `Sala aberta na porta ${room.port} · ${n} de 4 jogadores` : 'Sala fechada');
+  $('#mp-addresses').innerHTML = on ? room.addresses.map((a) => `
+    <div class="mp-addr"><span class="kind ${esc(a.kind)}">${esc(ADDR_KIND[a.kind] || a.kind)}</span><code>${esc(a.address)}</code>
+    <button class="ghost small" data-copy="${esc(a.address)}">Copiar</button></div>`).join('')
+    || '<p class="hint">Nenhum endereço de rede encontrado: confira a conexão deste PC.</p>' : '';
+  $$('#mp-addresses [data-copy]').forEach((b) => (b.onclick = async () => {
+    try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = 'Copiado'; setTimeout(() => (b.textContent = 'Copiar'), 1400); }
+    catch { b.textContent = 'Falhou'; }
+  }));
+  for (let k = 0; k < 4; k++) {
+    const p = on ? room.players.find((x) => x.slot === k) : null;
+    $(`#mp-slot-${k}`).textContent = p ? p.name : 'livre';
+    $(`#mp-slot-${k}`).parentElement.classList.toggle('taken', !!p);
+  }
+  $('#mp-log').textContent = room.lines.join('\n');
+}
+async function loadRoom() {
+  try { room = await invoke('room_info'); } catch { /* the backend has no room yet */ }
+  if (!room.running && room.name && !$('#mp-room-name').value) $('#mp-room-name').value = room.name;
+  renderRoom();
+}
+listen('room-line', () => loadRoom());
+$('#mp-open').onclick = async () => {
+  $('#mp-open').disabled = true;
+  setMpState('#mp-host-state', 'busy', 'Abrindo a sala…');
+  try {
+    room = await invoke('room_start', { name: $('#mp-room-name').value, port: +$('#mp-port').value || 5577, password: $('#mp-room-pass').value });
+    prefs.roomName = $('#mp-room-name').value; prefs.roomPort = $('#mp-port').value; savePrefs();
+  } catch (e) { showError('Não foi possível abrir a sala', String(e)); }
+  $('#mp-open').disabled = false;
+  renderRoom();
+};
+$('#mp-close').onclick = async () => { await invoke('room_stop'); await loadRoom(); };
+$('#mp-join-own').onclick = async () => {   // the host plays too: this PC's own room
+  const server = `127.0.0.1:${room.port}`;
+  $('#mp-server').value = server;
+  await saveIni({ mp_server: server, mp_password: $('#mp-room-pass').value, mp: '1' });
+  iniToControls();
+};
+$('#mp-test').onclick = async () => {
+  const server = $('#mp-server').value;
+  setMpState('#mp-test-state', 'busy', `Testando ${server}…`);
+  try {
+    const ms = await invoke('mp_test', { server });
+    setMpState('#mp-test-state', 'on', `A sala respondeu (${ms} ms). Pode entrar pelo jogo.`);
+  } catch (e) { setMpState('#mp-test-state', 'bad', String(e)); }
+};
+if (prefs.roomName) $('#mp-room-name').value = prefs.roomName;
+if (prefs.roomPort) $('#mp-port').value = prefs.roomPort;
 
 // ---------------------------------------------------------------- start
 // Language (i18n.js): the saved choice, else the system's

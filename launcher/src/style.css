@@ -685,3 +685,44 @@ label.toggle.pad-focus { outline-offset: 0; }
 .ok-note { color: var(--zonai); }
 .ok-note:empty { display: none; }
 .mod-toolbar button { white-space: nowrap; }
+
+/* ---- Multiplayer: the four slots as Four Swords shields, the host and join cards, the addresses to share */
+.mp-links { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 4px 0 18px; }
+.mp-link {
+  display: grid; grid-template-columns: 40px 1fr; grid-template-rows: auto auto; column-gap: 12px; align-items: center;
+  padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--c) 35%, transparent); border-radius: 10px;
+  background: color-mix(in srgb, var(--c) 7%, transparent); transition: background 0.3s, border-color 0.3s;
+}
+.mp-link svg { grid-row: span 2; width: 40px; height: 46px; }
+.mp-link svg path { fill: color-mix(in srgb, var(--c) 45%, transparent); stroke: var(--text); stroke-width: 1.4; stroke-opacity: 0.4; }
+.mp-link svg .tri { fill: var(--gold-hi); stroke: none; opacity: 0.55; }
+.mp-link b { color: var(--c); font: 700 13px var(--serif); letter-spacing: 0.08em; }
+.mp-link small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-link.taken { background: color-mix(in srgb, var(--c) 18%, transparent); border-color: var(--c); }
+.mp-link.taken svg path { fill: var(--c); }
+.mp-link.taken small { color: var(--text); font-weight: 600; }
+.mp-cards { align-items: start; gap: 16px; }
+.mp-card {
+  padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255, 255, 255, 0.025);
+}
+.mp-card h3 { margin: 0 0 6px; color: var(--gold-hi); font: 700 15px var(--serif); letter-spacing: 0.06em; }
+.mp-card input:disabled { opacity: 0.55; }
+.mp-tips { margin-top: 16px; }
+.mp-tips ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 13.5px; }
+.mp-tips li { margin: 4px 0; }
+.mp-tips b, .mp-tips em { color: var(--text); font-style: normal; }
+.mp-state { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; font-size: 13.5px; color: var(--muted); }
+.mp-state i { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); opacity: 0.6; flex: none; }
+.mp-state.on { color: var(--zonai); }
+.mp-state.on i { background: var(--zonai); opacity: 1; box-shadow: 0 0 10px var(--zonai-dim); }
+.mp-state.busy i { background: var(--gold); opacity: 1; animation: mp-pulse 1s ease-in-out infinite; }
+.mp-state.bad { color: var(--danger); }
+.mp-state.bad i { background: var(--danger); opacity: 1; }
+@keyframes mp-pulse { 50% { opacity: 0.3; } }
+.mp-addresses { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.mp-addr { display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 10px; border-radius: 8px; background: rgba(0, 0, 0, 0.25); }
+.mp-addr code { flex: 1; color: var(--gold-hi); font-size: 14px; user-select: text; }
+.mp-addr .kind { font-size: 11.5px; padding: 2px 8px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); color: var(--muted); white-space: nowrap; }
+.mp-addr .kind.lan { color: var(--zonai); }
+.mp-addr .kind.radmin, .mp-addr .kind.tailscale, .mp-addr .kind.zerotier { color: var(--gold-hi); }
+@media (max-width: 900px) { .mp-links { grid-template-columns: repeat(2, 1fr); } }

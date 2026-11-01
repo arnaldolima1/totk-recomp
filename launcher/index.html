@@ -38,6 +38,7 @@
       <button class="tab active" data-view="home">Início</button>
       <button class="tab" data-view="install">Instalação</button>
       <button class="tab" data-view="mods">Mods</button>
+      <button class="tab hidden" data-view="multiplayer" id="tab-mp">Multijogador</button>
       <button class="tab" data-view="settings">Configurações</button>
       <button class="tab" data-view="about">Sobre</button>
     </nav>
@@ -173,6 +174,62 @@
         <p class="hint" id="mods-status"></p>
         <div class="mod-list" id="mods-list"></div>
         <p class="hint small-print">Dois mods mexendo no mesmo arquivo: vale o que está mais acima (setas). Mods de código (<code>exefs</code>) não são aceitos pelo recomp.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- MULTIPLAYER: shown when the release has the room server (main.rs status.multiplayer, room.rs). Hosting runs the
+         release's tools/mp_server.py; joining writes the mp_* keys of totk.ini, which the game reads live. -->
+    <section class="view" id="view-multiplayer">
+      <div class="panel wide">
+        <h2>Multijogador</h2>
+        <p class="lead">Até quatro jogadores, cada um no seu mundo, como os quatro Links de <b>Four Swords</b>: progresso, conquistas, voz e chat compartilhados, e cada amigo aparece no seu jogo como um Link da cor dele.</p>
+        <div class="panel-scroll">
+        <div class="mp-links" id="mp-links">
+          <div class="mp-link" style="--c:#5bcc54"><svg viewBox="0 0 40 46" aria-hidden="true"><path d="M3 3h34v17c0 11-8 18-17 23C11 38 3 31 3 20z"/><path class="tri" d="M20 13l7 12H13z"/></svg><b>Verde</b><small id="mp-slot-0">livre</small></div>
+          <div class="mp-link" style="--c:#ee4f45"><svg viewBox="0 0 40 46" aria-hidden="true"><path d="M3 3h34v17c0 11-8 18-17 23C11 38 3 31 3 20z"/><path class="tri" d="M20 13l7 12H13z"/></svg><b>Vermelho</b><small id="mp-slot-1">livre</small></div>
+          <div class="mp-link" style="--c:#5287fa"><svg viewBox="0 0 40 46" aria-hidden="true"><path d="M3 3h34v17c0 11-8 18-17 23C11 38 3 31 3 20z"/><path class="tri" d="M20 13l7 12H13z"/></svg><b>Azul</b><small id="mp-slot-2">livre</small></div>
+          <div class="mp-link" style="--c:#b36bed"><svg viewBox="0 0 40 46" aria-hidden="true"><path d="M3 3h34v17c0 11-8 18-17 23C11 38 3 31 3 20z"/><path class="tri" d="M20 13l7 12H13z"/></svg><b>Roxo</b><small id="mp-slot-3">livre</small></div>
+        </div>
+        <div class="grid2 mp-cards">
+          <div class="mp-card" id="mp-host">
+            <h3>Hospedar uma sala</h3>
+            <p class="hint">Abra a sala aqui e passe um dos endereços abaixo para os amigos. Ela fica aberta enquanto o launcher estiver aberto.</p>
+            <label class="field"><span>Nome da sala</span><input id="mp-room-name" placeholder="Sala de Hyrule" maxlength="40" spellcheck="false" /></label>
+            <div class="grid2">
+              <label class="field"><span>Porta</span><input id="mp-port" type="number" min="1024" max="65535" value="5577" /></label>
+              <label class="field"><span>Senha <small>(opcional)</small></span><input id="mp-room-pass" type="password" maxlength="40" spellcheck="false" /></label>
+            </div>
+            <div class="actions left">
+              <button class="gold" id="mp-open">Abrir sala</button>
+              <button class="ghost hidden" id="mp-close">Fechar sala</button>
+              <button class="ghost hidden" id="mp-join-own" title="Coloca o endereço desta sala em Entrar numa sala">Entrar nela também</button>
+            </div>
+            <p class="mp-state" id="mp-host-state"><i></i><span>Sala fechada</span></p>
+            <div class="mp-addresses" id="mp-addresses"></div>
+            <details class="log"><summary>Registro da sala</summary><pre id="mp-log"></pre></details>
+          </div>
+          <div class="mp-card" id="mp-join">
+            <h3>Entrar numa sala</h3>
+            <p class="hint">O jogo lê estes campos na hora: dá para mudar com ele aberto.</p>
+            <label class="field"><span>Seu nome</span><input data-ini="mp_name" maxlength="24" placeholder="Link" spellcheck="false" /></label>
+            <label class="field"><span>Endereço da sala <small>(IP:porta, o anfitrião passa)</small></span><input id="mp-server" data-ini="mp_server" placeholder="192.168.0.10:5577" spellcheck="false" /></label>
+            <label class="field"><span>Senha da sala</span><input data-ini="mp_password" type="password" spellcheck="false" /></label>
+            <label class="toggle"><input type="checkbox" data-ini="mp" data-on="1" data-off="" /><span class="knob"></span><div><b>Entrar na sala</b><small>O jogo entra sozinho quando estiver aberto (depois da Ilha do Céu) e volta se a conexão cair.</small></div></label>
+            <div class="actions left"><button class="ghost" id="mp-test">Testar conexão</button></div>
+            <p class="mp-state" id="mp-test-state"><i></i><span>&nbsp;</span></p>
+          </div>
+        </div>
+        <div class="mp-card mp-tips">
+          <h3>Como funciona</h3>
+          <ul>
+            <li><b>Na mesma casa:</b> use o endereço marcado <em>Rede de casa</em>.</li>
+            <li><b>Longe:</b> todos instalam a mesma VPN gratuita (<b>Radmin VPN</b>, <b>Tailscale</b> ou <b>ZeroTier</b>) e entram na mesma rede dela; use o endereço daquela VPN.</li>
+            <li>O multijogador abre quando o Link acorda na <b>Grande Ilha do Céu</b>, depois do começo embaixo do castelo.</li>
+            <li>No jogo: <kbd>F1</kbd> → aba Multijogador. <kbd>T</kbd> abre o chat, <kbd>V</kbd> fala (segure), <kbd>G</kbd> marca onde você está.</li>
+            <li>Na primeira vez o Windows pode perguntar sobre o Python no firewall: permita em redes privadas.</li>
+          </ul>
+        </div>
         </div>
       </div>
     </section>
