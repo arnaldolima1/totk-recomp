@@ -74,8 +74,8 @@ it up or down. When two mods change the same file, the higher one wins.
   included.
 - Cheats: an Atmosphère cheat file goes into a mod's `cheats` folder (`mods/<name>/cheats/<build id>.txt`, the
   build id `277178B7DBA1B6D4` for 1.4.3, `9B4E43650501A4D4` for 1.2.1). The Cheats tab of the menu switches them.
-  Cheats that write memory work at the next start; cheats that change the game's code need the setup run again on
-  the install folder. The port ships no cheat files. Details: [cheats.md](cheats.md).
+  Cheats that write memory work at the next start; for cheats that change the game's code the game opens the setup's
+  rebuild window at start and comes back after it (a few minutes). The port ships no cheat files. Details: [cheats.md](cheats.md).
 
 The log names every mod at the start (`mods: <name>: ...`) and how many of its files it serves.
 

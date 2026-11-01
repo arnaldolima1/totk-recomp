@@ -286,6 +286,10 @@
 # mods_order =
 # Mods switched off, names separated by |.
 # mods_disabled =
+# auto: when an enabled mod has cheats that change the game's code and the game was built without them, the game starts
+# the setup's rebuild at start (a few minutes) and starts again after it. off: the game starts with the code it has.
+# A rebuild that failed or was cancelled is not started again for the same cheats. Default: auto.
+# mods_rebuild = auto
 
 [files]
 # Developer overlay: a folder with RomFS files and a manifest.tsv (tools/make_romfs_patches.py format). Players put

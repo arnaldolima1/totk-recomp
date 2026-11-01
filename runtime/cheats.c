@@ -42,6 +42,7 @@ typedef struct {
     uint32_t *words;
     int n;
     int dup;              // 1 for the first cheat of its name in its file, 2 for the next ...
+    uint32_t content;     // FNV-1a 32 of its words as tools/cheats.py writes them
     int set;              // patch set, -1 none
     volatile int32_t on;
     char note[STATUS_MAX];
@@ -50,6 +51,7 @@ typedef struct {
 static Cheat *g_cheats;
 static int g_n, g_cap, g_vm;   // g_vm: some cheat needs cheats_frame
 static char g_file[64];        // "<build id>.txt"
+static char g_dir[PLAT_PATH_MAX];   // the folder of totk.exe, with a trailing separator
 static int g_files;            // mods whose file was read
 static uint64_t g_main, g_main_size, g_code_end;   // main's image; its code with the padding up to .rodata
 
@@ -438,10 +440,74 @@ static void plain_name(char *s) {
     }
 }
 
+// ---- rebuild: code cheats the build lacks
+// The setup writes build-cache\rebuild.txt (installer/steps.py write_rebuild_command), the command that starts its
+// window in rebuild mode on this install folder, one argument per line. When an enabled mod has code cheats this build
+// lacks (CHEAT_REBUILD), the game runs it and exits; the setup lifts and compiles them in and starts the game again.
+// build-cache\rebuild.skip holds the key of the cheats a rebuild was started for: a rebuild that failed or was
+// cancelled leaves them unbuilt, and the same set does not start it again. TOTK_MODS_REBUILD=off never starts it.
+// Scripted runs (--seconds, --boot) never start it.
+static void rebuild_if_needed(const char *dir) {
+    uint32_t key = 0x811C9DC5u;
+    int need = 0;
+    for (int i = 0; i < g_n; i++) {
+        const Cheat *c = &g_cheats[i];
+        if (c->info.kind != CHEAT_REBUILD) continue;
+        need++;
+        key = (key ^ fnv(c->info.key, strlen(c->info.key))) * 0x01000193u;
+        key = (key ^ c->content) * 0x01000193u;
+    }
+    if (!need) return;
+    char cmd_path[PLAT_PATH_MAX + 64], skip_path[PLAT_PATH_MAX + 64], skip[16] = "", want[16];
+    snprintf(cmd_path, sizeof cmd_path, "%sbuild-cache" SEP "rebuild.txt", dir);
+    snprintf(skip_path, sizeof skip_path, "%sbuild-cache" SEP "rebuild.skip", dir);
+    snprintf(want, sizeof want, "%08X", key);
+    char *old = read_text(skip_path);
+    if (old) snprintf(skip, sizeof skip, "%.8s", old);
+    free(old);
+    const char *why = !strcmp(cfg_value("TOTK_MODS_REBUILD"), "off") ? "mods_rebuild = off"
+                    : rt_config()->seconds || rt_config()->boot   ? "a scripted run"
+                    : !strcmp(skip, want)                           ? "the last rebuild for them failed or was cancelled"
+                                                                    : NULL;
+    char *cmd = why ? NULL : read_text(cmd_path);
+    if (!why && !cmd) why = "no build-cache/rebuild.txt (a build without the setup)";
+    if (why) {
+        rt_log("cheats: %d code cheats are not built into the game; no rebuild: %s", need, why);
+        free(cmd);
+        return;
+    }
+    const char *argv[32];
+    int argc = 0;
+    for (char *line = cmd; line && *line && argc < 31;) {
+        char *end = strchr(line, '\n'), *next = end ? end + 1 : NULL;
+        if (end) *end = 0;
+        size_t n = strlen(line);
+        if (n && line[n - 1] == '\r') line[n - 1] = 0;
+        if (*line) argv[argc++] = line;
+        line = next;
+    }
+    argv[argc] = NULL;
+    if (argc < 2 || !plat_file_write(skip_path, want, strlen(want))) {
+        rt_log("cheats: %d code cheats are not built into the game; cannot start the rebuild (%s)", need, cmd_path);
+        free(cmd);
+        return;
+    }
+    rt_log("cheats: %d code cheats are not built into the game; starting the rebuild: %s", need, argv[0]);
+    int ok = plat_spawn(argv, dir);
+    free(cmd);
+    if (!ok) {
+        rt_log("cheats: the rebuild did not start; the game starts with the code it has");
+        return;
+    }
+    prof_write();   // plat_exit runs no atexit handlers
+    plat_exit(0);
+}
+
 void cheats_init(void) {
     const RtLoaded *m = ldr_count() ? ldr_module(0) : NULL;
     char dir[PLAT_PATH_MAX], bid[17], path[2400];   // path: a mod's cheats folder (ModInfo.cheats) + the file
     if (!m || !exe_dir(dir, sizeof dir) || !build_id(bid)) return;
+    snprintf(g_dir, sizeof g_dir, "%s", dir);
     g_main = m->base;
     g_main_size = m->size;
     g_code_end = m->base + ((m->text_end + 0xFFF) & ~0xFFFull);
@@ -479,7 +545,8 @@ void cheats_init(void) {
         if (!t) rt_fatal("cheats: out of memory");
         t[0] = 0;
         for (int k = 0; k < c->n; k++) tl += (size_t)snprintf(t + tl, tn - tl, k ? " %08X" : "%08X", c->words[k]);
-        snprintf(content, sizeof content, "%08X", fnv(t, tl));
+        c->content = fnv(t, tl);
+        snprintf(content, sizeof content, "%08X", c->content);
         free(t);
         snprintf(c->info.key, sizeof c->info.key, "TOTK_CHEAT_%s", key);
         int master = c->info.kind == CHEAT_MASTER;
@@ -511,14 +578,29 @@ void cheats_init(void) {
         counts[kind]++;
     }
     free(status);
+    rebuild_if_needed(dir);
     for (int i = 0; i < g_n; i++) plain_name((char *)g_cheats[i].info.name);   // the hashes above read the file's bytes
     int on = 0;
     for (int i = 0; i < g_n; i++) on += g_cheats[i].on && g_cheats[i].info.kind != CHEAT_HEADING;
     rt_log("cheats: %s in %d mods: %d cheats, %d on; %d code, %d while buttons are held, %d data, %d master, "
-           "%d restore, %d headings, %d need the setup again, %d not supported%s",
+           "%d restore, %d headings, %d wait for a rebuild, %d not supported%s",
            g_file, g_files, g_n, on, counts[CHEAT_CODE], counts[CHEAT_KEY], counts[CHEAT_DATA], counts[CHEAT_MASTER],
            counts[CHEAT_RESTORE], counts[CHEAT_HEADING], counts[CHEAT_REBUILD], counts[CHEAT_UNSUPPORTED],
            seen_dups ? " (repeated names numbered)" : "");
+}
+
+int cheats_rebuild_pending(void) {
+    char path[PLAT_PATH_MAX + 64];
+    snprintf(path, sizeof path, "%sbuild-cache" SEP "rebuild.txt", g_dir);
+    for (int i = 0; i < g_n; i++)
+        if (g_cheats[i].info.kind == CHEAT_REBUILD) return g_dir[0] && plat_file_exists(path);
+    return 0;
+}
+
+void cheats_rebuild_allow(void) {
+    char path[PLAT_PATH_MAX + 64];
+    snprintf(path, sizeof path, "%sbuild-cache" SEP "rebuild.skip", g_dir);
+    plat_fs_unlink(path);
 }
 
 int cheats_count(void) { return g_n; }

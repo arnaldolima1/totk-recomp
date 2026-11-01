@@ -7,6 +7,8 @@ installer/text/<en|ru|pt-BR|zh-Hans>.json under "ui.*" and "launcher.*" ids.
 
     --selftest [--shots DIR]   build every screen in every language and close by itself (PNG per screen with --shots)
     --lang en|ru|pt-BR|zh-Hans window language (default: the Windows display language)
+    --rebuild DIR              rebuild the install folder DIR for its mods (totk.exe starts this, build-cache/rebuild.txt):
+                               the run starts at once with that folder, and the game starts again when it succeeds
 """
 import argparse
 import json
@@ -43,8 +45,9 @@ def fix_tcl_paths():
 
 
 class App:
-    def __init__(self, root, ui_lang, layout, run_args=None):
+    def __init__(self, root, ui_lang, layout, run_args=None, rebuild=None):
         self.root, self.layout = root, layout
+        self.rebuild = rebuild           # the install folder of --rebuild, or None
         self.cat = Catalog(ui_lang)
         self.model = Model()
         self.process = None
@@ -94,6 +97,10 @@ class App:
         self.vars['lang'].set(self.lang_label(self.lang_code))
         self.vars['dest'].trace_add('write', lambda *_: self.refresh_form())
         self.show('form')
+        if rebuild:
+            self.bind_text(self.title, 'text', 'ui.rebuild_title')
+            self.vars['dest'].set(str(rebuild))
+            root.after(POLL_MS, self.start)
 
     # ---- text -----------------------------------------------------------------------------------------------------
 
@@ -258,6 +265,8 @@ class App:
         self.open_button.pack(side='right', padx=(0, 8))
         self.back_button = self.button(bar, 'ui.back', lambda: self.show('form'))
         self.back_button.pack(side='left')
+        if self.rebuild:   # a failed or cancelled rebuild: the game starts with the code it has
+            self.button(bar, 'ui.start_game', self.start_game).pack(side='right', padx=(0, 8))
         self.finish_title = ttk.Label(f, style='Title.TLabel', wraplength=620, justify='left')
         self.finish_title.pack(anchor='w')
         self.finish_text = ttk.Label(f, wraplength=620, justify='left')
@@ -363,6 +372,9 @@ class App:
             return
         self.model.finish(code)
         self.process = None
+        if self.rebuild and self.model.result == 'ok' and not self.closing:
+            self.start_game()
+            return
         self.refresh_run()
         self.refresh_finish()
         self.show('finish')
@@ -492,6 +504,15 @@ class App:
             self.open_button.state(['!disabled'])
         else:
             self.open_button.state(['disabled' if not Path(m.dest or '.').is_dir() else '!disabled'])
+
+    def start_game(self):
+        """Starts the game of the install folder and closes the window."""
+        dest = Path(self.vars['dest'].get().strip())
+        exe = dest / ('totk.exe' if os.name == 'nt' else 'totk')
+        flags = subprocess.DETACHED_PROCESS if os.name == 'nt' else 0
+        if exe.is_file():
+            subprocess.Popen([str(exe)], cwd=str(dest), creationflags=flags, close_fds=True)
+        self.root.destroy()
 
     def open_folder(self):
         dest = self.model.dest
@@ -625,13 +646,14 @@ def main(argv=None):
     ap.add_argument('--shots', type=Path)
     ap.add_argument('--lang', choices=UI_LANGUAGES)
     ap.add_argument('--root', type=Path)
+    ap.add_argument('--rebuild', type=Path)
     args = ap.parse_args(argv)
     layout = layouts.find(args.root)
     if args.selftest:
         return selftest(layout, args.shots)
     fix_tcl_paths()
     root = tk.Tk()
-    App(root, args.lang or windows_ui_language(), layout)
+    App(root, args.lang or windows_ui_language(), layout, rebuild=args.rebuild)
     root.mainloop()
     return 0
 

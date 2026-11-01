@@ -14,7 +14,7 @@ The port reads Atmosphère cheat files, the format Switch homebrew and the emula
    The Cheats tab names the file the installed game reads when no mod holds one, and `logs\totk.log` says `cheats: no enabled mod holds cheats/<id>.txt`.
 2. Put it in the `cheats` folder of a mod: `mods\My cheats\cheats\277178B7DBA1B6D4.txt`. A download laid out for the Switch's SD card or an emulator works as it is: unpack it into a folder of its own under `mods`, and the port finds `atmosphere\contents\0100F2C0115B6000\cheats`, `contents\0100F2C0115B6000\cheats` or `0100F2C0115B6000\cheats` inside it. The file name's case does not matter.
 3. Start the game. Cheats that write the game's memory work now.
-4. Cheats that change the game's code are greyed out with "run the setup again" until you run `TotK-Setup.exe` again on the same folder. It builds the code cheats of every mod into the game; saves and settings are kept.
+4. Cheats that change the game's code need the game rebuilt with them. When the game starts and finds such cheats it did not build, it opens the setup's rebuild window, which builds them in (a few minutes; the shaders stay prepared) and starts the game again. Until then they are greyed out with "after the rebuild". When the rebuild fails or you cancel it, the game starts without them and does not try again for the same cheats; "Rebuild the game now" on the Cheats tab tries again. `mods_rebuild = off` under `[mods]` in `totk.ini` turns the automatic rebuild off; running `TotK-Setup.exe` on the same folder does the same job by hand. Saves and settings are kept.
 5. Switch the cheats on the Cheats tab of the menu.
 
 The Cheats tab lists the cheats grouped by mod, in the order of the Mods tab. A mod switched off on the Mods tab, or one the port cannot use, contributes no cheats; the change applies at the next start. The Mods tab says how many cheats each mod brought.
@@ -53,7 +53,7 @@ The game's code is compiled ahead of time, so a cheat cannot write new instructi
 | master | `{name}` with code writes | A patch set that is always on. |
 | restore | Writes back only the game's original instructions | Not needed: switching a cheat off restores them. Greyed out. |
 
-A cheat whose code writes call or jump into a code cave the cheat writes itself (into main's zero padding) gets the cave inlined at the call site. The setup builds the code cheats of every mod in the `mods` folder, switched on or off, so switching a mod on later needs only a restart. A code cheat added or edited after the setup ran is greyed out until the setup runs again; a data cheat runs at the next start.
+A cheat whose code writes call or jump into a code cave the cheat writes itself (into main's zero padding) gets the cave inlined at the call site. The setup builds the code cheats of every mod in the `mods` folder, switched on or off, so switching a mod on later needs only a restart. A code cheat added or edited after the last build waits for the rebuild; a data cheat runs at the next start.
 
 Not supported, and shown greyed out with the reason:
 

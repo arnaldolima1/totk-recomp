@@ -30,6 +30,10 @@ typedef struct {
 
 void cheats_init(void);                    // after rt_patches_init: reads the mods' files and their build status
 int cheats_count(void);
+// 1 when a cheat of an enabled mod waits for a rebuild (CHEAT_REBUILD) and the setup left its rebuild command.
+int cheats_rebuild_pending(void);
+// The next start rebuilds again for cheats whose last rebuild failed or was cancelled (the menu restarts after it).
+void cheats_rebuild_allow(void);
 const CheatInfo *cheats_info(int i);
 int cheats_on(int i);                      // the player's switch (1 for a master cheat)
 void cheats_set(int i, int on);            // switches at once and sets the cheat's setting (the menu saves totk.ini)

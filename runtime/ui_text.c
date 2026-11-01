@@ -418,8 +418,8 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_TAB_CHEATS] = "Cheats",
     [UI_MENU_CHEATS_NONE] = "No cheats for this game version. A mod's cheats are an Atmosphere cheat file in its "
                             "cheats folder, named after the game's build: mods\\<mod>\\cheats\\%s. Restart the game to "
-                            "read them. Cheats that change the game's code also need the setup run again on this "
-                            "folder.",
+                            "read them. For cheats that change the game's code, the game rebuilds itself at start (a "
+                            "few minutes).",
     [UI_MENU_CHEATS_MOD] = "%s: %d cheats",
     [UI_MENU_CHEAT_CODE_DESC] = "Changes the game's code. Switches at once.",
     [UI_MENU_CHEAT_KEY_DESC] = "Changes the game's code while you hold %s. Switches at once.",
@@ -428,11 +428,17 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_CHEAT_MASTER_DESC] = "The file's master code: it is always on.",
     [UI_MENU_CHEAT_RESTORE] = "not needed",
     [UI_MENU_CHEAT_RESTORE_DESC] = "It only writes the game's own code back. Switching a cheat off already does that.",
-    [UI_MENU_CHEAT_REBUILD] = "run the setup again",
+    [UI_MENU_CHEAT_REBUILD] = "after the rebuild",
     [UI_MENU_CHEAT_REBUILD_DESC] = "This cheat changes the game's code and is new or edited since the game was built. "
-                                   "Run the setup again on this folder to build it (about three minutes).",
+                                   "The game builds it in when it starts next (a few minutes), or use Rebuild the game "
+                                   "now.",
     [UI_MENU_CHEAT_UNSUPPORTED] = "not supported",
     [UI_MENU_CHEAT_UNSUPPORTED_DESC] = "This cheat cannot be used with this version of the game:",
+    [UI_MENU_CHEATS_REBUILD] = "Rebuild the game now",
+    [UI_MENU_CHEATS_REBUILD_DESC] = "Some cheats change the game's code and are not built into it: they are new or "
+                                    "edited, or their last rebuild failed or was cancelled. Closes the game; the setup "
+                                    "builds them in (a few minutes) and starts the game again. Progress since your "
+                                    "last save is lost.",
 };
 
 static const char *const text_ru[UI_TEXT_COUNT] = {
@@ -834,7 +840,8 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_TAB_CHEATS] = "Читы",
     [UI_MENU_CHEATS_NONE] = "Для этой версии игры читов нет. Читы мода — это файл читов Atmosphere в его папке cheats "
                             "с именем по сборке игры: mods\\<мод>\\cheats\\%s. Перезапустите игру, чтобы они "
-                            "прочитались. Для читов, меняющих код игры, ещё раз запустите установщик для этой папки.",
+                            "прочитались. Для читов, меняющих код игры, игра пересоберётся сама при запуске (несколько "
+                            "минут).",
     [UI_MENU_CHEATS_MOD] = "%s — читов: %d",
     [UI_MENU_CHEAT_CODE_DESC] = "Меняет код игры. Включается и выключается сразу.",
     [UI_MENU_CHEAT_KEY_DESC] = "Меняет код игры, пока вы держите %s. Включается и выключается сразу.",
@@ -843,11 +850,16 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_CHEAT_MASTER_DESC] = "Главный код файла: включён всегда.",
     [UI_MENU_CHEAT_RESTORE] = "не нужен",
     [UI_MENU_CHEAT_RESTORE_DESC] = "Он только возвращает исходный код игры. Выключение чита уже делает это.",
-    [UI_MENU_CHEAT_REBUILD] = "запустите установщик",
-    [UI_MENU_CHEAT_REBUILD_DESC] = "Этот чит меняет код игры и появился или изменился после сборки игры. Запустите "
-                                   "установщик для этой папки ещё раз, чтобы собрать его (около трёх минут).",
+    [UI_MENU_CHEAT_REBUILD] = "после пересборки",
+    [UI_MENU_CHEAT_REBUILD_DESC] = "Этот чит меняет код игры и появился или изменился после сборки игры. Игра соберёт "
+                                   "его при следующем запуске (несколько минут), или нажмите «Пересобрать игру сейчас».",
     [UI_MENU_CHEAT_UNSUPPORTED] = "не поддерживается",
     [UI_MENU_CHEAT_UNSUPPORTED_DESC] = "Этот чит нельзя использовать с этой версией игры:",
+    [UI_MENU_CHEATS_REBUILD] = "Пересобрать игру сейчас",
+    [UI_MENU_CHEATS_REBUILD_DESC] = "Некоторые читы меняют код игры и ещё не собраны в неё: они новые или изменены, "
+                                    "либо прошлая пересборка не удалась или была отменена. Закрывает игру; установщик "
+                                    "собирает их (несколько минут) и снова запускает игру. Прогресс после последнего "
+                                    "сохранения будет потерян.",
 };
 
 static const char *const text_pt_br[UI_TEXT_COUNT] = {
@@ -1276,8 +1288,8 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_TAB_CHEATS] = "Cheats",
     [UI_MENU_CHEATS_NONE] = "Nenhum cheat para esta versão do jogo. Os cheats de um mod são um arquivo de cheats do "
                             "Atmosphere na pasta cheats dele, com o nome da build do jogo: mods\\<mod>\\cheats\\%s. "
-                            "Reinicie o jogo para lê-los. Cheats que alteram o código do jogo também precisam que o "
-                            "instalador seja executado de novo nesta pasta.",
+                            "Reinicie o jogo para lê-los. Para cheats que alteram o código do jogo, o jogo se recompila "
+                            "sozinho ao iniciar (alguns minutos).",
     [UI_MENU_CHEATS_MOD] = "%s: %d cheats",
     [UI_MENU_CHEAT_CODE_DESC] = "Altera o código do jogo. Liga e desliga na hora.",
     [UI_MENU_CHEAT_KEY_DESC] = "Altera o código do jogo enquanto você segura %s. Liga e desliga na hora.",
@@ -1286,12 +1298,17 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_CHEAT_MASTER_DESC] = "O código mestre do arquivo: está sempre ligado.",
     [UI_MENU_CHEAT_RESTORE] = "desnecessário",
     [UI_MENU_CHEAT_RESTORE_DESC] = "Ele só escreve de volta o código original do jogo. Desligar um cheat já faz isso.",
-    [UI_MENU_CHEAT_REBUILD] = "execute o instalador",
+    [UI_MENU_CHEAT_REBUILD] = "após recompilar",
     [UI_MENU_CHEAT_REBUILD_DESC] = "Este cheat altera o código do jogo e é novo ou foi editado depois que o jogo foi "
-                                   "compilado. Execute o instalador de novo nesta pasta para compilá-lo (cerca de três "
-                                   "minutos).",
+                                   "compilado. O jogo o compila na próxima vez que iniciar (alguns minutos), ou use "
+                                   "Recompilar o jogo agora.",
     [UI_MENU_CHEAT_UNSUPPORTED] = "não suportado",
     [UI_MENU_CHEAT_UNSUPPORTED_DESC] = "Este cheat não pode ser usado com esta versão do jogo:",
+    [UI_MENU_CHEATS_REBUILD] = "Recompilar o jogo agora",
+    [UI_MENU_CHEATS_REBUILD_DESC] = "Alguns cheats alteram o código do jogo e ainda não foram compilados nele: são "
+                                    "novos ou editados, ou a última recompilação falhou ou foi cancelada. Fecha o "
+                                    "jogo; o instalador os compila (alguns minutos) e inicia o jogo de novo. O "
+                                    "progresso desde o último salvamento é perdido.",
 };
 
 // Simplified Chinese: this row covers the software keyboard and the whole menu, so the menu and the overlay read Chinese
@@ -1820,7 +1837,8 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_FXAA_DESC] = "游戏自身的 FXAA 边缘平滑。会让细节略微模糊；开启 DLAA 时不需要。",
     [UI_MENU_TAB_CHEATS] = "金手指",
     [UI_MENU_CHEATS_NONE] = "此游戏版本没有金手指。模组的金手指是它的 cheats 文件夹中以游戏构建命名的 Atmosphere "
-                            "金手指文件：mods\\<模组>\\cheats\\%s。重启游戏后才会读取。修改游戏代码的金手指还需要对此文件夹重新运行安装程序。",
+                            "金手指文件：mods\\<模组>\\cheats\\%s。重启游戏后才会读取。对于修改游戏代码的金手指，"
+                            "游戏会在启动时自行重新构建（几分钟）。",
     [UI_MENU_CHEATS_MOD] = "%s：%d 个金手指",
     [UI_MENU_CHEAT_CODE_DESC] = "修改游戏代码。立即开关。",
     [UI_MENU_CHEAT_KEY_DESC] = "按住 %s 时修改游戏代码。立即开关。",
@@ -1829,10 +1847,12 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_CHEAT_MASTER_DESC] = "文件的主代码：始终开启。",
     [UI_MENU_CHEAT_RESTORE] = "无需使用",
     [UI_MENU_CHEAT_RESTORE_DESC] = "它只会写回游戏原本的代码。关闭金手指时已经会这样做。",
-    [UI_MENU_CHEAT_REBUILD] = "重新运行安装程序",
-    [UI_MENU_CHEAT_REBUILD_DESC] = "此金手指修改游戏代码，并且是在游戏构建后新增或修改的。对此文件夹重新运行安装程序来构建它（约三分钟）。",
+    [UI_MENU_CHEAT_REBUILD] = "重新构建后",
+    [UI_MENU_CHEAT_REBUILD_DESC] = "此金手指修改游戏代码，并且是在游戏构建后新增或修改的。游戏会在下次启动时把它构建进去（几分钟），也可以使用“立即重新构建游戏”。",
     [UI_MENU_CHEAT_UNSUPPORTED] = "不支持",
     [UI_MENU_CHEAT_UNSUPPORTED_DESC] = "此金手指不能用于此游戏版本：",
+    [UI_MENU_CHEATS_REBUILD] = "立即重新构建游戏",
+    [UI_MENU_CHEATS_REBUILD_DESC] = "有些金手指会修改游戏代码，但尚未构建进游戏：它们是新增或修改的，或上次重新构建失败或被取消。将关闭游戏；安装程序会把它们构建进去（几分钟）并重新启动游戏。上次存档之后的进度会丢失。",
 };
 
 #define SWKBD_ONLY(name, ...) static const char *const name[UI_TEXT_COUNT] = {SWKBD(__VA_ARGS__)}

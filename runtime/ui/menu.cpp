@@ -56,7 +56,7 @@ double frame_step_limit_hz(void);
 extern const int rt_game_version;
 extern const char rt_port_version[];
 void cheats_frame(uint64_t frame);   // cheats.c
-void tab_cheats(float scale);        // ui/cheats_tab.cpp
+bool tab_cheats(float scale);        // ui/cheats_tab.cpp; true: restart into the rebuild
 }
 
 // Roboto Medium (Apache-2.0, ui/fonts/LICENSE-Roboto.txt) with Latin and Cyrillic glyphs.
@@ -771,7 +771,9 @@ static const char *prompts_note(bool *restart) {
 
 // The confirmation of "Restart now", over the menu; Cancel has the cursor first. Restart writes totk.ini, then closes
 // the game as Quit does and starts it again (gfx_window_request_restart). It waits while the game writes a save, and
-// the game stays when totk.ini cannot be written, as the new prompts would not come back.
+// the game stays when totk.ini cannot be written, as the new prompts would not come back. From the Cheats tab
+// (restart_rebuild) Restart also lets the next start rebuild for cheats whose last rebuild failed (cheats_rebuild_allow).
+static bool restart_rebuild;
 static void restart_confirm(void) {
     g_modal = false;
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
@@ -792,12 +794,16 @@ static void restart_confirm(void) {
     if (ImGui::IsWindowAppearing()) ImGui::SetItemDefaultFocus();
     ImGui::SameLine();
     ImGui::BeginDisabled(saving);
-    if (ImGui::Button(yes, ImVec2(bw, 0)) && cfg_save()) gfx_window_request_restart();
+    if (ImGui::Button(yes, ImVec2(bw, 0)) && cfg_save()) {
+        if (restart_rebuild) cheats_rebuild_allow();
+        gfx_window_request_restart();
+    }
     ImGui::EndDisabled();
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))
         close = true;
     if (close) {
         ImGui::CloseCurrentPopup();
+        restart_rebuild = false;
         opt_focus_key("##restart");   // back on the row it came from
     }
     ImGui::EndPopup();
@@ -1140,7 +1146,13 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
             case TAB_CONTROLS: tab_controls(scale); break;
             case TAB_AMIIBO: tab_amiibo(scale); break;
             case TAB_MENU: tab_menu(scale); break;
-            case TAB_CHEATS: tab_cheats(scale); break;
+            case TAB_CHEATS:
+                if (tab_cheats(scale)) {
+                    restart_rebuild = true;
+                    ImGui::OpenPopup("##restart_confirm");
+                }
+                restart_confirm();
+                break;
             case TAB_ADVANCED: tab_advanced(scale); break;
             }
             ImGui::EndTabItem();

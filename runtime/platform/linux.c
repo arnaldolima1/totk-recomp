@@ -1711,6 +1711,26 @@ int plat_restart(void) {
     return e == 0;
 }
 
+int plat_spawn(const char *const *argv, const char *cwd) {
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_addclosefrom_np(&fa, 3);
+    posix_spawn_file_actions_addchdir_np(&fa, cwd);
+    posix_spawnattr_t at;
+    posix_spawnattr_init(&at);
+    sigset_t none, all;
+    sigemptyset(&none);
+    sigfillset(&all);
+    posix_spawnattr_setsigmask(&at, &none);
+    posix_spawnattr_setsigdefault(&at, &all);
+    posix_spawnattr_setflags(&at, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSID);
+    pid_t pid;
+    int e = posix_spawn(&pid, argv[0], &fa, &at, (char *const *)argv, environ);
+    posix_spawnattr_destroy(&at);
+    posix_spawn_file_actions_destroy(&fa);
+    return e == 0;
+}
+
 int plat_restart_wait(uint32_t timeout_ms) {
     const char *v = getenv(RESTART_WAIT);
     if (!v) return 0;
