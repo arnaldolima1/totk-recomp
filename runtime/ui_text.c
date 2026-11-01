@@ -123,7 +123,8 @@ static const char *const text_en[UI_TEXT_COUNT] = {
                                   "Takes effect at the next start.",
     [UI_MENU_DLAA] = "NVIDIA DLSS / DLAA",
     [UI_MENU_DLAA_DESC] = "NVIDIA DLSS for the 3D scene (NVIDIA RTX GPUs; nvngx_dlss.dll next to totk.exe): smoother edges "
-                          "and less shimmer. The HUD is not touched. The mode below sets the resolution it works from.",
+                          "and less shimmer. The HUD is not touched. The mode below sets the resolution it works from. Takes effect "
+                          "after a restart.",
     [UI_MENU_DLSS] = "DLSS mode",
     [UI_MENU_DLSS_DESC] = "DLAA draws the 3D scene at full resolution. Quality, Balanced and Performance draw it at 67, 58 "
                           "and 50 % and let DLSS scale it up, for more frames per second; they replace the 3D render "
@@ -455,7 +456,8 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
                                   "разрешение теней. Действует после перезапуска.",
     [UI_MENU_DLAA] = "NVIDIA DLSS / DLAA",
     [UI_MENU_DLAA_DESC] = "NVIDIA DLSS для 3D-сцены (видеокарты NVIDIA RTX; nvngx_dlss.dll рядом с totk.exe): ровнее края и "
-                          "меньше мерцания. Интерфейс не затрагивается. Режим ниже задаёт разрешение, с которым он работает.",
+                          "меньше мерцания. Интерфейс не затрагивается. Режим ниже задаёт разрешение, с которым он работает. "
+                          "Действует после перезапуска.",
     [UI_MENU_DLSS] = "Режим DLSS",
     [UI_MENU_DLSS_DESC] = "DLAA рисует 3D-сцену в полном разрешении. «Качество», «Баланс» и «Производительность» рисуют её "
                           "в 67, 58 и 50 % и масштабируют через DLSS ради большего числа кадров; они заменяют масштаб "
@@ -1035,6 +1037,21 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_PCSS] = "Sombras suaves",
     [UI_MENU_PCSS_DESC] = "Sombras do sol nítidas onde um objeto toca o chão e mais suaves quanto mais longe a sombra "
                           "cai (PCSS). 0 mantém o filtro do jogo. Vale no próximo início.",
+    [UI_MENU_DLAA] = "NVIDIA DLSS / DLAA",
+    [UI_MENU_DLAA_DESC] = "NVIDIA DLSS para a cena 3D (placas NVIDIA RTX; nvngx_dlss.dll ao lado do totk.exe): bordas "
+                          "mais suaves e menos cintilação. O HUD não é afetado. O modo abaixo define a resolução de "
+                          "onde ele parte. Vale após reiniciar.",
+    [UI_MENU_DLSS] = "Modo do DLSS",
+    [UI_MENU_DLSS_DESC] = "DLAA desenha a cena 3D na resolução cheia. Qualidade, Equilibrado e Desempenho a desenham "
+                          "em 67, 58 e 50 % e deixam o DLSS ampliá-la, para mais quadros por segundo; eles substituem "
+                          "a escala 3D. Vale após reiniciar.",
+    [UI_MENU_DLSS_DLAA] = "DLAA (nativo)",
+    [UI_MENU_DLSS_QUALITY] = "Qualidade",
+    [UI_MENU_DLSS_BALANCED] = "Equilibrado",
+    [UI_MENU_DLSS_PERFORMANCE] = "Desempenho",
+    [UI_MENU_FXAA] = "Antisserrilhado do jogo (FXAA)",
+    [UI_MENU_FXAA_DESC] = "A suavização de bordas FXAA do próprio jogo. Borra um pouco os detalhes finos; com o DLAA "
+                          "ligado não é necessária.",
 };
 
 // Simplified Chinese: this row covers the software keyboard and the whole menu, so the menu and the overlay read Chinese
@@ -1494,6 +1511,17 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_CONTACT_SHADOWS_DESC] = "阴影贴图遗漏的细小太阳阴影：脚下、石头下、草丛和褶皱中。在光照之后于屏幕空间追踪。下次启动时生效。",
     [UI_MENU_PCSS] = "柔和阴影",
     [UI_MENU_PCSS_DESC] = "物体接触地面处的太阳阴影锐利，阴影投得越远越柔和（PCSS）。0 保留游戏自身的过滤。下次启动时生效。",
+    [UI_MENU_DLAA] = "NVIDIA DLSS / DLAA",
+    [UI_MENU_DLAA_DESC] = "用于 3D 场景的 NVIDIA DLSS（NVIDIA RTX 显卡；nvngx_dlss.dll 放在 totk.exe 旁）：边缘更平滑，闪烁更少。HUD "
+                          "不受影响。下方的模式决定它的工作分辨率。重启后生效。",
+    [UI_MENU_DLSS] = "DLSS 模式",
+    [UI_MENU_DLSS_DESC] = "DLAA 以全分辨率绘制 3D 场景。质量、平衡和性能分别以 67%、58% 和 50% 绘制，再由 DLSS 放大，以获得更高帧率；它们会取代 3D 渲染比例。重启后生效。",
+    [UI_MENU_DLSS_DLAA] = "DLAA（原生）",
+    [UI_MENU_DLSS_QUALITY] = "质量",
+    [UI_MENU_DLSS_BALANCED] = "平衡",
+    [UI_MENU_DLSS_PERFORMANCE] = "性能",
+    [UI_MENU_FXAA] = "游戏抗锯齿（FXAA）",
+    [UI_MENU_FXAA_DESC] = "游戏自身的 FXAA 边缘平滑。会让细节略微模糊；开启 DLAA 时不需要。",
 };
 
 #define SWKBD_ONLY(name, ...) static const char *const name[UI_TEXT_COUNT] = {SWKBD(__VA_ARGS__)}

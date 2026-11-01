@@ -86,9 +86,14 @@ static int p_getu(const NgxParam *p, const char *n, unsigned *v) { return NGX_OK
 static int p_getf(const NgxParam *p, const char *n, float *v) { return NGX_OK(((GetF)p->vt->slot[G_F])(p, n, v)); }
 static int p_getp(const NgxParam *p, const char *n, void **v) { return NGX_OK(((GetP)p->vt->slot[G_P])(p, n, v)); }
 
-// NGX is brought up whenever the driver has it, whatever the setting, so dlaa can be switched on while the game runs
-// (its device extensions can only be asked for at device creation). Switched off, nothing else of DLAA runs.
-int vk_dlaa_wanted(void) { return 1; }
+// NGX is brought up only when dlaa is on at start: its device extensions can only be asked for at device creation, and
+// loading the driver's NGX core on every NVIDIA machine would cost start time and change the device with DLAA off. So
+// dlaa applies after a restart; switched off, nothing else of DLAA runs.
+int vk_dlaa_wanted(void) {
+    static int wanted = -1;
+    if (wanted < 0) wanted = cfg_bool("TOTK_DLAA");
+    return wanted;
+}
 
 static int core_load(void) {
     if (N.tried) return N.loaded;
@@ -656,6 +661,7 @@ int vk_dlaa_skip_draw(VkExec *ex, const GfxShader *fs) {
     static int fxaa = 1;
     uint64_t f = __atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED);
     if (f != frame_read) frame_read = f, fxaa = cfg_bool("TOTK_FXAA");   // once a frame: the menu switches it live
+    if (fxaa && !D.up) return 0;   // nothing to skip: no shader lookup per draw at the defaults
     if (!fs) return 0;
     uint64_t h = spirv_hash(fs);
     if (h != FXAA_FS[0] && h != FXAA_FS[1]) return 0;
