@@ -35,7 +35,6 @@ static int g_font_bad;
 
 extern "C" {
 #include "cfg.h"
-#include "cheats.h"
 #include "input.h"
 #include "input_map.h"
 #include "perfmon.h"
@@ -54,6 +53,8 @@ extern const int rt_game_version;
 int romfs_xbox_prompts_ready(void);
 int romfs_xbox_prompts_active(void);
 extern const char rt_port_version[];
+void cheats_frame(uint64_t frame);   // cheats.c
+void tab_cheats(float scale);        // ui/cheats_tab.cpp
 }
 
 // Roboto Medium (Apache-2.0, ui/fonts/LICENSE-Roboto.txt) with Latin and Cyrillic glyphs.
@@ -265,11 +266,10 @@ static int vk_up(const MenuTarget *t) {
     return 1;
 }
 
-// Roboto Medium (Latin, Cyrillic, dashes, quotes and the numero sign of cheat names) at 26 px per 1080 lines, with
-// the glyphs of the Japanese, Korean and Chinese language names merged in from a system font when there is one (each
-// language is named in its own script). Made again when the window height changes; the old texture goes after the
-// queue is idle (CreateFontsTexture).
-static const ImWchar kRanges[] = {0x0020, 0x00FF, 0x0400, 0x052F, 0x2010, 0x2027, 0x2116, 0x2116, 0};
+// Roboto Medium (Latin, Cyrillic, dashes and quotes) at 26 px per 1080 lines, with the glyphs of the Japanese, Korean
+// and Chinese language names merged in from a system font when there is one (each language is named in its own script).
+// Made again when the window height changes; the old texture goes after the queue is idle (CreateFontsTexture).
+static const ImWchar kRanges[] = {0x0020, 0x00FF, 0x0400, 0x052F, 0x2010, 0x2027, 0};
 static const struct { const char *lang; UiTextId name; } kCjk[] = {
     {"ja", UI_MENU_LANGNAME_JA}, {"ko", UI_MENU_LANGNAME_KO}, {"zh-Hans", UI_MENU_LANGNAME_ZH_HANS},
     {"zh-Hant", UI_MENU_LANGNAME_ZH_HANT},
@@ -690,54 +690,6 @@ static void tab_menu(float scale) {
     opt_begin("##menu", scale);
     static const UiTextId langs[] = {UI_MENU_MENU_LANG_AUTO, UI_MENU_LANGNAME_EN, UI_MENU_LANGNAME_RU};
     opt_choice("TOTK_MENU_LANG", UI_MENU_MENU_LANG, langs, 3, UI_MENU_MENU_LANG_DESC);
-    opt_end();
-}
-
-// ---- Cheats: the cheats of cheats\<build id>.txt (cheats.c), a row per cheat in file order and a heading per group
-// label; a cheat that cannot be switched here is greyed out with the reason.
-static void tab_cheats(float scale) {
-    opt_begin("##cheats", scale);
-    static char line[512], desc[768], buttons[192];
-    int n = cheats_count();
-    if (!n) {
-        snprintf(line, sizeof line, menu_text(UI_MENU_CHEATS_NONE),
-                 cheats_file()[0] ? cheats_file() : "cheats\\<build id>.txt");
-        opt_text_str(line);
-        opt_end();
-        return;
-    }
-    int listed = 0;
-    for (int i = 0; i < n; i++) listed += cheats_info(i)->kind != CHEAT_HEADING;
-    snprintf(line, sizeof line, menu_text(UI_MENU_CHEATS_FILE), cheats_file(), listed);
-    opt_text_str(line);
-    for (int i = 0; i < n; i++) {
-        const CheatInfo *c = cheats_info(i);
-        UiTextId text = UI_MENU_CHEAT_CODE_DESC;
-        switch (c->kind) {
-        case CHEAT_HEADING:
-            if (!strstr(c->name, "TID=")) opt_group_text(c->name);   // the file's title line only names the game
-            continue;
-        case CHEAT_CODE: break;
-        case CHEAT_KEY: text = UI_MENU_CHEAT_KEY_DESC; break;
-        case CHEAT_DATA: text = UI_MENU_CHEAT_DATA_DESC; break;
-        case CHEAT_MASTER: text = UI_MENU_CHEAT_MASTER_DESC, opt_disable_next(UI_MENU_CHEAT_MASTER); break;
-        case CHEAT_RESTORE: text = UI_MENU_CHEAT_RESTORE_DESC, opt_disable_next(UI_MENU_CHEAT_RESTORE); break;
-        case CHEAT_REBUILD: text = UI_MENU_CHEAT_REBUILD_DESC, opt_disable_next(UI_MENU_CHEAT_REBUILD); break;
-        case CHEAT_UNSUPPORTED:
-            text = UI_MENU_CHEAT_UNSUPPORTED_DESC, opt_disable_next(UI_MENU_CHEAT_UNSUPPORTED);
-            break;
-        }
-        if (c->kind == CHEAT_KEY)
-            snprintf(desc, sizeof desc, menu_text(text), cheats_buttons(c->buttons, buttons, sizeof buttons));
-        else if (c->kind == CHEAT_UNSUPPORTED)
-            snprintf(desc, sizeof desc, "%s %s", menu_text(text), c->note);
-        else
-            snprintf(desc, sizeof desc, "%s", menu_text(text));
-        if (opt_toggle_text(c->key, c->name, desc, cheats_on(i) != 0)) {
-            cheats_set(i, !cheats_on(i));
-            opt_save_soon();
-        }
-    }
     opt_end();
 }
 

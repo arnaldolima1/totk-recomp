@@ -399,6 +399,14 @@ static int status_of(char *status, const char *key, char **fields) {
     return 0;
 }
 
+// The menu's font has no numero sign (U+2116), which cheat names often start with: they show "No" instead.
+static void plain_name(char *s) {
+    for (char *p; (p = strstr(s, "\xE2\x84\x96")) != NULL;) {
+        p[0] = 'N', p[1] = 'o';
+        memmove(p + 2, p + 3, strlen(p + 3) + 1);
+    }
+}
+
 void cheats_init(void) {
     const RtLoaded *m = ldr_count() ? ldr_module(0) : NULL;
     char dir[PLAT_PATH_MAX], bid[17], path[PLAT_PATH_MAX + 64];
@@ -465,6 +473,7 @@ void cheats_init(void) {
         counts[kind]++;
     }
     free(status);
+    for (int i = 0; i < g_n; i++) plain_name((char *)g_cheats[i].info.name);   // the hashes above read the file's bytes
     int on = 0;
     for (int i = 0; i < g_n; i++) on += g_cheats[i].on && g_cheats[i].info.kind != CHEAT_HEADING;
     rt_log("cheats: %s: %d cheats, %d on; %d code, %d while buttons are held, %d data, %d master, %d restore, "

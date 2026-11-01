@@ -2,7 +2,7 @@
 
 The port reads Atmosphère cheat files, the format Switch homebrew and the emulators use. The setup installs a cheat file for 1.2.1 and for 1.4.3, all cheats off: open the menu (F1) and switch them on the Cheats tab. The switches are saved under `[cheats]` in `totk.ini`.
 
-The two files are from [MyNXCheats](https://github.com/Arch9SK7/MyNXCheats) by Skyla Kikari (Arch9SK7) and stay in `tools/data/cheats/` with that credit at the top. Only the 1.4.3 file has been tried in game.
+The two files are from [MyNXCheats](https://github.com/Arch9SK7/MyNXCheats) by Skyla Kikari (Arch9SK7) and stay in `tools/data/cheats/` with that credit at the top. The 1.2.1 file has not been tried in game.
 
 ## Adding your own cheat file
 
