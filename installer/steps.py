@@ -674,6 +674,20 @@ ASPECT_SIZES = ('2560x1080', '3440x1440', '3840x1600', '5120x2160', '3840x1080',
                 '1280x800', '1680x1050', '1920x1200', '2560x1600')
 
 
+PATCH_STAMPS = 'cache/romfs-patches.json'   # {set folder: fingerprint of what made it}, Prepare.run
+
+
+def translator_identity(exe):
+    """What the shader cache's keys hold of the translator (runtime/gfx_shader.c xlate_identity): the .id beside it,
+    which tools/build_xlate.py hashes from the translator's sources, else the binary's own hash. Each release builds
+    the binary again, so it differs between releases of the same sources; the .id does not, and the translations
+    stay valid."""
+    tag = exe.with_suffix('.id')
+    if tag.is_file():
+        return 'id:' + tag.read_text(encoding='utf-8').strip()
+    return 'exe:' + file_sha256(exe)
+
+
 class Prepare(Step):
     id = 'prepare'
 
@@ -694,7 +708,7 @@ class Prepare(Step):
     def run(self, ctx):
         layout, rep, dest = ctx.layout, ctx.reporter, ctx.dest
         xlate = dest / layout.xlate.name
-        if xlate.is_file() and file_sha256(xlate) != file_sha256(layout.xlate):
+        if xlate.is_file() and translator_identity(xlate) != translator_identity(layout.xlate):
             # Another translator: its cache keys differ, so the old translations would only take space.
             for name in ('shader-cache', 'shader-prepared.bin'):
                 remove(dest / name)
@@ -721,23 +735,47 @@ class Prepare(Step):
         sets = [('prepare-xbox', 'romfs-patches-xbox', ['--xbox-prompts']),
                 ('prepare-ps', 'romfs-patches-ps', ['--playstation-prompts']), ('prepare', 'romfs-patches', [])]
         sets += [(f'prepare-{size}', f'romfs-patches-{size}', ['--aspect', size]) for size in ASPECT_SIZES]
-        for _, folder, _ in sets:
+        # A set is written again only when what makes it changed: the extracted game, the three tools, the bundled
+        # Python (its zstd writes the files) or the set's arguments. They come out byte-identical otherwise, and an
+        # update used to spend two minutes rewriting all thirteen. The fingerprints are kept in PATCH_STAMPS.
+        stamps_path = dest / PATCH_STAMPS
+        try:
+            stamps = json.loads(stamps_path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            stamps = {}
+        made_by = fingerprint('romfs-patches-1', ctx.keys['extract'], game_version(ctx),
+                              *[layout.tools / n for n in ('make_romfs_patches.py', 'ps_prompts.py',
+                                                           'ultrawide_layout.py')],
+                              *sorted(p for p in layout.python.parent.glob('*') if p.suffix in ('.dll', '.pyd', '.zip')))
+        want = {folder: fingerprint(made_by, *extra) for _, folder, extra in sets}
+        todo = [s for s in sets
+                if stamps.get(s[1]) != want[s[1]] or not (dest / s[1] / 'manifest.tsv').is_file()]
+        if len(todo) < len(sets):
+            rep.log(f'romfs patch sets: {len(sets) - len(todo)} of {len(sets)} unchanged, kept')
+        for _, folder, _ in todo:
             remove(dest / folder)
-        rep.progress('prepare', 'romfs_patches', 0, len(sets), 'patches', force=True)
+            stamps.pop(folder, None)
+        rep.progress('prepare', 'romfs_patches', len(sets) - len(todo), len(sets), 'patches', force=True)
         # Each run is one Python process of a few hundred MB: a quarter of the logical cores, two to six runs.
         workers = min(6, max(2, (os.cpu_count() or 4) // 4))
         results = run_parallel(ctx, [(step, layout.tools / 'make_romfs_patches.py', [*base, dest / folder, *extra])
-                                     for step, folder, extra in sets], workers,
-                               lambda n: rep.progress('prepare', 'romfs_patches', n, len(sets), 'patches'))
-        for (step, folder, _), (code, log) in zip(sets, results):
+                                     for step, folder, extra in todo], workers,
+                               lambda n: rep.progress('prepare', 'romfs_patches', len(sets) - len(todo) + n,
+                                                      len(sets), 'patches'))
+        for (step, folder, _), (code, log) in zip(todo, results):
             if not code:
+                stamps[folder] = want[folder]
                 continue
             if step in ('prepare-xbox', 'prepare-ps'):
                 remove(dest / folder)
                 rep.warning('warn.xbox_prompts_failed' if step == 'prepare-xbox' else 'warn.ps_prompts_failed',
                             code=code, log=str(log))
             else:
+                stamps_path.parent.mkdir(parents=True, exist_ok=True)
+                stamps_path.write_text(json.dumps(stamps, indent=1), encoding='utf-8')
                 raise InstallError('prepare.romfs_patches_failed', code=code, log=str(log))
+        stamps_path.parent.mkdir(parents=True, exist_ok=True)
+        stamps_path.write_text(json.dumps(stamps, indent=1), encoding='utf-8')
         # Achievements (tools/achievements.py): the default set when the folder has none (the player's own set, made
         # in the editor, stays), compiled against this game version. Optional: without it the game has no
         # achievements, so the setup warns and goes on.
