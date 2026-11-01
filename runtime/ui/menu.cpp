@@ -2862,15 +2862,17 @@ static void layout_rail(float x, float rail, float H, float scale) {
     dl->AddPolyline(d, 4, ui_col(kUiZonai, 0.16f * glow), ImDrawFlags_Closed, 8 * scale);
     dl->AddPolyline(d, 4, ui_col(kUiGold), ImDrawFlags_Closed, 1.6f * scale);
     dl->AddCircleFilled(c, 2.5f * scale, ui_col(kUiGoldHi));
-    float bs = 62 * scale;
-    ImGui::SetCursorPosY(96 * scale);
+    // the tabs share the height between the mark and the close button: 62 px buttons 6 px apart when they fit,
+    // smaller ones when the window is short (eleven tabs at 1080p do not fit at full size)
+    float cs = 52 * scale, top = 96 * scale, room = H - 26 * scale - cs - 14 * scale - top;
+    float per = fminf(68 * scale, room / TAB_COUNT), bs = per * (62.0f / 68.0f), gap = per - bs;
+    ImGui::SetCursorPosY(top);
     for (int t = 0; t < TAB_COUNT; t++) {
         ImGui::SetCursorPosX((rail - bs) / 2);
         if (rail_button(t, g_tab == t, bs, scale, menu_text(kTabNames[t])) && t != g_tab && !g_modal && !binds_modal())
             g_tab_request = t;
-        ImGui::Dummy(ImVec2(1, 6 * scale));
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + gap - ImGui::GetStyle().ItemSpacing.y);
     }
-    float cs = 52 * scale;
     ImGui::SetCursorPos(ImVec2((rail - cs) / 2, H - 26 * scale - cs));
     ImVec2 p = ImGui::GetCursorScreenPos();
     ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
