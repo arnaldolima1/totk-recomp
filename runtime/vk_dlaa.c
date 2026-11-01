@@ -9,6 +9,7 @@
 // layout with a set-then-get round trip before anything relies on it.
 //
 // Where DLAA runs in the frame, the jitter and the motion vectors: see the sections below.
+#ifdef _WIN32
 #include <windows.h>
 #include <math.h>
 #include <stdio.h>
@@ -668,3 +669,20 @@ int vk_dlaa_skip_draw(VkExec *ex, const GfxShader *fs) {
     if (!ex->depth.image) return D.up;   // the scaling pass
     return !fxaa;
 }
+
+#else
+// NGX is loaded as a Windows DLL; elsewhere DLAA, the DLSS modes' scaling and the FXAA switch do nothing.
+#include "vk_dlaa.h"
+
+int vk_dlaa_wanted(void) { return 0; }
+void vk_dlaa_instance_exts(const char **ext, uint32_t *n, uint32_t max) { (void)ext, (void)n, (void)max; }
+void vk_dlaa_device_exts(const VkExtensionProperties *have, uint32_t nhave, const char **ext, uint32_t *n, uint32_t max) {
+    (void)have, (void)nhave, (void)ext, (void)n, (void)max;
+}
+void vk_dlaa_init(void) {}
+void vk_dlaa_pass(VkExec *ex) { (void)ex; }
+void vk_dlaa_frame(void) {}
+void vk_dlaa_draw(VkExec *ex) { (void)ex; }
+void vk_dlaa_viewport(VkExec *ex, VkViewport *v) { (void)ex, (void)v; }
+int vk_dlaa_skip_draw(VkExec *ex, const GfxShader *fs) { (void)ex, (void)fs; return 0; }
+#endif
