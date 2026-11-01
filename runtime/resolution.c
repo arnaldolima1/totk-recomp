@@ -52,6 +52,7 @@ static struct {
     int heapdef_ok;            // romfs.c serves the grown HeapDef
     int on;                    // res_init switched the patch sets on
     unsigned shadow;           // fixed sun shadow map size (TOTK_SHADOW_RES), 0: the game's own
+    double dlss_k;             // TOTK_DLSS quality/balanced/performance: the scene's share of the output, else 0
 } R;
 
 static void decide(void) {
@@ -70,7 +71,16 @@ static void decide(void) {
     }
     const char *s = cfg_value("TOTK_RENDER_SCALE");
     double k = 5.0 / 6.0;
-    if (strcmp(s, "game")) {
+    const char *m = cfg_value("TOTK_DLSS");   // a DLSS mode other than dlaa sets the scene size
+    static const struct { const char *name; double k; } dlss[] = {
+        {"quality", 2.0 / 3.0}, {"balanced", 0.58}, {"performance", 0.5}};
+    for (int i = 0; i < 3; i++)
+        if (!strcmp(m, dlss[i].name)) R.dlss_k = dlss[i].k;
+    if (R.dlss_k) {
+        k = R.dlss_k;
+        R.scene_set = 1;
+        rt_log("resolution: DLSS %s: the scene at %.0f %% of the output (render_scale ignored)", m, k * 100);
+    } else if (strcmp(s, "game")) {
         char *end;
         double pct = strtod(s, &end);
         if (end != s && !*end && pct >= 25 && pct <= 400) {
@@ -226,7 +236,25 @@ static void shadow_init(uint8_t *page) {
 // ---- start: the patch page and the sets
 static uint64_t pack(unsigned w, unsigned h) { return (uint64_t)h << 32 | w; }
 
+// TOTK_SHADOW_RANGE (percent, 50 to 400; 100 = the game's): the sun's shadow cascades end at 20, 40, 80 and 160 m.
+// Other values multiply those distances through the cascade patch set (recomp/patches-v143.txt), so the sharp first
+// cascade reaches further and the visible steps between cascades move away from the player, at the cost of shadow
+// texels per metre (TOTK_SHADOW_SCALE pays that back).
+static void res_shadow_range(void) {
+    int pct = cfg_int("TOTK_SHADOW_RANGE"), set = rt_patch_set("cascade");
+    if (pct == 100) return;
+    if (set < 0) {
+        rt_log("resolution: the generated C has no cascade patch set; shadow_range stays 100");
+        return;
+    }
+    float k = (float)(pct < 50 ? 50 : pct > 400 ? 400 : pct) / 100.0f, d[4] = {20 * k, 40 * k, 80 * k, 160 * k};
+    memcpy((uint8_t *)rt_patch_page() + 64, d, sizeof d);
+    rt_patch_switch(set, 1);
+    rt_log("resolution: shadow cascades end at %g, %g, %g and %g m", d[0], d[1], d[2], d[3]);
+}
+
 void res_init(void) {
+    res_shadow_range();
     if (!bigger()) {
         rt_log("resolution: the game's own (output 1920x1080, scene 1600x900)");
         shadow_init(rt_patch_page());
@@ -275,6 +303,13 @@ void res_init(void) {
     shadow_init(page);
     rt_log("resolution: output %ux%u, scene %ux%u%s; texture heap +%llu KiB", R.ow, R.oh, R.sw, R.sh,
            scene_on ? "" : " (the game's own 5/6 of the output)", (unsigned long long)res_heap_extra_kib());
+}
+
+// DLSS upscaling: textures are sampled for the output's resolution, not the scene's (NVIDIA's DLSS guide: a mip bias
+// of log2(render / output)), so their detail survives the scaling. 0 without a DLSS mode.
+float res_dlss_lod_bias(void) {
+    decide();
+    return R.dlss_k ? (float)log2(R.dlss_k) : 0.0f;
 }
 
 // 16:9 within 1% (1366x768 counts): the shape the game's own layouts and camera are made for.

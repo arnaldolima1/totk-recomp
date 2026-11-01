@@ -30,7 +30,7 @@ static const char *const text_en[UI_TEXT_COUNT] = {
 
     [UI_MENU_TITLE] = "Settings",
     [UI_MENU_TAB_SCREEN] = "Screen", [UI_MENU_TAB_GAME] = "Game", [UI_MENU_TAB_SOUND] = "Sound",
-    [UI_MENU_TAB_CONTROLS] = "Controls", [UI_MENU_TAB_MENU] = "Menu", [UI_MENU_TAB_ADVANCED] = "Advanced",
+    [UI_MENU_TAB_CONTROLS] = "Controls", [UI_MENU_TAB_AMIIBO] = "Amiibo", [UI_MENU_TAB_MENU] = "Menu", [UI_MENU_TAB_ADVANCED] = "Advanced",
     [UI_MENU_CONTINUE] = "Continue", [UI_MENU_QUIT] = "Quit game",
     [UI_MENU_ON] = "On", [UI_MENU_OFF] = "Off", [UI_MENU_AUTO] = "Automatic", [UI_MENU_DEFAULT_MARK] = "default",
     [UI_MENU_AFTER_RESTART] = "after restart", [UI_MENU_SET_BY_ENV] = "set by environment variable",
@@ -108,6 +108,31 @@ static const char *const text_en[UI_TEXT_COUNT] = {
                               "bright room.",
     [UI_MENU_HDR_UI] = "HUD and menu brightness",
     [UI_MENU_HDR_UI_DESC] = "Nits of the HUD's and this menu's white.",
+    [UI_MENU_SHADOW_SCALE] = "Shadow resolution",
+    [UI_MENU_SHADOW_SCALE_DESC] = "Draws the sun's shadow maps this many times larger on each side than the game's 960x960: "
+                                  "sharper shadow edges and leaf shadows. Takes effect at the next start.",
+    [UI_MENU_PCSS] = "Soft shadows",
+    [UI_MENU_PCSS_DESC] = "Sun shadows sharp where an object meets the ground and softer the further the shadow falls "
+                          "(PCSS). 0 keeps the game's filter. Takes effect at the next start.",
+    [UI_MENU_CONTACT_SHADOWS] = "Contact shadows",
+    [UI_MENU_CONTACT_SHADOWS_DESC] = "Small sun shadows the shadow maps miss: at feet, under stones, in grass and creases. "
+                                     "Traced on the screen after lighting. Takes effect at the next start.",
+    [UI_MENU_SHADOW_RANGE] = "Shadow cascade range",
+    [UI_MENU_SHADOW_RANGE_DESC] = "Moves the steps where shadows turn softer (the game's 20, 40, 80 and 160 m) further "
+                                  "away. Spreads the shadow map over more ground: raise Shadow resolution with it. "
+                                  "Takes effect at the next start.",
+    [UI_MENU_DLAA] = "NVIDIA DLSS / DLAA",
+    [UI_MENU_DLAA_DESC] = "NVIDIA DLSS for the 3D scene (NVIDIA RTX GPUs; nvngx_dlss.dll next to totk.exe): smoother edges "
+                          "and less shimmer. The HUD is not touched. The mode below sets the resolution it works from. Takes effect "
+                          "after a restart.",
+    [UI_MENU_DLSS] = "DLSS mode",
+    [UI_MENU_DLSS_DESC] = "DLAA draws the 3D scene at full resolution. Quality, Balanced and Performance draw it at 67, 58 "
+                          "and 50 % and let DLSS scale it up, for more frames per second; they replace the 3D render "
+                          "scale. Takes effect after a restart.",
+    [UI_MENU_DLSS_DLAA] = "DLAA (native)", [UI_MENU_DLSS_QUALITY] = "Quality", [UI_MENU_DLSS_BALANCED] = "Balanced",
+    [UI_MENU_DLSS_PERFORMANCE] = "Performance",
+    [UI_MENU_FXAA] = "Game anti-aliasing (FXAA)",
+    [UI_MENU_FXAA_DESC] = "The game's own FXAA edge smoothing. It blurs fine detail a little; with DLAA on it is not needed.",
 
     [UI_MENU_FPS_LIMIT] = "Frame rate limit",
     [UI_MENU_FPS_LIMIT_DESC] = "The most frames per second the game draws. Above 60 is experimental and needs Game speed "
@@ -170,8 +195,9 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_RESTART_CONFIRM] = "Restart the game now? Progress since your last save is lost.",
     [UI_MENU_RESTART_YES] = "Restart",
     [UI_MENU_RESTART_SAVING] = "The game is saving: Restart is possible in a moment.",
-    [UI_MENU_STICK_DEADZONE] = "Stick dead zone",
-    [UI_MENU_STICK_DEADZONE_DESC] = "How far a gamepad stick moves before the game sees it. Raise it if the character or the camera moves on its own.",
+    [UI_MENU_LSTICK_DEADZONE] = "Left stick dead zone", [UI_MENU_RSTICK_DEADZONE] = "Right stick dead zone",
+    [UI_MENU_STICK_DEADZONE_DESC] = "How far a gamepad stick moves before the game sees it. Raise it if the character or the camera moves on its own: let go of the stick, read \"stick now\" and set the dead zone a few percent above it.",
+    [UI_MENU_STICK_DEADZONE_NOW] = "stick now: %.0f %%",
     [UI_MENU_MOUSE_SENS] = "Mouse camera sensitivity",
     [UI_MENU_MOUSE_SENS_DESC] = "How fast the mouse turns the camera.",
     [UI_MENU_WALK_KEY] = "Walk key",
@@ -231,6 +257,36 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_PAD_LPADDLE2] = "Left back button 2", [UI_PAD_RPADDLE2] = "Right back button 2",
     [UI_PAD_CROSS] = "Cross", [UI_PAD_CIRCLE] = "Circle", [UI_PAD_SQUARE] = "Square", [UI_PAD_TRIANGLE] = "Triangle",
 
+    [UI_MENU_AMIIBO_DIR] = "Amiibo folder",
+    [UI_MENU_AMIIBO_OPEN] = "Open",
+    [UI_MENU_AMIIBO_DEFAULT_DIR] = "Default folder",
+    [UI_MENU_AMIIBO_REFRESH] = "Refresh",
+    [UI_MENU_AMIIBO_PICK] = "Amiibo dumps (540-byte .bin or .nfc files):",
+    [UI_MENU_AMIIBO_NO_DIR] = "Cannot open the folder %s",
+    [UI_MENU_AMIIBO_READER] = "NFC reader",
+    [UI_MENU_AMIIBO_STATE] = "Reader:",
+    [UI_MENU_AMIIBO_STATE_IDLE] = "ready",
+    [UI_MENU_AMIIBO_STATE_SEARCHING] = "the game is waiting for an amiibo",
+    [UI_MENU_AMIIBO_STATE_FOUND] = "amiibo on the reader",
+    [UI_MENU_AMIIBO_STATE_MOUNTED] = "the game is reading the amiibo",
+    [UI_MENU_AMIIBO_STATE_OFF] = "off",
+    [UI_MENU_AMIIBO_FILE] = "Selected file:",
+    [UI_MENU_AMIIBO_NO_FILE] = "(no file selected)",
+    [UI_MENU_AMIIBO_TAP] = "Tap the amiibo",
+    [UI_MENU_AMIIBO_REMOVE] = "Lift the amiibo",
+    [UI_MENU_AMIIBO_AUTO_REMOVE] = "Lift the amiibo by itself after a tap",
+    [UI_MENU_AMIIBO_HOLD] = "Time on the reader",
+    [UI_MENU_AMIIBO_SECONDS] = "%.1f s",
+    [UI_MENU_AMIIBO_TAG] = "Amiibo on the reader:",
+    [UI_MENU_AMIIBO_NO_TAG] = "No amiibo on the reader.",
+    [UI_MENU_AMIIBO_TAG_FILE] = "File: %s",
+    [UI_MENU_AMIIBO_TAG_ID] = "Character %s, series %02x, number %04x, type %02x",
+    [UI_MENU_AMIIBO_TAG_UID] = "UID: %s",
+    [UI_MENU_AMIIBO_READY] = "Ready",
+    [UI_MENU_AMIIBO_TAPPED] = "Tapped: %s",
+    [UI_MENU_AMIIBO_LOAD_FAILED] = "Not an amiibo dump (540-byte NTAG215): %s",
+    [UI_MENU_AMIIBO_REMOVED] = "Amiibo lifted",
+    [UI_MENU_AMIIBO_STATUS] = "Status: %s",
     [UI_MENU_MENU_LANG] = "Menu language", [UI_MENU_MENU_LANG_DESC] = "Language of this menu and the overlay.",
     [UI_MENU_MENU_LANG_AUTO] = "Automatic (from Windows)",
 
@@ -335,7 +391,7 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
 
     [UI_MENU_TITLE] = "Настройки",
     [UI_MENU_TAB_SCREEN] = "Экран", [UI_MENU_TAB_GAME] = "Игра", [UI_MENU_TAB_SOUND] = "Звук",
-    [UI_MENU_TAB_CONTROLS] = "Управление", [UI_MENU_TAB_MENU] = "Меню", [UI_MENU_TAB_ADVANCED] = "Дополнительно",
+    [UI_MENU_TAB_CONTROLS] = "Управление", [UI_MENU_TAB_AMIIBO] = "Amiibo", [UI_MENU_TAB_MENU] = "Меню", [UI_MENU_TAB_ADVANCED] = "Дополнительно",
     [UI_MENU_CONTINUE] = "Продолжить", [UI_MENU_QUIT] = "Выйти из игры",
     [UI_MENU_ON] = "Вкл.", [UI_MENU_OFF] = "Выкл.", [UI_MENU_AUTO] = "Автоматически",
     [UI_MENU_DEFAULT_MARK] = "по умолчанию",
@@ -416,6 +472,31 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
                               "поднимите.",
     [UI_MENU_HDR_UI] = "Яркость интерфейса и меню",
     [UI_MENU_HDR_UI_DESC] = "Ниты белого цвета интерфейса игры и этого меню.",
+    [UI_MENU_SHADOW_SCALE] = "Разрешение теней",
+    [UI_MENU_SHADOW_SCALE_DESC] = "Карты теней от солнца рисуются во столько раз больше по каждой стороне, чем 960x960 "
+                                  "самой игры: края теней и тени листвы чётче. Действует после перезапуска.",
+    [UI_MENU_PCSS] = "Мягкие тени",
+    [UI_MENU_PCSS_DESC] = "Тени от солнца резкие там, где предмет касается земли, и мягче, чем дальше падает тень "
+                          "(PCSS). 0 оставляет фильтр игры. Действует после перезапуска.",
+    [UI_MENU_CONTACT_SHADOWS] = "Контактные тени",
+    [UI_MENU_CONTACT_SHADOWS_DESC] = "Мелкие тени от солнца, которых нет на картах теней: у ног, под камнями, в траве и "
+                                     "складках. Считаются по экрану после освещения. Действует после перезапуска.",
+    [UI_MENU_SHADOW_RANGE] = "Дальность каскадов теней",
+    [UI_MENU_SHADOW_RANGE_DESC] = "Отодвигает границы, за которыми тени становятся мягче (в игре 20, 40, 80 и 160 м). "
+                                  "Карта теней растягивается на большую площадь, поэтому вместе с этим поднимайте "
+                                  "разрешение теней. Действует после перезапуска.",
+    [UI_MENU_DLAA] = "NVIDIA DLSS / DLAA",
+    [UI_MENU_DLAA_DESC] = "NVIDIA DLSS для 3D-сцены (видеокарты NVIDIA RTX; nvngx_dlss.dll рядом с totk.exe): ровнее края и "
+                          "меньше мерцания. Интерфейс не затрагивается. Режим ниже задаёт разрешение, с которым он работает. "
+                          "Действует после перезапуска.",
+    [UI_MENU_DLSS] = "Режим DLSS",
+    [UI_MENU_DLSS_DESC] = "DLAA рисует 3D-сцену в полном разрешении. «Качество», «Баланс» и «Производительность» рисуют её "
+                          "в 67, 58 и 50 % и масштабируют через DLSS ради большего числа кадров; они заменяют масштаб "
+                          "3D-отрисовки. Действует после перезапуска.",
+    [UI_MENU_DLSS_DLAA] = "DLAA (родное)", [UI_MENU_DLSS_QUALITY] = "Качество", [UI_MENU_DLSS_BALANCED] = "Баланс",
+    [UI_MENU_DLSS_PERFORMANCE] = "Производительность",
+    [UI_MENU_FXAA] = "Сглаживание игры (FXAA)",
+    [UI_MENU_FXAA_DESC] = "Собственное сглаживание FXAA. Слегка размывает мелкие детали; с DLAA оно не нужно.",
 
     [UI_MENU_FPS_LIMIT] = "Ограничение частоты кадров",
     [UI_MENU_FPS_LIMIT_DESC] = "Наибольшее число кадров в секунду. Выше 60 — экспериментальный режим, нужна «Скорость "
@@ -477,8 +558,9 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_RESTART_CONFIRM] = "Перезапустить игру сейчас? Прогресс после последнего сохранения будет потерян.",
     [UI_MENU_RESTART_YES] = "Перезапустить",
     [UI_MENU_RESTART_SAVING] = "Игра сохраняется: перезапуск будет доступен через мгновение.",
-    [UI_MENU_STICK_DEADZONE] = "Мёртвая зона стиков",
-    [UI_MENU_STICK_DEADZONE_DESC] = "Насколько нужно отклонить стик геймпада, чтобы игра это заметила. Увеличьте, если персонаж или камера двигаются сами.",
+    [UI_MENU_LSTICK_DEADZONE] = "Мёртвая зона левого стика", [UI_MENU_RSTICK_DEADZONE] = "Мёртвая зона правого стика",
+    [UI_MENU_STICK_DEADZONE_DESC] = "Насколько нужно отклонить стик геймпада, чтобы игра это заметила. Увеличьте, если персонаж или камера двигаются сами: отпустите стик, посмотрите «стик сейчас» и поставьте мёртвую зону на несколько процентов выше.",
+    [UI_MENU_STICK_DEADZONE_NOW] = "стик сейчас: %.0f %%",
     [UI_MENU_MOUSE_SENS] = "Чувствительность мыши",
     [UI_MENU_MOUSE_SENS_DESC] = "Как быстро мышь поворачивает камеру.",
     [UI_MENU_WALK_KEY] = "Клавиша шага",
@@ -542,6 +624,36 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_PAD_LPADDLE2] = "Левая задняя кнопка 2", [UI_PAD_RPADDLE2] = "Правая задняя кнопка 2",
     [UI_PAD_CROSS] = "Крест", [UI_PAD_CIRCLE] = "Круг", [UI_PAD_SQUARE] = "Квадрат", [UI_PAD_TRIANGLE] = "Треугольник",
 
+    [UI_MENU_AMIIBO_DIR] = "Папка amiibo",
+    [UI_MENU_AMIIBO_OPEN] = "Открыть",
+    [UI_MENU_AMIIBO_DEFAULT_DIR] = "Папка по умолчанию",
+    [UI_MENU_AMIIBO_REFRESH] = "Обновить",
+    [UI_MENU_AMIIBO_PICK] = "Дампы amiibo (файлы .bin или .nfc по 540 байт):",
+    [UI_MENU_AMIIBO_NO_DIR] = "Не удаётся открыть папку %s",
+    [UI_MENU_AMIIBO_READER] = "NFC-считыватель",
+    [UI_MENU_AMIIBO_STATE] = "Считыватель:",
+    [UI_MENU_AMIIBO_STATE_IDLE] = "готов",
+    [UI_MENU_AMIIBO_STATE_SEARCHING] = "игра ждёт amiibo",
+    [UI_MENU_AMIIBO_STATE_FOUND] = "amiibo на считывателе",
+    [UI_MENU_AMIIBO_STATE_MOUNTED] = "игра читает amiibo",
+    [UI_MENU_AMIIBO_STATE_OFF] = "выключен",
+    [UI_MENU_AMIIBO_FILE] = "Выбранный файл:",
+    [UI_MENU_AMIIBO_NO_FILE] = "(файл не выбран)",
+    [UI_MENU_AMIIBO_TAP] = "Приложить amiibo",
+    [UI_MENU_AMIIBO_REMOVE] = "Убрать amiibo",
+    [UI_MENU_AMIIBO_AUTO_REMOVE] = "Убирать amiibo само после касания",
+    [UI_MENU_AMIIBO_HOLD] = "Время на считывателе",
+    [UI_MENU_AMIIBO_SECONDS] = "%.1f с",
+    [UI_MENU_AMIIBO_TAG] = "Amiibo на считывателе:",
+    [UI_MENU_AMIIBO_NO_TAG] = "На считывателе нет amiibo.",
+    [UI_MENU_AMIIBO_TAG_FILE] = "Файл: %s",
+    [UI_MENU_AMIIBO_TAG_ID] = "Персонаж %s, серия %02x, номер %04x, тип %02x",
+    [UI_MENU_AMIIBO_TAG_UID] = "UID: %s",
+    [UI_MENU_AMIIBO_READY] = "Готово",
+    [UI_MENU_AMIIBO_TAPPED] = "Приложен: %s",
+    [UI_MENU_AMIIBO_LOAD_FAILED] = "Не дамп amiibo (NTAG215, 540 байт): %s",
+    [UI_MENU_AMIIBO_REMOVED] = "Amiibo убран",
+    [UI_MENU_AMIIBO_STATUS] = "Состояние: %s",
     [UI_MENU_MENU_LANG] = "Язык меню", [UI_MENU_MENU_LANG_DESC] = "Язык этого меню и индикатора.",
     [UI_MENU_MENU_LANG_AUTO] = "Автоматически (из Windows)",
 
@@ -648,7 +760,7 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
 
     [UI_MENU_TITLE] = "Configurações",
     [UI_MENU_TAB_SCREEN] = "Tela", [UI_MENU_TAB_GAME] = "Jogo", [UI_MENU_TAB_SOUND] = "Som",
-    [UI_MENU_TAB_CONTROLS] = "Controles", [UI_MENU_TAB_MENU] = "Menu", [UI_MENU_TAB_ADVANCED] = "Avançado",
+    [UI_MENU_TAB_CONTROLS] = "Controles", [UI_MENU_TAB_AMIIBO] = "Amiibo", [UI_MENU_TAB_MENU] = "Menu", [UI_MENU_TAB_ADVANCED] = "Avançado",
     [UI_MENU_CONTINUE] = "Continuar", [UI_MENU_QUIT] = "Sair do jogo",
     [UI_MENU_ON] = "Ligado", [UI_MENU_OFF] = "Desligado", [UI_MENU_AUTO] = "Automático",
     [UI_MENU_DEFAULT_MARK] = "padrão",
@@ -736,8 +848,12 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_PAD_LAYOUT_AUTO] = "Automático", [UI_MENU_PAD_LAYOUT_NINTENDO] = "Nintendo (A à direita)",
     [UI_MENU_PAD_LAYOUT_XBOX] = "Xbox (A embaixo)",
     [UI_MENU_PAD_LAYOUT_IN_USE] = "em uso: %s",
-    [UI_MENU_STICK_DEADZONE] = "Zona morta dos analógicos",
-    [UI_MENU_STICK_DEADZONE_DESC] = "Quanto um analógico do controle precisa se mover antes que o jogo perceba. Aumente se o personagem ou a câmera se moverem sozinhos.",
+    [UI_MENU_LSTICK_DEADZONE] = "Zona morta do analógico esquerdo",
+    [UI_MENU_RSTICK_DEADZONE] = "Zona morta do analógico direito",
+    [UI_MENU_STICK_DEADZONE_DESC] = "Quanto um analógico do controle precisa se mover antes que o jogo perceba. Aumente "
+                                    "se o personagem ou a câmera se moverem sozinhos: solte o analógico, leia \"analógico "
+                                    "agora\" e coloque a zona morta alguns por cento acima.",
+    [UI_MENU_STICK_DEADZONE_NOW] = "analógico agora: %.0f %%",
     [UI_MENU_MOUSE_SENS] = "Sensibilidade da câmera no mouse",
     [UI_MENU_MOUSE_SENS_DESC] = "Quão rápido o mouse gira a câmera.",
 
@@ -793,6 +909,36 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_PAD_LPADDLE2] = "Botão traseiro esquerdo 2", [UI_PAD_RPADDLE2] = "Botão traseiro direito 2",
     [UI_PAD_CROSS] = "Cruz", [UI_PAD_CIRCLE] = "Círculo", [UI_PAD_SQUARE] = "Quadrado", [UI_PAD_TRIANGLE] = "Triângulo",
 
+    [UI_MENU_AMIIBO_DIR] = "Pasta de amiibo",
+    [UI_MENU_AMIIBO_OPEN] = "Abrir",
+    [UI_MENU_AMIIBO_DEFAULT_DIR] = "Pasta padrão",
+    [UI_MENU_AMIIBO_REFRESH] = "Atualizar",
+    [UI_MENU_AMIIBO_PICK] = "Dumps de amiibo (arquivos .bin ou .nfc de 540 bytes):",
+    [UI_MENU_AMIIBO_NO_DIR] = "Não foi possível abrir a pasta %s",
+    [UI_MENU_AMIIBO_READER] = "Leitor NFC",
+    [UI_MENU_AMIIBO_STATE] = "Leitor:",
+    [UI_MENU_AMIIBO_STATE_IDLE] = "pronto",
+    [UI_MENU_AMIIBO_STATE_SEARCHING] = "o jogo está esperando um amiibo",
+    [UI_MENU_AMIIBO_STATE_FOUND] = "amiibo no leitor",
+    [UI_MENU_AMIIBO_STATE_MOUNTED] = "o jogo está lendo o amiibo",
+    [UI_MENU_AMIIBO_STATE_OFF] = "desligado",
+    [UI_MENU_AMIIBO_FILE] = "Arquivo selecionado:",
+    [UI_MENU_AMIIBO_NO_FILE] = "(nenhum arquivo selecionado)",
+    [UI_MENU_AMIIBO_TAP] = "Encostar o amiibo",
+    [UI_MENU_AMIIBO_REMOVE] = "Afastar o amiibo",
+    [UI_MENU_AMIIBO_AUTO_REMOVE] = "Afastar o amiibo sozinho depois de encostar",
+    [UI_MENU_AMIIBO_HOLD] = "Tempo no leitor",
+    [UI_MENU_AMIIBO_SECONDS] = "%.1f s",
+    [UI_MENU_AMIIBO_TAG] = "Amiibo no leitor:",
+    [UI_MENU_AMIIBO_NO_TAG] = "Nenhum amiibo no leitor.",
+    [UI_MENU_AMIIBO_TAG_FILE] = "Arquivo: %s",
+    [UI_MENU_AMIIBO_TAG_ID] = "Personagem %s, série %02x, número %04x, tipo %02x",
+    [UI_MENU_AMIIBO_TAG_UID] = "UID: %s",
+    [UI_MENU_AMIIBO_READY] = "Pronto",
+    [UI_MENU_AMIIBO_TAPPED] = "Encostado: %s",
+    [UI_MENU_AMIIBO_LOAD_FAILED] = "Não é um dump de amiibo (NTAG215, 540 bytes): %s",
+    [UI_MENU_AMIIBO_REMOVED] = "Amiibo afastado",
+    [UI_MENU_AMIIBO_STATUS] = "Estado: %s",
     [UI_MENU_MENU_LANG] = "Idioma do menu", [UI_MENU_MENU_LANG_DESC] = "Idioma deste menu e do indicador.",
     [UI_MENU_MENU_LANG_AUTO] = "Automático (do Windows)",
 
@@ -972,6 +1118,36 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_MENU_WALK_SCALE_DESC] = "A inclinação dos analógicos do teclado enquanto a tecla de andar está segura. Metade "
                                 "é andar, a inclinação total é correr.",
     [UI_MENU_OV_SCALE_DOWN] = "bilinear (o FSR só amplia)",
+    [UI_MENU_SHADOW_SCALE] = "Resolução das sombras",
+    [UI_MENU_SHADOW_SCALE_DESC] = "Desenha os mapas de sombra do sol essa quantidade de vezes maiores em cada lado "
+                                  "que os 960x960 do jogo: bordas de sombra e sombras de folhas mais nítidas. Vale no "
+                                  "próximo início.",
+    [UI_MENU_SHADOW_RANGE] = "Alcance das cascatas de sombra",
+    [UI_MENU_SHADOW_RANGE_DESC] = "Afasta os degraus em que as sombras ficam mais suaves (20, 40, 80 e 160 m no "
+                                  "jogo). Espalha o mapa de sombras por mais terreno: aumente a Resolução das sombras "
+                                  "junto. Vale no próximo início.",
+    [UI_MENU_CONTACT_SHADOWS] = "Sombras de contato",
+    [UI_MENU_CONTACT_SHADOWS_DESC] = "Pequenas sombras do sol que os mapas de sombra não pegam: nos pés, sob pedras, "
+                                     "na grama e em dobras. Traçadas na tela depois da iluminação. Vale no próximo "
+                                     "início.",
+    [UI_MENU_PCSS] = "Sombras suaves",
+    [UI_MENU_PCSS_DESC] = "Sombras do sol nítidas onde um objeto toca o chão e mais suaves quanto mais longe a sombra "
+                          "cai (PCSS). 0 mantém o filtro do jogo. Vale no próximo início.",
+    [UI_MENU_DLAA] = "NVIDIA DLSS / DLAA",
+    [UI_MENU_DLAA_DESC] = "NVIDIA DLSS para a cena 3D (placas NVIDIA RTX; nvngx_dlss.dll ao lado do totk.exe): bordas "
+                          "mais suaves e menos cintilação. O HUD não é afetado. O modo abaixo define a resolução de "
+                          "onde ele parte. Vale após reiniciar.",
+    [UI_MENU_DLSS] = "Modo do DLSS",
+    [UI_MENU_DLSS_DESC] = "DLAA desenha a cena 3D na resolução cheia. Qualidade, Equilibrado e Desempenho a desenham "
+                          "em 67, 58 e 50 % e deixam o DLSS ampliá-la, para mais quadros por segundo; eles substituem "
+                          "a escala 3D. Vale após reiniciar.",
+    [UI_MENU_DLSS_DLAA] = "DLAA (nativo)",
+    [UI_MENU_DLSS_QUALITY] = "Qualidade",
+    [UI_MENU_DLSS_BALANCED] = "Equilibrado",
+    [UI_MENU_DLSS_PERFORMANCE] = "Desempenho",
+    [UI_MENU_FXAA] = "Antisserrilhado do jogo (FXAA)",
+    [UI_MENU_FXAA_DESC] = "A suavização de bordas FXAA do próprio jogo. Borra um pouco os detalhes finos; com o DLAA "
+                          "ligado não é necessária.",
 };
 
 // Simplified Chinese: this row covers the software keyboard and the whole menu, so the menu and the overlay read Chinese
@@ -985,6 +1161,7 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_TAB_GAME] = "游戏",
     [UI_MENU_TAB_SOUND] = "声音",
     [UI_MENU_TAB_CONTROLS] = "操作",
+    [UI_MENU_TAB_AMIIBO] = "amiibo",
     [UI_MENU_TAB_MENU] = "菜单",
     [UI_MENU_TAB_ADVANCED] = "高级",
     [UI_MENU_CONTINUE] = "继续",
@@ -1116,9 +1293,10 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_PAD_LAYOUT_NINTENDO] = "Nintendo（A 在右）",
     [UI_MENU_PAD_LAYOUT_XBOX] = "Xbox（A 在下）",
     [UI_MENU_PAD_LAYOUT_IN_USE] = "使用中：%s",
-    [UI_MENU_STICK_DEADZONE] = "摇杆死区",
+    [UI_MENU_LSTICK_DEADZONE] = "左摇杆死区", [UI_MENU_RSTICK_DEADZONE] = "右摇杆死区",
     [UI_MENU_STICK_DEADZONE_DESC] = "手柄摇杆要推动多远游戏才会响应。如果角色或视角会自己移动，"
-                                    "请调高此值。",
+                                    "请调高此值：松开摇杆，查看“当前摇杆”，把死区设得比它高几个百分点。",
+    [UI_MENU_STICK_DEADZONE_NOW] = "当前摇杆：%.0f %%",
     [UI_MENU_MOUSE_SENS] = "鼠标视角灵敏度",
     [UI_MENU_MOUSE_SENS_DESC] = "鼠标转动视角的速度。",
 
@@ -1229,6 +1407,36 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_PAD_SQUARE] = "方块键",
     [UI_PAD_TRIANGLE] = "三角键",
 
+    [UI_MENU_AMIIBO_DIR] = "amiibo 文件夹",
+    [UI_MENU_AMIIBO_OPEN] = "打开",
+    [UI_MENU_AMIIBO_DEFAULT_DIR] = "默认文件夹",
+    [UI_MENU_AMIIBO_REFRESH] = "刷新",
+    [UI_MENU_AMIIBO_PICK] = "amiibo 转储（540 字节的 .bin 或 .nfc 文件）：",
+    [UI_MENU_AMIIBO_NO_DIR] = "无法打开文件夹 %s",
+    [UI_MENU_AMIIBO_READER] = "NFC 读取器",
+    [UI_MENU_AMIIBO_STATE] = "读取器：",
+    [UI_MENU_AMIIBO_STATE_IDLE] = "就绪",
+    [UI_MENU_AMIIBO_STATE_SEARCHING] = "游戏正在等待 amiibo",
+    [UI_MENU_AMIIBO_STATE_FOUND] = "amiibo 已放在读取器上",
+    [UI_MENU_AMIIBO_STATE_MOUNTED] = "游戏正在读取 amiibo",
+    [UI_MENU_AMIIBO_STATE_OFF] = "已关闭",
+    [UI_MENU_AMIIBO_FILE] = "已选文件：",
+    [UI_MENU_AMIIBO_NO_FILE] = "（未选择文件）",
+    [UI_MENU_AMIIBO_TAP] = "放上 amiibo",
+    [UI_MENU_AMIIBO_REMOVE] = "拿开 amiibo",
+    [UI_MENU_AMIIBO_AUTO_REMOVE] = "放上后自动拿开 amiibo",
+    [UI_MENU_AMIIBO_HOLD] = "停留时间",
+    [UI_MENU_AMIIBO_SECONDS] = "%.1f 秒",
+    [UI_MENU_AMIIBO_TAG] = "读取器上的 amiibo：",
+    [UI_MENU_AMIIBO_NO_TAG] = "读取器上没有 amiibo。",
+    [UI_MENU_AMIIBO_TAG_FILE] = "文件：%s",
+    [UI_MENU_AMIIBO_TAG_ID] = "角色 %s，系列 %02x，编号 %04x，类型 %02x",
+    [UI_MENU_AMIIBO_TAG_UID] = "UID：%s",
+    [UI_MENU_AMIIBO_READY] = "就绪",
+    [UI_MENU_AMIIBO_TAPPED] = "已放上：%s",
+    [UI_MENU_AMIIBO_LOAD_FAILED] = "不是 amiibo 转储（NTAG215，540 字节）：%s",
+    [UI_MENU_AMIIBO_REMOVED] = "已拿开 amiibo",
+    [UI_MENU_AMIIBO_STATUS] = "状态：%s",
     [UI_MENU_MENU_LANG] = "菜单语言",
     [UI_MENU_MENU_LANG_DESC] = "本菜单和性能浮层的语言。",
     [UI_MENU_MENU_LANG_AUTO] = "自动（跟随 Windows）",
@@ -1423,6 +1631,25 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_MENU_WALK_SCALE] = "步行幅度",
     [UI_MENU_WALK_SCALE_DESC] = "按住步行键时键盘摇杆的推动幅度。一半为走路，推满为奔跑。",
     [UI_MENU_OV_SCALE_DOWN] = "双线性（FSR 只能放大）",
+    [UI_MENU_SHADOW_SCALE] = "阴影分辨率",
+    [UI_MENU_SHADOW_SCALE_DESC] = "将太阳阴影贴图的每条边绘制为游戏 960x960 的若干倍：阴影边缘和树叶阴影更清晰。下次启动时生效。",
+    [UI_MENU_SHADOW_RANGE] = "阴影级联范围",
+    [UI_MENU_SHADOW_RANGE_DESC] = "把阴影变柔和的分界（游戏中为 20、40、80 和 160 米）推得更远。阴影贴图会覆盖更大的地面，请同时提高阴影分辨率。下次启动时生效。",
+    [UI_MENU_CONTACT_SHADOWS] = "接触阴影",
+    [UI_MENU_CONTACT_SHADOWS_DESC] = "阴影贴图遗漏的细小太阳阴影：脚下、石头下、草丛和褶皱中。在光照之后于屏幕空间追踪。下次启动时生效。",
+    [UI_MENU_PCSS] = "柔和阴影",
+    [UI_MENU_PCSS_DESC] = "物体接触地面处的太阳阴影锐利，阴影投得越远越柔和（PCSS）。0 保留游戏自身的过滤。下次启动时生效。",
+    [UI_MENU_DLAA] = "NVIDIA DLSS / DLAA",
+    [UI_MENU_DLAA_DESC] = "用于 3D 场景的 NVIDIA DLSS（NVIDIA RTX 显卡；nvngx_dlss.dll 放在 totk.exe 旁）：边缘更平滑，闪烁更少。HUD "
+                          "不受影响。下方的模式决定它的工作分辨率。重启后生效。",
+    [UI_MENU_DLSS] = "DLSS 模式",
+    [UI_MENU_DLSS_DESC] = "DLAA 以全分辨率绘制 3D 场景。质量、平衡和性能分别以 67%、58% 和 50% 绘制，再由 DLSS 放大，以获得更高帧率；它们会取代 3D 渲染比例。重启后生效。",
+    [UI_MENU_DLSS_DLAA] = "DLAA（原生）",
+    [UI_MENU_DLSS_QUALITY] = "质量",
+    [UI_MENU_DLSS_BALANCED] = "平衡",
+    [UI_MENU_DLSS_PERFORMANCE] = "性能",
+    [UI_MENU_FXAA] = "游戏抗锯齿（FXAA）",
+    [UI_MENU_FXAA_DESC] = "游戏自身的 FXAA 边缘平滑。会让细节略微模糊；开启 DLAA 时不需要。",
 };
 
 #define SWKBD_ONLY(name, ...) static const char *const name[UI_TEXT_COUNT] = {SWKBD(__VA_ARGS__)}

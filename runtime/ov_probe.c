@@ -348,6 +348,13 @@ static int event_works(uint64_t ev, int autoclear) {
     return !before && after && again == !autoclear;
 }
 
+// A manual-clear system event an override signalled when binding it: set, and still set on a second wait.
+static int event_set(uint64_t ev) {
+    static uint64_t try_wait;
+    if (!try_wait && !(try_wait = ldr_symbol(TRY_WAIT_SYSTEM_EVENT))) rt_fatal("probe-services: no %s", TRY_WAIT_SYSTEM_EVENT);
+    return (uint8_t)rt_call(gc, try_wait, 1, ev) && (uint8_t)rt_call(gc, try_wait, 1, ev);
+}
+
 static void probe_applet(void) {
     uint8_t *report = guest_alloc(0x100);
     uint64_t uid[2] = {1, 2};
@@ -357,21 +364,28 @@ static void probe_applet(void) {
           "AddInternetConnectionStatus");
     CHECK(CALL("nfp.Initialize", 0) == 0 && (uint32_t)CALL("nfp.GetState", 0) == 1, "nfp initialize");
     uint8_t handles[64];
-    int32_t count = 7;
-    CHECK((uint32_t)CALL("nfp.ListDevices", U(handles), U(&count), 4) == 0x8073 && count == 0, "nfp ListDevices");
+    int32_t count = 0;
+    CHECK((uint32_t)CALL("nfp.ListDevices", U(handles), U(&count), 4) == 0 && count == 1, "nfp ListDevices");
     uint64_t ev = U(guest_alloc(0x100));
     CHECK(CALL("nfp.AttachAvailabilityChangeEvent", ev) == 0, "AttachAvailabilityChangeEvent");
-    int nfp_event = event_works(ev, 0);
-    CHECK(nfp_event, "the nfp availability event does not work as a manual-clear system event");
+    // The emulated reader is there from the start (amiibo.c), so the availability event is set when it is attached.
+    int nfp_event = event_set(ev);
+    CHECK(nfp_event, "the nfp availability event is not set for the emulated reader, or clears itself");
     CHECK((uint32_t)CALL("nfp.GetDeviceState", U(handles)) == 0, "nfp device state");
-    static const char *const none[] = {"nfp.Mount", "nfp.GetNpadId", "nfp.AttachActivateEvent", "nfp.AttachDeactivateEvent",
-                                       "nfp.StartDetection", "nfp.StopDetection", "nfp.GetTagInfo", "nfp.GetModelInfo"};
+    static const char *const none[] = {"nfp.Mount", "nfp.GetTagInfo", "nfp.GetModelInfo"};
     uint8_t out[0x100];
     for (size_t i = 0; i < sizeof none / sizeof *none; i++) {
-        int first_is_handle = !strcmp(none[i], "nfp.Mount") || strstr(none[i], "Detection");
+        int first_is_handle = !strcmp(none[i], "nfp.Mount");
         uint64_t r = first_is_handle ? CALL(none[i], U(handles), 0, 0) : CALL(none[i], U(out), U(handles));
         CHECK((uint32_t)r == 0x8073, "%s: %#x, not device-not-found", none[i], (uint32_t)r);
     }
+    CHECK((uint32_t)CALL("nfp.GetNpadId", U(out), U(handles)) == 0, "nfp GetNpadId");
+    uint64_t activate = U(guest_alloc(0x100)), deactivate = U(guest_alloc(0x100));
+    CHECK(CALL("nfp.AttachActivateEvent", activate, U(handles)) == 0, "nfp AttachActivateEvent");
+    CHECK(CALL("nfp.AttachDeactivateEvent", deactivate, U(handles)) == 0, "nfp AttachDeactivateEvent");
+    CHECK(event_works(activate, 0), "the nfp activate event is set without an amiibo on the reader");
+    CHECK((uint32_t)CALL("nfp.StartDetection", U(handles)) == 0, "nfp StartDetection");
+    CHECK((uint32_t)CALL("nfp.StopDetection", U(handles)) == 0, "nfp StopDetection");
     CHECK(CALL("nfp.Finalize", 0) == 0 && (uint32_t)CALL("nfp.GetState", 0) == 0, "nfp finalize");
     CALL("err.ShowError", 0x2a8);
     CALL("nndiagStartup", 0);
@@ -380,8 +394,8 @@ static void probe_applet(void) {
     CALL("err.InitializeContextWriterApi", 0);
     CALL("pctl.Initialize", 0);
     CALL("diag.InitializeApplicationAbortObserver", 0);
-    printf("applet/prepo/nfp/err: launch parameter none, volume balance, play reports local, no NFC device, "
-           "availability event (bound through the SDK's CreateSystemEvent) %s\n", nfp_event ? "ok" : "FAILED");
+    printf("applet/prepo/nfp/err: launch parameter none, volume balance, play reports local, an NFC reader without "
+           "an amiibo, availability event (bound through the SDK's CreateSystemEvent) %s\n", nfp_event ? "ok" : "FAILED");
 }
 
 static void probe_account(void) {

@@ -54,7 +54,9 @@ MacNativeGames cannot run on x86-64 as is: its CPU path executes ARM64 code nati
   libzstd on the host (`ov_zstd.c`, `TOTK_ZSTD_NATIVE`); the lifted decoder took almost three times as long.
 - Settings and menu: every key with its default is in one table (`cfg.c`), read from `totk.ini` and `TOTK_*`
   variables and written back when the in-game menu changes it. The menu and the performance overlay are Dear ImGui,
-  drawn into the swapchain image (`runtime/ui/`); their text is in `ui_text.c` (English, Russian, Brazilian Portuguese).
+  drawn into the swapchain image (`runtime/ui/`); their text is in `ui_text.c` (English, Russian, Brazilian Portuguese,
+  Simplified Chinese). The Chinese glyphs come from a system font (Microsoft YaHei, `plat_font_path`) merged into the
+  font atlas.
 - OS calls the host makes go through `runtime/platform/` (`platform.h`, `win32.c`), so a Linux or macOS host adds one file instead of touching the rest. The split is not finished: `tools/check_platform.py` lists the Win32 uses left in the other files.
 
 #### Threads and cores
@@ -112,6 +114,11 @@ Every guest thread is a host thread. TotK assumes Horizon's scheduler: three app
   swapchain, which FSR 1 or the blit then scale; the in-game menu is drawn into an RGBA8 image and blended on at the
   HUD's white. Without an HDR10 surface format (Windows with "Use HDR" off, a compositor without colour management)
   the swapchain stays SDR. `TOTK_SHOTS` reads the window texture, so its pictures clip highlights in HDR.
+- DLAA (`vk_dlaa.c`, `dlaa`, off by default). NVIDIA DLSS at the scene's own size, through the driver's NGX core loaded
+  at run time (no SDK code compiled in). It runs on the R11G11B10F light target right before the bloom chain's first
+  pass, so post effects and the HUD read the anti-aliased picture. The scene's draws get a sub-pixel Halton viewport
+  jitter; motion vectors are camera-only, reprojected from the scene depth through this and last frame's
+  view-projection of the scene camera block (constant bank c4). `fxaa` switches the game's own FXAA pass.
 - Occlusion queries never block the CPU; a result that is not ready counts as visible.
 - ASTC textures are uploaded as they are where the device reports `textureCompressionASTC_LDR`, and decoded by a compute shader everywhere else (`vk_astc.c`, `TOTK_ASTC`). The CPU decoder (`tex_astc*.c`) is the fallback and the test oracle.
 - Draw state. A draw whose program, bound state and textures repeat reuses the previous draw's shaders and skips rebuilding its descriptor sets; descriptor sets are written through update templates (`vk_exec_draw.c`, `vk_pipeline.c`).

@@ -30,10 +30,12 @@ static int g_font_bad;
 #pragma clang diagnostic ignored "-Wunused-function"
 #include "imstb_truetype.h"
 #pragma clang diagnostic pop
+#include "ui/amiibo_page.h"
 #include "ui/binds_page.h"
 #include "ui/option_rows.h"
 
 extern "C" {
+#include "amiibo.h"
 #include "cfg.h"
 #include "fs.h"
 #include "input.h"
@@ -368,7 +370,7 @@ extern "C" void menu_vk_release(void) {
 // TOTK_MENU_TEST_SET=<frame>:<key>=<value>[,<key>=<value>...][;<frame>:...]: cfg_set of each key (TOTK_ prefix
 // optional) at that presented frame; changes live settings with no input, menu open or not. totk.ini is written only by
 // the pseudo-key SAVE=1 (cfg_save, as a row change does; a failed write shows the menu's save note).
-enum { TAB_SCREEN, TAB_GAME, TAB_SOUND, TAB_CONTROLS, TAB_MENU, TAB_ADVANCED, TAB_COUNT };
+enum { TAB_SCREEN, TAB_GAME, TAB_SOUND, TAB_CONTROLS, TAB_AMIIBO, TAB_MENU, TAB_ADVANCED, TAB_COUNT };
 enum { TEST_PAGE_FRAMES = 30, TEST_SETS = 16 };
 struct TestSet { uint64_t frame; char key[64], value[64]; };
 static struct {
@@ -520,6 +522,18 @@ static void row_shadow_res(void) {
     opt_choice_list("TOTK_SHADOW_RES", UI_MENU_SHADOW_RES, vals, names, N, UI_MENU_SHADOW_RES_DESC);
 }
 
+static void row_shadow_scale(void) {
+    static const char *const vals[] = {"1", "2", "3", "4"};
+    static const char *const names[] = {"960 (1x)", "1920 (2x)", "2880 (3x)", "3840 (4x)"};
+    opt_choice_list("TOTK_SHADOW_SCALE", UI_MENU_SHADOW_SCALE, vals, names, 4, UI_MENU_SHADOW_SCALE_DESC);
+}
+
+static void row_shadow_range(void) {
+    static const char *const vals[] = {"100", "150", "200", "300"};
+    static const char *const names[] = {"160 m (1x)", "240 m (1.5x)", "320 m (2x)", "480 m (3x)"};
+    opt_choice_list("TOTK_SHADOW_RANGE", UI_MENU_SHADOW_RANGE, vals, names, 4, UI_MENU_SHADOW_RANGE_DESC);
+}
+
 static void row_gpu(void) {
     const char *vals[MAX_GPUS + 1], *names[MAX_GPUS + 1];
     char idx[MAX_GPUS][4];
@@ -648,6 +662,15 @@ static void tab_screen(float scale) {
     static const char *const aniso[] = {"game", "2", "4", "8", "16"};
     const char *aniso_names[] = {menu_text(UI_MENU_ANISO_GAME), "2x", "4x", "8x", "16x"};
     opt_choice_list("TOTK_ANISO", UI_MENU_ANISO, aniso, aniso_names, 5, UI_MENU_ANISO_DESC);
+    row_shadow_scale();
+    row_shadow_range();
+    opt_slider("TOTK_PCSS", UI_MENU_PCSS, 0, 200, UI_MENU_PCSS_DESC, 10, "%.0f %%");
+    opt_slider("TOTK_CONTACT_SHADOWS", UI_MENU_CONTACT_SHADOWS, 0, 100, UI_MENU_CONTACT_SHADOWS_DESC, 10, "%.0f %%");
+    opt_toggle("TOTK_DLAA", UI_MENU_DLAA, UI_MENU_DLAA_DESC);
+    static const UiTextId dlss[] = {UI_MENU_DLSS_DLAA, UI_MENU_DLSS_QUALITY, UI_MENU_DLSS_BALANCED,
+                                    UI_MENU_DLSS_PERFORMANCE};
+    opt_choice("TOTK_DLSS", UI_MENU_DLSS, dlss, 4, UI_MENU_DLSS_DESC);
+    opt_toggle("TOTK_FXAA", UI_MENU_FXAA, UI_MENU_FXAA_DESC);
     rows_color();
     opt_group(UI_MENU_HDR_GROUP);
     opt_toggle("TOTK_HDR", UI_MENU_HDR, UI_MENU_HDR_DESC);
@@ -792,7 +815,17 @@ static void tab_controls(float scale) {
     opt_slider("TOTK_RUMBLE_STRENGTH", UI_MENU_RUMBLE_STRENGTH, 0, 300, UI_MENU_RUMBLE_STRENGTH_DESC, 10, "%.0f %%");
     opt_slider("TOTK_RUMBLE_CURVE", UI_MENU_RUMBLE_CURVE, 0.2f, 1.5f, UI_MENU_RUMBLE_CURVE_DESC, 0.05f, "%.2f");
     opt_toggle("TOTK_RUMBLE_TRIGGERS", UI_MENU_RUMBLE_TRIGGERS, UI_MENU_RUMBLE_TRIGGERS_DESC);
-    opt_slider("TOTK_STICK_DEADZONE", UI_MENU_STICK_DEADZONE, 0, 50, UI_MENU_STICK_DEADZONE_DESC, 1, "%.0f %%");
+    // One row per stick, falling back to TOTK_STICK_DEADZONE (both sticks) while unset. With a gamepad connected each
+    // row shows its stick's deflection now, before the dead zone: a drifting stick's resting value, to set it above.
+    double now[2];
+    bool pad = input_pad_stick_percent(now) != 0;
+    char stick_note[2][64];
+    for (int s = 0; s < 2; s++)
+        snprintf(stick_note[s], sizeof stick_note[s], menu_text(UI_MENU_STICK_DEADZONE_NOW), now[s]);
+    opt_slider("TOTK_LSTICK_DEADZONE", UI_MENU_LSTICK_DEADZONE, 0, 50, UI_MENU_STICK_DEADZONE_DESC, 1, "%.0f %%",
+               pad ? stick_note[0] : nullptr, "TOTK_STICK_DEADZONE");
+    opt_slider("TOTK_RSTICK_DEADZONE", UI_MENU_RSTICK_DEADZONE, 0, 50, UI_MENU_STICK_DEADZONE_DESC, 1, "%.0f %%",
+               pad ? stick_note[1] : nullptr, "TOTK_STICK_DEADZONE");
     opt_slider("TOTK_STICK_SENS", UI_MENU_STICK_SENS, 0.1f, 3, UI_MENU_STICK_SENS_DESC, 0.05f, "%.2f");
     opt_slider("TOTK_MOUSE_SENS", UI_MENU_MOUSE_SENS, 0, 10, UI_MENU_MOUSE_SENS_DESC, 0.1f, "%.1f");
     row_walk_key();
@@ -969,8 +1002,9 @@ static void tab_advanced(float scale) {
     }
 }
 
-static const UiTextId kTabNames[TAB_COUNT] = {UI_MENU_TAB_SCREEN, UI_MENU_TAB_GAME, UI_MENU_TAB_SOUND,
-                                              UI_MENU_TAB_CONTROLS, UI_MENU_TAB_MENU, UI_MENU_TAB_ADVANCED};
+static const UiTextId kTabNames[TAB_COUNT] = {UI_MENU_TAB_SCREEN,   UI_MENU_TAB_GAME, UI_MENU_TAB_SOUND,
+                                              UI_MENU_TAB_CONTROLS, UI_MENU_TAB_AMIIBO, UI_MENU_TAB_MENU,
+                                              UI_MENU_TAB_ADVANCED};
 static int g_tab;               // the tab shown
 static int g_tab_request = -1;  // select this tab at the next layout; -1 none
 static int g_focus_page = -1;   // this tab's first row takes the cursor once it is shown; -1 none
@@ -1021,6 +1055,7 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
             case TAB_GAME: tab_game(scale); break;
             case TAB_SOUND: tab_sound(scale); break;
             case TAB_CONTROLS: tab_controls(scale); break;
+            case TAB_AMIIBO: tab_amiibo(scale); break;
             case TAB_MENU: tab_menu(scale); break;
             case TAB_ADVANCED: tab_advanced(scale); break;
             }
@@ -1306,6 +1341,7 @@ extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const cha
     if (g_test.next_set < g_test.n_sets && frame >= g_test.sets[g_test.next_set].frame) test_apply_sets(frame);
     if (g_perf_save.exchange(0)) cfg_save();
     perf_tick(plat_now_ns(), t);
+    amiibo_tick();
     bool open = g_open.load(std::memory_order_relaxed);
     if (!open) {
         if (g_save_pending) g_save_pending = opt_save_tick(1);   // closed: the last change goes to totk.ini now

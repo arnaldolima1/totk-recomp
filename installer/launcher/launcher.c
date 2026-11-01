@@ -13,14 +13,21 @@
 #define LANGID_PT_BR 0x0416     /* the whole LANGID: Portugal's Portuguese stays English */
 #define PATH_CHARS (MAX_PATH * 2)
 
+/* The language of the window (installer/guilogic.py ui_language_for_langid): Russian, Simplified Chinese (zh-CN and
+   zh-SG; the Traditional Chinese regions get English, as the window has no Traditional Chinese), else English. */
 static void fail(void)
 {
-    LANGID id = GetUserDefaultUILanguage();
-    int russian = (id & 0x3ff) == LANGID_RUSSIAN, brazilian = id == LANGID_PT_BR;
+    LANGID ui = GetUserDefaultUILanguage();
+    int russian = (ui & 0x3ff) == LANGID_RUSSIAN, brazilian = ui == LANGID_PT_BR;
+    int chinese = ui == MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED) ||
+                  ui == MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SINGAPORE);
     MessageBoxW(NULL,
-                russian ? LAUNCHER_PYTHON_MISSING_RU : brazilian ? LAUNCHER_PYTHON_MISSING_PT_BR
-                                                                 : LAUNCHER_PYTHON_MISSING_EN,
-                russian ? LAUNCHER_TITLE_RU : brazilian ? LAUNCHER_TITLE_PT_BR : LAUNCHER_TITLE_EN,
+                russian    ? LAUNCHER_PYTHON_MISSING_RU
+                : brazilian ? LAUNCHER_PYTHON_MISSING_PT_BR
+                : chinese   ? LAUNCHER_PYTHON_MISSING_ZH_HANS
+                            : LAUNCHER_PYTHON_MISSING_EN,
+                russian ? LAUNCHER_TITLE_RU : brazilian ? LAUNCHER_TITLE_PT_BR : chinese ? LAUNCHER_TITLE_ZH_HANS
+                                                                                         : LAUNCHER_TITLE_EN,
                 MB_OK | MB_ICONERROR);
 }
 

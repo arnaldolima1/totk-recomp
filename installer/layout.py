@@ -93,6 +93,7 @@ class Layout:
         need = [self.python, self.tools / 'extract.py', self.tools / 'build_game.py', self.tools / 'prepare_shaders.py',
                 self.tools / 'pack_shader_cache.py', self.tools / 'make_romfs_patches.py', self.tools / 'ultrawide_layout.py',
                 self.tools / 'button_icons.py',
+                self.tools / 'vendor' / 'macnativegames' / 'extract_shared_fonts.py',
                 self.recomp / 'gen.py',
                 self.clang,
                 *((self.deps / 'include', self.deps / 'lib') if self.deps else ()), self.runtime, *([lib] if lib else ()),
