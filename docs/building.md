@@ -78,7 +78,8 @@ of them.
    .venv-py314\Scripts\python tools\extract.py
    ```
 
-4. Shader translator (once; no game files). This publishes `build\xlate\totk_xlate.exe`:
+4. Shader translator (no game files; again after a change to its sources, and `tools\make_release.py` stops on an older
+   one). This publishes `build\xlate\totk_xlate.exe`:
 
    ```powershell
    .venv\Scripts\python tools\build_xlate.py
