@@ -1191,6 +1191,11 @@ int plat_os_version(char *out, size_t cap) {
     return 1;
 }
 
+int plat_is_wine(void) {
+    HMODULE nt = GetModuleHandleW(L"ntdll.dll");
+    return nt && GetProcAddress(nt, "wine_get_version") != NULL;
+}
+
 int plat_stderr_path(char *out, size_t cap) {
     HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
     wchar_t w[WPATH];

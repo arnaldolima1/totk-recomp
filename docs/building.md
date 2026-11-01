@@ -69,7 +69,8 @@ of them.
    keys file. `config.local.toml` is ignored by git. The tools read the keys file themselves.
 
 3. Extract and verify. This writes `build\extracted\v0` (1.0.0) and `build\extracted\<ver>` for each update in
-   `updates`, identified by its hash; a hash mismatch stops the run:
+   `updates`, identified by its hash; a hash mismatch stops the run. With another `[work] dir` in `config.local.toml`,
+   `extracted` goes there instead, and `build_game.py` reads the ExeFS and RomFS from there:
 
    ```powershell
    .venv-py314\Scripts\python tools\extract.py
@@ -115,6 +116,11 @@ of them.
    Without this step the first launch compiles shaders and pipelines during play and stutters until the caches fill.
    The AMD driver keeps its pipeline cache per exe path and holds a limited amount: preparing another build folder can
    evict this one's. `totk.exe --warm-shaders` rebuilds it from the shader cache.
+   When the driver's shader compiler crashes on a variant (NVIDIA 615.78.08 on an RTX 5080 does, issue #30),
+   `prepare_shaders.py` runs the driver step again with `--warm-shaders`, up to three times, without the variants the
+   driver was building at the crash. `shader-prepare-skip.txt` next to the exe lists them with the GPU and driver
+   version; they build at their first draw instead, another driver version builds them again, and so does deleting the
+   file.
 
 7. Run. The game keeps running when its window loses the focus (`assume_focus = 1` in `totk.ini`, the default; the
    Game tab switches it). With 0 it pauses, as it does on the Switch when Home is pressed.

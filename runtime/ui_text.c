@@ -69,6 +69,11 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_ASPECT_FIT] = "Black bars", [UI_MENU_ASPECT_STRETCH] = "Stretch",
     [UI_MENU_FOV] = "Field of view",
     [UI_MENU_FOV_DESC] = "How much of the world the camera shows, in percent of the game's own. Game version 1.4.3 only.",
+    [UI_MENU_SHADOW_RES] = "Shadow map size",
+    [UI_MENU_SHADOW_RES_DESC] = "Size of the sun's shadow map. The game's own size changes with the view, down to about 400 "
+                                "near the ground, so leaf shadows look blocky and jump; a fixed size keeps them still and "
+                                "sharper. Above 1024 the shadows cost more GPU time and video memory.",
+    [UI_MENU_SHADOW_RES_GAME] = "Game (changes)",
     [UI_MENU_SHARPNESS] = "FSR sharpness",
     [UI_MENU_SHARPNESS_DESC] = "Sharpening after FSR scaling; 0 turns it off.",
     [UI_MENU_COLOR] = "Colour",
@@ -136,6 +141,13 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_MENU_STICK_DEADZONE_DESC] = "How far a gamepad stick moves before the game sees it. Raise it if the character or the camera moves on its own.",
     [UI_MENU_MOUSE_SENS] = "Mouse camera sensitivity",
     [UI_MENU_MOUSE_SENS_DESC] = "How fast the mouse turns the camera.",
+    [UI_MENU_WALK_KEY] = "Walk key",
+    [UI_MENU_WALK_KEY_DESC] = "Hold it to tilt the keyboard's sticks part of the way, so the keyboard walks instead of "
+                              "runs. The walk scale sets how far. A controller and the mouse are not affected.",
+    [UI_MENU_WALK_KEY_TAKEN] = "also %s",
+    [UI_MENU_WALK_SCALE] = "Walk scale",
+    [UI_MENU_WALK_SCALE_DESC] = "The tilt the keyboard's sticks get while the walk key is held. Half is a walk, the "
+                                "full tilt a run.",
 
     [UI_BINDS_HELP] = "Select a cell and press A or Enter, then the key, mouse button or controller button. Delete or "
                       "X clears a cell. A key in use moves here; a controller button swaps with the one it replaces.",
@@ -330,6 +342,11 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_ASPECT_FIT] = "Чёрные полосы", [UI_MENU_ASPECT_STRETCH] = "Растянуть",
     [UI_MENU_FOV] = "Поле зрения",
     [UI_MENU_FOV_DESC] = "Сколько мира показывает камера, в процентах от игрового. Только для версии игры 1.4.3.",
+    [UI_MENU_SHADOW_RES] = "Размер карты теней",
+    [UI_MENU_SHADOW_RES_DESC] = "Размер карты теней от солнца. Собственный размер игры меняется вместе с видом, у земли до "
+                                "примерно 400, поэтому тени листвы выглядят квадратными и дёргаются; постоянный размер делает "
+                                "их ровными и чётче. Выше 1024 тени требуют больше времени GPU и видеопамяти.",
+    [UI_MENU_SHADOW_RES_GAME] = "Как в игре (меняется)",
     [UI_MENU_SHARPNESS] = "Резкость FSR",
     [UI_MENU_SHARPNESS_DESC] = "Повышение резкости после масштабирования FSR; 0 выключает его.",
     [UI_MENU_COLOR] = "Цвет",
@@ -398,6 +415,13 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_MENU_STICK_DEADZONE_DESC] = "Насколько нужно отклонить стик геймпада, чтобы игра это заметила. Увеличьте, если персонаж или камера двигаются сами.",
     [UI_MENU_MOUSE_SENS] = "Чувствительность мыши",
     [UI_MENU_MOUSE_SENS_DESC] = "Как быстро мышь поворачивает камеру.",
+    [UI_MENU_WALK_KEY] = "Клавиша шага",
+    [UI_MENU_WALK_KEY_DESC] = "Удерживайте: стики клавиатуры отклоняются частично, и персонаж идёт, а не бежит. "
+                              "Насколько — задаёт сила шага. Контроллер и мышь не затрагиваются.",
+    [UI_MENU_WALK_KEY_TAKEN] = "также %s",
+    [UI_MENU_WALK_SCALE] = "Сила шага",
+    [UI_MENU_WALK_SCALE_DESC] = "Отклонение стиков клавиатуры при удержании клавиши шага. Половина — шаг, полное "
+                                "отклонение — бег.",
 
     [UI_BINDS_HELP] = "Выберите ячейку и нажмите A или Enter, затем клавишу, кнопку мыши или кнопку контроллера. "
                       "Delete или X очищает ячейку. Занятая клавиша переходит сюда; кнопка контроллера меняется "

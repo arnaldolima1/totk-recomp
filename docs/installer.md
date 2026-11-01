@@ -9,7 +9,7 @@ holds only the game; the installer and its tools stay outside it.
 1. Downloads `TotK-Setup-<version>-windows.zip` from GitHub Releases (none is published yet), unpacks it anywhere and
    starts `TotK-Setup.exe`.
 2. Picks:
-   - the base game (XCI or NSP) and the 1.2.1 or 1.4.3 update (NSP);
+   - the base game (XCI or NSP) and the 1.1.1, 1.2.1 or 1.4.3 update (NSP);
    - their `prod.keys`;
    - the game language and the install folder.
 3. Waits for the setup, one time. The window shows each step and its progress.
@@ -34,12 +34,13 @@ The player runs a newer installer on the same folder. It reads `totk-install.jso
 `profile/` and `totk.ini` after checking their hashes, rebuilds `totk.exe` and re-prepares the shaders. A newer
 release that changes nothing game-derived skips the rebuild.
 
-Given an update file other than the recorded one (1.2.1, then 1.4.3), the installer extracts and builds again from it and
-keeps `profile/`. Saves carry over both ways: 1.4.3 converts a 1.2.1 save on load, and 1.2.1 loads the saves 1.4.3 wrote.
+Given an update file other than the recorded one (1.1.1, then 1.2.1, then 1.4.3), the installer extracts and builds again from it
+and keeps `profile/`. Saves carry over both ways between 1.2.1 and 1.4.3: 1.4.3 converts a 1.2.1 save on load, and 1.2.1
+loads the saves 1.4.3 wrote.
 
 ## Setup steps
 
-1. **Check** before writing anything: the files open with the keys, the update is 1.2.1 or 1.4.3 (by hash, as
+1. **Check** before writing anything: the files open with the keys, the update is 1.1.1, 1.2.1 or 1.4.3 (by hash, as
    `tools/extract.py`), the keys are new enough for the update, enough space is free on the target disk (about 36 GiB at the peak of a
    first install, 20 GiB after it), the CPU has
    AVX2 (`-march=x86-64-v3`), a Vulkan 1.3 GPU exists. Each failure is one clear message.
@@ -55,6 +56,9 @@ keeps `profile/`. Saves carry over both ways: 1.4.3 converts a 1.2.1 save on loa
    writes the translations it makes in play as loose files; running the tool again with the game closed folds those in.
    The patches are written twice: `romfs-patches` and `romfs-patches-xbox` (`--xbox-prompts`, the A/B and X/Y prompts
    swapped for `pad_layout = xbox_prompts`).
+   When the graphics driver crashes while building the shaders, `prepare_shaders.py` runs that part again without the
+   variants it was building ([building.md](building.md), step 6), and the setup finishes with a warning that names how
+   many were left out.
 6. **Clean up** the temp folder (generated C and objects, about 1.3 GB).
 
 A cancelled or failed setup resumes from the last finished step (`totk-install.json`).
@@ -79,9 +83,10 @@ python -m installer --base FILE --update FILE --keys FILE --lang CODE --dest DIR
   the merged RomFS (15.9 GiB) before it deletes them. The check computes the exact figure.
 - Window (`python -m installer.gui`, `installer/gui.py` draws, `installer/guilogic.py` decides): form, step list with
   progress, space line, collapsible log, Cancel (Ctrl+Break to the CLI's process group, then it waits for the exit),
-  finish screen with Open folder. English or Russian, chosen from the Windows display language, switchable in the
-  window; every sentence is an id in `installer/text/<en|ru>.json`. A folder with `totk-install.json` needs only the
-  folder. `--selftest [--shots DIR]` builds every screen in both languages and closes itself.
+  finish screen with Open folder. English, Russian or Brazilian Portuguese, chosen from the Windows display language,
+  switchable in the window; every sentence is an id in `installer/text/<en|ru|pt-BR>.json`. A folder with
+  `totk-install.json` needs only the folder. `--selftest [--shots DIR]` builds every screen in every language and
+  closes itself.
 - `tests/installer_gui_test.py`: event model, form, catalogs, cancel, the self-closing window and one end-to-end run
   of the CLI in `--verify` mode (needs `build/install-test` and `build/extracted/v121`; see its docstring).
 - `tests/installer_test.py`: bookkeeping with fake steps. `tests/installer_e2e.py`: a dev-mode run with the files of
