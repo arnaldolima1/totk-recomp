@@ -36,6 +36,7 @@ void menu_event_focus(int focused);
 void menu_event_char16(unsigned unit);    // a typed character as a UTF-16 unit (WM_CHAR); surrogate pairs come in two
 void menu_event_text(const char *utf8);   // typed text (SDL_EVENT_TEXT_INPUT)
 int menu_wants_text(void);                // a text field of the menu has the keyboard
+int menu_chat_open(void);                 // the chat key: opens the chat box while in a multiplayer room, 1 when it did
 
 // ---- the overlay, drawn into the swapchain image after the game image (gfx_present.c, present lock held)
 typedef struct {

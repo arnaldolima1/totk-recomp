@@ -5,16 +5,28 @@
 // the cursor (input_window_msg runs first; closing the menu gives the capture back). While the menu is open, its keys,
 // the typed characters, the mouse and focus changes go to it; the game polls the keyboard on its own (input_win.c) and gets nothing while the
 // menu is open (input_menu).
+#include <string.h>
 #include <windows.h>
 #include <windowsx.h>
 
 #include "imgui.h"
 
 extern "C" {
+#include "cfg.h"
 #include "input.h"
 #include "input_win.h"
 #include "ui/menu.h"
+#include "voice.h"
 }
+
+// The multiplayer keys of totk.ini (TOTK_MP_CHAT_KEY, TOTK_MP_VOICE_KEY): a letter, enter, capslock or off.
+static bool is_key(const char *setting, WPARAM vk) {
+    const char *k = cfg_value(setting);
+    if (!strcmp(k, "enter")) return vk == VK_RETURN;
+    if (!strcmp(k, "capslock")) return vk == VK_CAPITAL;
+    return k[0] >= 'a' && k[0] <= 'z' && !k[1] && vk == (WPARAM)(k[0] - 'a' + 'A');
+}
+static bool g_skip_char;   // the chat key's own character, which TranslateMessage sends after the box opened
 
 static ImGuiKey key_of(WPARAM vk) {
     switch (vk) {
@@ -64,13 +76,25 @@ extern "C" int menu_window_msg(HWND h, UINT m, WPARAM w, LPARAM l, LRESULT *res)
             *res = 0;
             return 1;
         }
+        if (!(l & (1 << 30)) && !menu_is_open() && is_key("TOTK_MP_CHAT_KEY", w) && menu_chat_open()) {
+            g_skip_char = true;
+            *res = 0;
+            return 1;
+        }
         [[fallthrough]];
     case WM_KEYUP:
     case WM_SYSKEYUP:
+        // push to talk: down only while playing (not typing), up always; the key goes on to the game as well
+        if (is_key("TOTK_MP_VOICE_KEY", w) && (!menu_is_open() || m == WM_KEYUP || m == WM_SYSKEYUP))
+            voice_ptt(m == WM_KEYDOWN || m == WM_SYSKEYDOWN);
         if (!menu_is_open()) return 0;
         if (ImGuiKey k = key_of(w)) menu_event_key(k, m == WM_KEYDOWN || m == WM_SYSKEYDOWN);
         return 0;   // F11 and the system keys keep working
     case WM_CHAR:   // the typed text, for the menu's text fields (the window loop translates key messages)
+        if (g_skip_char) {
+            g_skip_char = false;
+            return 0;
+        }
         if (menu_is_open()) menu_event_char16((unsigned)w);
         return 0;
     case WM_MOUSEMOVE:
@@ -91,6 +115,7 @@ extern "C" int menu_window_msg(HWND h, UINT m, WPARAM w, LPARAM l, LRESULT *res)
         return 0;
     case WM_SETFOCUS:
     case WM_KILLFOCUS:
+        if (m == WM_KILLFOCUS) voice_ptt(0);   // a key released in another window never comes here
         menu_event_focus(m == WM_SETFOCUS);
         return 0;
     }

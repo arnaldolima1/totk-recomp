@@ -27,6 +27,7 @@ typedef int Sock;
 #include "cfg.h"
 #include "host.h"
 #include "platform/platform.h"
+#include "voice.h"
 
 #define PROTOCOL "1"
 enum { DEFAULT_PORT = 5577, LOG_LINES = 80, TOASTS = 16, OUTBOX = 16, RETRY_MS = 5000, PING_MS = 30000 };
@@ -40,6 +41,7 @@ static int toast_head, toast_tail;
 static char outbox[OUTBOX][320];
 static int out_head, out_tail;
 static volatile int32_t started, kick;
+static char me[MP_NAME_MAX];   // this game's name as the room keeps it (room_name): its own chat lines get no notice
 
 static int64_t now_unix(void) { return (int64_t)time(NULL); }
 
@@ -47,6 +49,18 @@ static int64_t now_unix(void) { return (int64_t)time(NULL); }
 static void field(char *dst, size_t cap, const char *s) {
     size_t n = 0;
     for (; s && *s && n + 1 < cap; s++) dst[n++] = *s == '\t' || *s == '\r' || *s == '\n' ? ' ' : *s;
+    dst[n] = 0;
+}
+
+// The name as tools/mp_server.py keeps it: surrounding spaces stripped, at most 24 characters (code points).
+static void room_name(char *dst, size_t cap, const char *name) {
+    while (*name == ' ') name++;
+    size_t n = 0, chars = 0;
+    for (const char *p = name; *p && n + 1 < cap; p++) {
+        if (((unsigned char)*p & 0xc0) != 0x80 && ++chars > 24) break;
+        dst[n++] = *p;
+    }
+    while (n && dst[n - 1] == ' ') n--;
     dst[n] = 0;
 }
 
@@ -132,6 +146,37 @@ static Sock dial(const char *server, const char **why) {
     return s;
 }
 
+// ---- voice frames travel as base64 in VOICE lines
+
+static const char B64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static size_t b64_encode(char *out, const uint8_t *in, size_t n) {
+    size_t o = 0;
+    for (size_t i = 0; i < n; i += 3) {
+        uint32_t v = (uint32_t)in[i] << 16 | (i + 1 < n ? (uint32_t)in[i + 1] << 8 : 0) | (i + 2 < n ? in[i + 2] : 0);
+        out[o++] = B64[v >> 18 & 63], out[o++] = B64[v >> 12 & 63];
+        out[o++] = i + 1 < n ? B64[v >> 6 & 63] : '=';
+        out[o++] = i + 2 < n ? B64[v & 63] : '=';
+    }
+    out[o] = 0;
+    return o;
+}
+
+static int b64_decode(uint8_t *out, int cap, const char *in) {
+    uint32_t v = 0;
+    int bits = 0, n = 0;
+    for (; *in && *in != '='; in++) {
+        const char *c = strchr(B64, *in);
+        if (!c || !*in) return -1;
+        v = v << 6 | (uint32_t)(c - B64), bits += 6;
+        if (bits >= 8) {
+            if (n >= cap) return -1;
+            bits -= 8, out[n++] = (uint8_t)(v >> bits);
+        }
+    }
+    return n;
+}
+
 static const char *rarity_name(int r) {
     static const char *const n[] = {"common", "rare", "epic", "legendary", "platinum"};
     return r >= 0 && r < 5 ? n[r] : "common";
@@ -144,9 +189,16 @@ static void on_line(char *line, Sock s) {
     f[n++] = line;
     for (char *p = line; *p && n < cap; p++)
         if (*p == '\t') *p = 0, f[n++] = p + 1;
+    if (!strcmp(f[0], "VOICE") && n >= 3) {   // VOICE from base64: a friend's Opus frame
+        uint8_t pkt[VOICE_PACKET_MAX];
+        int len = b64_decode(pkt, sizeof pkt, f[2]);
+        if (len > 0) voice_receive(f[1], pkt, len);
+        return;
+    }
     plat_mutex_lock(&lock);
     if (!strcmp(f[0], "WELCOME") && n >= 3) {
         view.state = MP_CONNECTED;
+        voice_connected(1);
         field(view.room, sizeof view.room, f[2]);
         view.error[0] = 0;
     } else if (!strcmp(f[0], "ERROR") && n >= 3) {
@@ -163,7 +215,7 @@ static void on_line(char *line, Sock s) {
             at += 2 + MP_STATS;
         }
     } else if (!strcmp(f[0], "CHAT") && n >= 3) {
-        add_line(MP_LINE_CHAT, f[1], f[2], "", "", 1);
+        add_line(MP_LINE_CHAT, f[1], f[2], "", "", strcmp(f[1], me) != 0);   // the room echoes our own lines
     } else if (!strcmp(f[0], "ACH") && n >= 5) {   // ACH from id name rarity
         add_line(MP_LINE_ACH, f[1], f[3], f[2], f[4], 1);
     } else if (!strcmp(f[0], "EVENT") && n >= 3) {
@@ -175,6 +227,13 @@ static void on_line(char *line, Sock s) {
     }
     plat_mutex_unlock(&lock);
     (void)s;
+}
+
+// The settings a connection is made with: a change to one of them reconnects, other settings (the voice's, the rest of
+// totk.ini) do not.
+static void conn_settings(char *out, size_t cap) {
+    snprintf(out, cap, "%d\t%s\t%s\t%s", cfg_bool("TOTK_MP"), cfg_value("TOTK_MP_SERVER"), cfg_value("TOTK_MP_NAME"),
+             cfg_value("TOTK_MP_PASSWORD"));
 }
 
 static void session(const char *server) {
@@ -197,17 +256,27 @@ static void session(const char *server) {
         set_state(MP_RETRYING, "connect");
         return;
     }
+    plat_mutex_lock(&lock);
+    room_name(me, sizeof me, name);
+    plat_mutex_unlock(&lock);
     rt_log("mp: connected to %s as %s", server, name);
     unsigned sent_gen = 0, ver = cfg_version();
+    char settings[512], now_settings[512];
+    conn_settings(settings, sizeof settings);
     uint64_t last_ping = plat_now_ms();
     char buf[16384];
     size_t have = 0;
     int alive = 1;
-    while (alive && plat_cas32(&kick, 0, 0) == 0 && cfg_version() == ver) {
+    while (alive && plat_cas32(&kick, 0, 0) == 0) {
+        if (cfg_version() != ver) {
+            ver = cfg_version();
+            conn_settings(now_settings, sizeof now_settings);
+            if (strcmp(now_settings, settings)) break;
+        }
         fd_set rd;
         FD_ZERO(&rd);
         FD_SET(s, &rd);
-        struct timeval tv = {0, 200000};
+        struct timeval tv = {0, 10000};   // 10 ms: voice frames leave every 20 ms
         int r = select((int)s + 1, &rd, NULL, NULL, &tv);
         if (r < 0) break;
         if (r > 0) {
@@ -259,6 +328,14 @@ static void session(const char *server) {
             const char *chat[] = {"CHAT", text};
             alive = send_line(s, 2, chat);
         }
+        uint8_t pkt[VOICE_PACKET_MAX];
+        for (int len; alive && (len = voice_take_packet(pkt, sizeof pkt)) > 0;) {
+            char vline[8 + VOICE_PACKET_MAX * 4 / 3 + 8];
+            memcpy(vline, "VOICE\t", 6);
+            size_t k = 6 + b64_encode(vline + 6, pkt, (size_t)len);
+            vline[k++] = '\n';
+            alive = send_all(s, vline, k);
+        }
         if (alive && plat_now_ms() - last_ping > PING_MS) {
             const char *ping[] = {"PING"};
             alive = send_line(s, 1, ping);
@@ -266,6 +343,7 @@ static void session(const char *server) {
         }
     }
     sock_close(s);
+    voice_connected(0);
     plat_mutex_lock(&lock);
     if (view.state != MP_REFUSED) view.state = MP_RETRYING, snprintf(view.error, sizeof view.error, "lost");
     view.nplayers = 0;

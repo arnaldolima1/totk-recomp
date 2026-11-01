@@ -30,6 +30,7 @@
 #include "audren.h"
 #include "host.h"
 #include "ipc.h"
+#include "voice.h"
 
 #define MAX_FRAME 1024
 #define RING_FRAMES 16384            // stereo frames, about 340 ms at 48 kHz
@@ -230,6 +231,7 @@ static void SDLCALL sdl_pull(void *user, SDL_AudioStream *stream, int additional
         if (frames > 1024) frames = 1024;
         ring_pull(m, tmp, frames);
         chime_mix(tmp, frames);
+        voice_mix(tmp, frames);   // the multiplayer room's voices (voice.c)
         if (!SDL_PutAudioStreamData(stream, tmp, (int)(frames * 2 * sizeof(float)))) break;
         additional -= (int)(frames * 2 * sizeof(float));
     }
@@ -259,6 +261,7 @@ static void output_open(Mixer *m, int rate) {
     }
     m->device_ok = 1;
     if (!chime_buf[CHIME_NORMAL]) chime_make(rate);
+    voice_output_rate(rate);
     SDL_AudioSpec dev;
     int period = 0;
     if (!SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(m->stream), &dev, &period) || period <= 0) period = m->frame;

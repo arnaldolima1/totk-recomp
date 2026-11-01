@@ -5,14 +5,26 @@
 // the cursor (input_sdl.c sees the event first; closing the menu gives the capture back). While the menu is open, its
 // keys, the typed text, the mouse and focus changes go to it; the game reads the keyboard through input_sdl.c and gets nothing while
 // the menu is open (input_menu). Mouse positions come in window units and go to the menu in pixels.
+#include <string.h>
+
 #include <SDL3/SDL.h>
 
 #include "imgui.h"
 
 extern "C" {
+#include "cfg.h"
 #include "input.h"
 #include "input_sdl.h"
 #include "ui/menu.h"
+#include "voice.h"
+}
+
+// The multiplayer keys of totk.ini (TOTK_MP_CHAT_KEY, TOTK_MP_VOICE_KEY): a letter, enter, capslock or off.
+static bool is_key(const char *setting, SDL_Scancode sc) {
+    const char *k = cfg_value(setting);
+    if (!strcmp(k, "enter")) return sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER;
+    if (!strcmp(k, "capslock")) return sc == SDL_SCANCODE_CAPSLOCK;
+    return k[0] >= 'a' && k[0] <= 'z' && !k[1] && sc == (SDL_Scancode)(SDL_SCANCODE_A + (k[0] - 'a'));
 }
 
 static ImGuiKey key_of(SDL_Scancode sc) {
@@ -69,8 +81,13 @@ extern "C" void menu_sdl_event(const SDL_Event *e) {
             if (!e->key.repeat) menu_perf_cycle();
             return;
         }
+        // the chat box: text input starts once its field has the keyboard, so the key's own letter is not typed
+        if (!e->key.repeat && !menu_is_open() && is_key("TOTK_MP_CHAT_KEY", e->key.scancode) && menu_chat_open()) return;
         [[fallthrough]];
     case SDL_EVENT_KEY_UP:
+        // push to talk: down only while playing (not typing), up always; the key goes on to the game as well
+        if (is_key("TOTK_MP_VOICE_KEY", e->key.scancode) && (!menu_is_open() || e->type == SDL_EVENT_KEY_UP))
+            voice_ptt(e->type == SDL_EVENT_KEY_DOWN);
         if (!menu_is_open()) return;
         if (ImGuiKey k = key_of(e->key.scancode)) menu_event_key(k, e->type == SDL_EVENT_KEY_DOWN);
         return;
@@ -95,6 +112,7 @@ extern "C" void menu_sdl_event(const SDL_Event *e) {
         return;
     case SDL_EVENT_WINDOW_FOCUS_GAINED:
     case SDL_EVENT_WINDOW_FOCUS_LOST:
+        if (e->type == SDL_EVENT_WINDOW_FOCUS_LOST) voice_ptt(0);   // a key released elsewhere never comes here
         menu_event_focus(e->type == SDL_EVENT_WINDOW_FOCUS_GAINED);
         return;
     }

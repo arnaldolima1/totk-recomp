@@ -168,6 +168,9 @@ async def handle(room, reader, writer):
                     except ValueError:
                         pass
                 await room.progress_changed()
+            elif kind == 'VOICE' and len(f) >= 2 and p.name:   # a 20 ms Opus frame, base64: to everyone else
+                b64 = ''.join(c for c in f[1][:600] if c.isascii() and (c.isalnum() or c in '+/='))   # line() would cut it at 500
+                await room.broadcast(f'VOICE\t{p.name}\t{b64}\n'.encode('utf-8'), skip=p)
             elif kind == 'CHAT' and len(f) >= 2 and f[1].strip():
                 await room.broadcast(line('CHAT', p.name, clean(f[1])[:300]))
             elif kind == 'ACH' and len(f) >= 4:   # ACH id name rarity, relayed with the player's name in front

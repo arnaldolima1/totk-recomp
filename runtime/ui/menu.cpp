@@ -38,6 +38,7 @@ static int g_font_bad;
 extern "C" {
 #include "achievements.h"
 #include "net_mp.h"
+#include "voice.h"
 #include "amiibo.h"
 #include "cfg.h"
 #include "input.h"
@@ -77,6 +78,7 @@ static const unsigned char roboto_ttf[] = {
 // ---- open state, any thread
 static std::atomic<int> g_open;     // the menu is open
 static std::atomic<int> g_reset;    // opened or closed since the last laid-out frame: drop stale input
+static std::atomic<int> g_chat;     // opened as the multiplayer chat box (menu_chat_open), not the whole menu
 
 // g_open, the input block and the log line change together under open_lock, so they cannot disagree when the window thread
 // (F1, Esc), the polling thread (combo) and the present path (Continue, B) race.
@@ -88,6 +90,7 @@ static int change_open(int want) {
     int open = want < 0 ? !g_open.load() : want;
     if (g_open.load() != open) {
         g_open.store(open);
+        if (!open) g_chat.store(0);
         g_reset.store(1);
         input_menu(open);
         rt_log("menu: %s", open ? "open" : "closed");
@@ -97,6 +100,9 @@ static int change_open(int want) {
 }
 
 static void set_open(int open) { change_open(open); }
+
+// The whole menu shows (not the chat box alone): what the notices and the overlays make room for.
+static bool full_menu(void) { return g_open.load(std::memory_order_relaxed) && !g_chat.load(std::memory_order_relaxed); }
 
 static int g_failed_flag();
 extern "C" int menu_is_open(void) { return g_open.load(std::memory_order_relaxed); }
@@ -771,6 +777,17 @@ static void tab_game(float scale) {
 static void tab_sound(float scale) {
     opt_begin("##sound", scale);
     opt_slider("TOTK_VOLUME", UI_MENU_VOLUME, 0, 100, UI_MENU_VOLUME_DESC, 5, "%.0f %%");
+    opt_group(UI_MENU_VOICE_GROUP);
+    static const char *const chat_keys[] = {"t", "y", "enter", "off"};
+    const char *chat_names[] = {"T", "Y", "Enter", menu_text(UI_MENU_OFF)};
+    opt_choice_list("TOTK_MP_CHAT_KEY", UI_MENU_MP_CHAT_KEY, chat_keys, chat_names, 4, UI_MENU_MP_CHAT_KEY_DESC);
+    opt_toggle("TOTK_MP_VOICE", UI_MENU_MP_VOICE, UI_MENU_MP_VOICE_DESC);
+    static const UiTextId modes[] = {UI_MENU_MP_VOICE_PUSH, UI_MENU_MP_VOICE_OPEN};
+    opt_choice("TOTK_MP_VOICE_MODE", UI_MENU_MP_VOICE_MODE, modes, 2, UI_MENU_MP_VOICE_MODE_DESC);
+    static const char *const voice_keys[] = {"v", "b", "g", "h", "capslock"};
+    static const char *const voice_names[] = {"V", "B", "G", "H", "Caps Lock"};
+    opt_choice_list("TOTK_MP_VOICE_KEY", UI_MENU_MP_VOICE_KEY, voice_keys, voice_names, 5, UI_MENU_MP_VOICE_KEY_DESC);
+    opt_slider("TOTK_MP_VOICE_VOL", UI_MENU_MP_VOICE_VOL, 0, 200, UI_MENU_MP_VOICE_VOL_DESC, 10, "%.0f %%");
     opt_end();
 }
 
@@ -1161,6 +1178,124 @@ static void tab_achievements(float scale) {
     ImGui::EndChild();
 }
 
+// ---- multiplayer shortcuts: the chat box the chat key opens over the game, and the voice indicators
+
+static const char *key_label(const char *key) {
+    const char *v = cfg_value(key);
+    if (!strcmp(v, "enter")) return "Enter";
+    if (!strcmp(v, "capslock")) return "Caps Lock";
+    if (!strcmp(v, "off")) return menu_text(UI_MENU_OFF);
+    static char up[2][8];
+    static int k;
+    k ^= 1;
+    snprintf(up[k], sizeof up[k], "%c", v[0] >= 'a' && v[0] <= 'z' ? v[0] - 32 : v[0]);
+    return up[k];
+}
+
+// Called by the window adapters on the chat key: opens the chat box while this game is in a room (else the key goes
+// on to the game). 1 when it opened.
+extern "C" int menu_chat_open(void) {
+    if (g_failed_flag() || menu_is_open()) return 0;
+    MpView v;
+    mp_view(&v);
+    if (v.state != MP_CONNECTED) return 0;
+    g_chat.store(1);
+    change_open(1);
+    return 1;
+}
+
+// The chat box: the last lines of the room's chat over a text field, at the bottom left, above the game.
+static void layout_chat(uint32_t w, uint32_t h, float scale) {
+    static char text[300];
+    static bool focus;
+    if (g_reset.load() == 0 && ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        set_open(0);
+        return;
+    }
+    if (ImGui::GetFrameCount() <= 1 || !ImGui::IsAnyItemActive()) focus = true;
+    float bw = fminf((float)w * 0.42f, 760 * scale);
+    ImGui::SetNextWindowPos(ImVec2(24 * scale, (float)h - 24 * scale), ImGuiCond_Always, ImVec2(0, 1));
+    ImGui::SetNextWindowSize(ImVec2(bw, 0));
+    ImGui::SetNextWindowBgAlpha(0.88f);
+    ImGui::Begin("##chat_box", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                                        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize);
+    static MpLine lines[8];
+    int n = mp_lines(lines, 8);
+    ImGui::PushTextWrapPos(bw - 16 * scale);
+    for (int i = 0; i < n; i++) {
+        const MpLine &l = lines[i];
+        if (l.kind == MP_LINE_CHAT) {
+            ImGui::TextColored(kUiGoldHi, "%s:", l.from);
+            ImGui::SameLine();
+            ImGui::TextUnformatted(l.text);
+        } else {
+            ImGui::TextColored(l.kind == MP_LINE_ACH ? kUiZonai : kUiMuted, "%s", l.text);
+        }
+    }
+    ImGui::PopTextWrapPos();
+    ImGui::SetNextItemWidth(-1);
+    if (focus) {
+        ImGui::SetKeyboardFocusHere();
+        focus = false;
+    }
+    if (ImGui::InputText("##chat_say", text, sizeof text, ImGuiInputTextFlags_EnterReturnsTrue)) {
+        if (text[0]) mp_send_chat(text);
+        text[0] = 0;
+        set_open(0);   // Enter sends and goes back to the game
+    }
+    ImGui::TextColored(kUiMuted, "%s", menu_text(UI_MENU_MP_CHAT_BOX_HINT));
+    ImGui::End();
+}
+
+static bool voice_active(void) {
+    char names[VOICE_SPEAKERS][VOICE_NAME_MAX];
+    return voice_transmitting() || voice_speakers(names, VOICE_SPEAKERS) > 0;
+}
+
+// While voice runs: "Talking" when this game sends its microphone, and the friends heard now, at the top left.
+static void voice_draw(const MenuTarget *t, float scale) {
+    (void)t;
+    char names[VOICE_SPEAKERS][VOICE_NAME_MAX];
+    int n = voice_speakers(names, VOICE_SPEAKERS), me = voice_transmitting();
+    if (!n && !me) return;
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    ImFont *font = ImGui::GetFont();
+    float fs = ImGui::GetFontSize() * 0.8f, pad = 8 * scale, r = 6 * scale;
+    float x = (full_menu() ? 124 : 24) * scale, y = 24 * scale;
+    for (int i = -1; i < n; i++) {
+        if (i < 0 && !me) continue;
+        const char *label = i < 0 ? menu_text(UI_MENU_MP_TALKING) : names[i];
+        ImVec4 col = i < 0 ? kUiDanger : kUiZonai;
+        ImVec2 ts = font->CalcTextSizeA(fs, FLT_MAX, 0, label);
+        float hgt = ts.y + pad * 2, wid = pad * 3 + r * 2 + ts.x;
+        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + wid, y + hgt), ui_col(kUiPanel, 0.85f), hgt / 2);
+        dl->AddCircleFilled(ImVec2(x + pad + r, y + hgt / 2), r, ui_col(col, 1.0f));
+        dl->AddText(font, fs, ImVec2(x + pad * 2 + r * 2, y + pad), ui_col(kUiCream, 1.0f), label);
+        y += hgt + 6 * scale;
+    }
+}
+
+// The Multiplayer tab's line about the shortcuts, with the microphone's level while it is open.
+static void mp_voice_line(float scale) {
+    char hint[200];
+    const char *chat = key_label("TOTK_MP_CHAT_KEY");
+    if (!cfg_bool("TOTK_MP_VOICE")) snprintf(hint, sizeof hint, menu_text(UI_MENU_MP_HINT_NOVOICE), chat);
+    else if (!strcmp(cfg_value("TOTK_MP_VOICE_MODE"), "open")) snprintf(hint, sizeof hint, menu_text(UI_MENU_MP_HINT_OPEN), chat);
+    else snprintf(hint, sizeof hint, menu_text(UI_MENU_MP_HINT_PUSH), chat, key_label("TOTK_MP_VOICE_KEY"));
+    ImGui::TextColored(kUiMuted, "%s", hint);
+    if (!cfg_bool("TOTK_MP_VOICE")) return;
+    if (voice_mic_error()) {
+        ImGui::TextColored(kUiWarn, "%s", menu_text(UI_MENU_MP_NO_MIC));
+        return;
+    }
+    float lv = voice_level();
+    ImGui::TextColored(kUiMuted, "%s", menu_text(UI_MENU_MP_MIC));
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_PlotHistogram, voice_transmitting() ? kUiDanger : kUiZonai);
+    ImGui::ProgressBar(lv, ImVec2(160 * scale, 8 * scale), "");
+    ImGui::PopStyleColor();
+}
+
 // ---- the Multiplayer tab (net_mp.c): the room's settings and state, the players' progress, the group challenge and
 // the chat. The text fields write totk.ini when they lose the keyboard.
 static void mp_field(const char *key, UiTextId label, char *buf, size_t cap, ImGuiInputTextFlags flags, float w) {
@@ -1225,6 +1360,7 @@ static void tab_multiplayer(float scale) {
     }
     ImGui::AlignTextToFramePadding();
     ImGui::TextColored(sc, "%s", state);
+    mp_voice_line(scale);
     ImGui::Dummy(ImVec2(1, 8 * scale));
     // the players, the most achievements first
     if (v.state == MP_CONNECTED && v.nplayers) {
@@ -1335,12 +1471,12 @@ static bool mp_notes_tick(void) {
 }
 
 static void mp_notes_draw(const MenuTarget *t, float scale) {
-    if (!g_mp_nnotes) return;
+    if (!g_mp_nnotes || g_chat.load()) return;   // the chat box shows the lines itself
     ImDrawList *dl = ImGui::GetForegroundDrawList();
     ImFont *font = ImGui::GetFont();
     // above the menu's bottom row while the menu is open
     float fs = ImGui::GetFontSize() * 0.8f, pad = 10 * scale, icon = 40 * scale,
-          y = (float)t->height - (g_open.load(std::memory_order_relaxed) ? 96 : 24) * scale;
+          y = (float)t->height - (full_menu() ? 96 : 24) * scale;
     double now = plat_now_ns() / 1e9;
     for (int i = g_mp_nnotes - 1; i >= 0; i--) {
         const MpLine &l = g_mp_notes[i].l;
@@ -1371,7 +1507,7 @@ static void mp_notes_draw(const MenuTarget *t, float scale) {
         ImVec2 bs = font->CalcTextSizeA(fs, FLT_MAX, maxw, body);
         float tw = fmaxf(hs.x, bs.x), th = (head[0] ? hs.y + 2 * scale : 0) + bs.y;
         float ic = idx >= 0 ? icon + pad : 0, w = pad * 2 + ic + tw, h = fmaxf(pad * 2 + th, idx >= 0 ? icon + pad * 2 : 0);
-        float x0 = (g_open.load(std::memory_order_relaxed) ? 124 : 24) * scale;   // past the rail while it shows
+        float x0 = (full_menu() ? 124 : 24) * scale;   // past the rail while it shows
         ImVec2 p(x0, y - h), q(p.x + w, y);
         dl->AddRectFilled(p, q, ui_col(kUiPanel, 0.88f * a), 10 * scale);
         dl->AddRect(p, q, ui_col(col, 0.6f * a), 10 * scale, 0, 1.2f * scale);
@@ -1829,7 +1965,7 @@ static void perf_full_draw(const MenuTarget *t, float scale) {
                                         ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
                                         ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoSavedSettings);
     // under the menu while it is open (the settings stay readable), else over everything
-    if (g_open.load(std::memory_order_relaxed)) ImGui::BringWindowToDisplayBack(ImGui::GetCurrentWindow());
+    if (full_menu()) ImGui::BringWindowToDisplayBack(ImGui::GetCurrentWindow());
     else ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());
     ImGui::SetWindowFontScale(0.72f);
     const ImVec4 gpu_c(0.55f, 0.83f, 0.31f, 1), cpu_c(0.18f, 0.59f, 0.80f, 1), ram_c(0.80f, 0.45f, 0.70f, 1),
@@ -1904,7 +2040,7 @@ static void perf_draw(const MenuTarget *t, float scale) {
     float w = (float)t->width;
     if (!g_perf_mode || !g_perf_text[0]) return;
     // with the menu open: under its window, over the dimming layout_menu drew before
-    ImDrawList *dl = g_open.load(std::memory_order_relaxed) ? ImGui::GetBackgroundDrawList() : ImGui::GetForegroundDrawList();
+    ImDrawList *dl = full_menu() ? ImGui::GetBackgroundDrawList() : ImGui::GetForegroundDrawList();
     ImVec2 sz = ImGui::CalcTextSize(g_perf_text);
     float pad = 6 * scale;
     ImVec2 p(w - 12 * scale - sz.x - pad * 2, 12 * scale);   // the top right corner: the game's HUD leaves it empty
@@ -2035,6 +2171,7 @@ extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const cha
     toast = note_tick() || toast;   // an achievement notice needs the overlay's frame as the shader notice does
     mp_tick();
     toast = mp_notes_tick() || toast;
+    toast = voice_active() || toast;   // the voice indicators need the overlay while someone talks
     amiibo_tick();
     bool open = g_open.load(std::memory_order_relaxed);
     if (!open) {
@@ -2094,7 +2231,9 @@ extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const cha
     ImGui_ImplVulkan_NewFrame();
     ImGui::NewFrame();
     g_wants_text.store(open && io.WantTextInput, std::memory_order_relaxed);
-    if (open) layout_menu(t->width, t->height, scale);
+    if (open && g_chat.load()) layout_chat(t->width, t->height, scale);
+    else if (open) layout_menu(t->width, t->height, scale);
+    voice_draw(t, scale);
     perf_draw(t, scale);
     toast_draw(t, scale);
     note_draw(t, scale);
