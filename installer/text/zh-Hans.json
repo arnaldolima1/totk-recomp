@@ -85,6 +85,7 @@
  "lift.failed": "游戏代码转换失败（退出代码 {code}）。详情：{log}",
  "compile.failed": "编译 {game_exe} 失败（退出代码 {code}）。详情：{log}",
  "compile.exe_in_use": "{path} 正在使用中。请关闭游戏后重新运行安装程序。",
+ "prepare.xlate_in_use": "{path} 正在被占用。请关闭游戏，结束上次残留的 totk_xlate 进程，再重新运行安装程序。",
  "prepare.shader_list_missing": "缺少着色器列表。",
  "prepare.romfs_patches_failed": "写入游戏数据补丁失败（退出代码 {code}）。详情：{log}",
  "prepare.shaders_failed": "准备着色器失败（退出代码 {code}）。详情：{log}",
