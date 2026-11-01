@@ -27,10 +27,13 @@ Report problems as issues, following [CONTRIBUTING.md](CONTRIBUTING.md).
 - Keyboard, mouse and gamepad with remapping, rumble and gyro
 - Xbox button prompts: LB, RB, LT, RT, Menu and View, and A, B, X and Y as labelled on the button to press, with either button layout
 - Shaders prepared at install instead of during play
+- Mods made for emulators: unpack a mod into the `mods` folder next to `totk.exe`; switch and order them in the menu. RomFS
+  mods, TKMM's merged output and ExeFS code patches (`.ips`, `.pchtxt`) work; the game rebuilds itself for code patches
+  ([docs/tester-guide.md](docs/tester-guide.md), "Mods")
+- Atmosphère cheats: put a cheat file into a mod and switch its cheats in the menu ([docs/cheats.md](docs/cheats.md))
 
 ## Planned
 
-- Mods made for emulators: unpack a mod into a `mods` folder
 - VRR
 
 ## Installing

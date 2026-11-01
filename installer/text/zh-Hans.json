@@ -93,12 +93,16 @@
  "cleanup.ini_failed": "无法写入 totk.ini：{detail}",
 
  "warn.lang_needs_fonts": "{lang}文本需要 Switch 系统字体，而安装程序不会提取这些字体；部分文字可能无法显示。",
+ "warn.cheats_skipped": "无法构建 mods 文件夹中修改游戏代码的金手指；游戏将不含它们进行安装。详情：{log}",
+ "warn.exefs_skipped": "无法构建模组的 ExeFS 补丁（.ips、.pchtxt）；游戏将不含它们进行安装。详情：{log}",
  "warn.npdm_differs": "main.npdm 与参考的 {version} 导出不同；只使用其中的代码模块。",
  "warn.xbox_prompts_failed": "无法准备 Xbox 按键提示（退出代码 {code}）；游戏将继续使用 Switch 按键提示。详情：{log}",
  "warn.shaders_skipped": "显卡驱动在编译部分着色器时崩溃，因此有 {count} 个着色器未被预先准备。游戏会在首次需要时编译它们，驱动在那时也可能崩溃；更新驱动可能会解决。详情：{log}",
  "warn.kernel_old": "Linux {version} 缺少游戏依赖的写入跟踪功能（需要 6.7 或更新版本）；游戏可能运行得很慢。更新系统即可解决。",
 
  "ui.title": "TotK 安装程序",
+ "ui.rebuild_title": "正在为你的模组重新构建游戏",
+ "ui.start_game": "启动游戏",
  "ui.version": "版本 {version}",
  "ui.intro": "用你自己的游戏文件构建一个可以游玩的《王国之泪》文件夹。耗时较长，只需运行一次。",
  "ui.notice": "此安装程序构建的文件夹包含游戏本身，仅供你个人使用；请勿分享或上传。",

@@ -456,6 +456,11 @@ int probe_cfg(void) {
         if (!ok) fprintf(stderr, "FAIL cfg: default '%s' of %s is not one of its values '%s'\n", m->def, m->key, m->values), fails++;
     }
     CHECK(listed >= 30, "the defaults table was walked");
+    // cfg_meta answers with the first row of a key: a second row would be dead, and Reset would visit the key twice
+    for (int i = 0; cfg_meta_at(i); i++)
+        for (int j = i + 1; cfg_meta_at(j); j++)
+            if (!strcmp(cfg_meta_at(i)->key, cfg_meta_at(j)->key))
+                fprintf(stderr, "FAIL cfg: %s has two rows in the defaults table\n", cfg_meta_at(i)->key), fails++;
     printf("probe-cfg: %s\n", fails ? "FAIL" : "ok");
     return fails ? 1 : 0;
 }
