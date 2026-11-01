@@ -87,10 +87,12 @@ class App:
         version.pack(side='left', padx=(10, 0), pady=(6, 0))
         sw = ttk.Frame(top)
         sw.pack(side='right')
-        self.ui_var = tk.StringVar(value=self.cat.lang)
-        for code in UI_LANGUAGES:
-            ttk.Radiobutton(sw, text=UI_LANGUAGE_LABELS[code], value=code, variable=self.ui_var, style='Toolbutton',
-                            command=self.switch_language).pack(side='left', padx=1)
+        self.ui_var = tk.StringVar(value=self.cat.lang)   # the window language code; the box shows its name
+        labels = [UI_LANGUAGE_LABELS[c] for c in UI_LANGUAGES]
+        self.ui_box = ttk.Combobox(sw, values=labels, state='readonly', width=max(map(len, labels)) + 1)
+        self.ui_box.set(UI_LANGUAGE_LABELS[self.cat.lang])
+        self.ui_box.bind('<<ComboboxSelected>>', self.pick_language)
+        self.ui_box.pack(side='left')
         self.body = ttk.Frame(root, padding=PAD)
         self.body.pack(fill='both', expand=True)
         self.frames = {'form': self.build_form(), 'run': self.build_run(), 'finish': self.build_finish()}
@@ -128,8 +130,13 @@ class App:
         self.refresh_finish()
         self.render_log()
 
+    def pick_language(self, _event=None):
+        self.ui_var.set(UI_LANGUAGES[self.ui_box.current()])
+        self.switch_language()
+
     def switch_language(self):
         self.cat.set_language(self.ui_var.get())
+        self.ui_box.set(UI_LANGUAGE_LABELS[self.ui_var.get()])
         code = self.selected_lang()
         self.retext()
         self.vars['lang'].set(self.lang_label(code))
