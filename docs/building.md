@@ -1,7 +1,9 @@
 # Building from source
 
-Windows 10 or later, an x86-64 CPU with AVX2, and a GPU with Vulkan 1.3 and `VK_EXT_external_memory_host`. Allow about
-60 GB for the work folder. Extraction wants about 55 GB free while it runs and keeps about 35 GB afterwards.
+Windows 10 or later, an x86-64 CPU with SSE4.2, and a GPU with Vulkan 1.3 and `VK_EXT_external_memory_host`. The
+default build targets x86-64-v3 (AVX2/FMA); a CPU without them builds with `--cpu v2` instead and runs slower (see
+"Build"). Allow about 60 GB for the work folder. Extraction wants about 55 GB free while it runs and keeps about 35 GB
+afterwards.
 
 Players who only want to play can use the [installer](installer.md) instead: it builds the game on their machine
 without this toolchain.
@@ -90,6 +92,9 @@ of them.
    .venv-py314\Scripts\python tools\make_romfs_patches.py --version <ver>
    .venv\Scripts\python tools\build_game.py --version <ver>
    ```
+
+   `--cpu v2` targets x86-64-v2 (SSE4.2, no AVX2/FMA) for older CPUs; the default `v3` needs AVX2. The v2 build links
+   `runtime/fma.c`, a correctly rounded software fma the FP lowering needs, and runs slower.
 
    Lifting takes about 15 s, a clean compile about 200 s on 24 threads; later builds recompile only what changed.
    A compiler cache in front of clang shortens it further: with `SCCACHE` set to an sccache executable, `build_game.py`
@@ -201,6 +206,9 @@ change passes these, all run with `.venv`:
 | `tests\flags_check.py` | the function-local flag helpers of `runtime\cpu.h` against its packed ones | no |
 | `tests\excl_mt.py` | the exclusive monitor helpers under contention and ABA, on several threads | no |
 | `tests\jumptables_check.py` | `recomp/jumptables.py` against a Unicorn oracle; must report 0 disagreements, on 1.4.3 too | yes |
+
+A `--cpu v2` build passes the same differential tests with `--cflags=-march=x86-64-v2`; they compile `runtime/fma.c`
+too, so they check the software fma the v2 build links rather than the C runtime's.
 
 Runtime probes, each a mode of `totk.exe` (the list is at the top of `runtime/main.c`): `--probe-kernel`,
 `--probe-vkexec`, `--probe-nvn-tex` and `--probe-shader` cover most runtime changes. `--probe-shader` and the draw
