@@ -533,6 +533,13 @@ EMITTED = re.compile(r'^emitted (\d+)/(\d+) chunks')
 DISCOVERED = re.compile(r'^(\w+): \d+ functions \(.*discovery')
 
 
+def cheat_files(ctx):
+    """The Atmosphere cheat files in <dest>/cheats, for the lift key. All of them: the one the build reads goes by the
+    build id of the installed main, and the keys are computed before Extract runs (runner plan), when a fresh install
+    has no main and an update may still have another version's. The .status files beside them are lift's own output."""
+    return sorted((ctx.dest / 'cheats').glob('*.txt'))
+
+
 def cheats_file(ctx):
     """<dest>/cheats/<build id>.txt, the Atmosphere cheat file of the installed main (tools/cheats.py), whether or not
     it exists."""
@@ -550,7 +557,7 @@ class Lift(Step):
 
     def key(self, ctx):
         return fingerprint('lift-2', ctx.keys['extract'], ctx.layout.recomp, ctx.layout.patches(game_version(ctx)),
-                           ctx.layout.tools / 'cheats.py', cheats_file(ctx))
+                           ctx.layout.tools / 'cheats.py', *cheat_files(ctx))
 
     def current(self, ctx, record):
         gen = ctx.temp / 'gen'
