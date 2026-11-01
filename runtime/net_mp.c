@@ -1,6 +1,7 @@
 // Multiplayer client (net_mp.h): one thread, one TCP connection to the room, text lines (tools/mp_server.py).
 #include "net_mp.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,6 +43,11 @@ static char outbox[OUTBOX][320];
 static int out_head, out_tail;
 static volatile int32_t started, kick;
 static char me[MP_NAME_MAX];   // this game's name as the room keeps it (room_name): its own chat lines get no notice
+
+// Friends' positions by name (POS lines), merged into the roster's players by mp_view.
+enum { POS_STALE_MS = 6000, POS_EVERY_MS = 200 };
+static struct { char name[MP_NAME_MAX]; float pos[3]; uint64_t at_ms; } friend_pos[MP_MAX_PLAYERS];
+static volatile int32_t mark_pending;   // mp_mark asked; the connection's thread sends it
 
 static int64_t now_unix(void) { return (int64_t)time(NULL); }
 
@@ -189,6 +195,35 @@ static void on_line(char *line, Sock s) {
     f[n++] = line;
     for (char *p = line; *p && n < cap; p++)
         if (*p == '\t') *p = 0, f[n++] = p + 1;
+    if (!strcmp(f[0], "POS") && n >= 5) {   // POS player x y z
+        plat_mutex_lock(&lock);
+        int slot = -1, oldest = 0;
+        for (int i = 0; i < MP_MAX_PLAYERS; i++) {
+            if (!strcmp(friend_pos[i].name, f[1])) slot = i;
+            if (friend_pos[i].at_ms < friend_pos[oldest].at_ms) oldest = i;
+        }
+        if (slot < 0) slot = oldest;
+        field(friend_pos[slot].name, sizeof friend_pos[0].name, f[1]);
+        for (int k = 0; k < 3; k++) friend_pos[slot].pos[k] = (float)atof(f[2 + k]);
+        friend_pos[slot].at_ms = plat_now_ms();
+        plat_mutex_unlock(&lock);
+        return;
+    }
+    if (!strcmp(f[0], "MARK") && n >= 5) {   // MARK player x y z: one marker per player, the newest kept
+        plat_mutex_lock(&lock);
+        int slot = -1;
+        for (int i = 0; i < view.nmarkers; i++)
+            if (!strcmp(view.markers[i].name, f[1])) slot = i;
+        if (slot < 0 && view.nmarkers < MP_MAX_MARKERS) slot = view.nmarkers++;
+        if (slot >= 0) {
+            MpMarker *m = &view.markers[slot];
+            field(m->name, sizeof m->name, f[1]);
+            for (int k = 0; k < 3; k++) m->pos[k] = (float)atof(f[2 + k]);
+            m->at_ms = plat_now_ms();
+        }
+        plat_mutex_unlock(&lock);
+        return;
+    }
     if (!strcmp(f[0], "VOICE") && n >= 3) {   // VOICE from base64: a friend's Opus frame
         uint8_t pkt[VOICE_PACKET_MAX];
         int len = b64_decode(pkt, sizeof pkt, f[2]);
@@ -283,7 +318,8 @@ static void session(const char *server) {
     unsigned sent_gen = 0, ver = cfg_version();
     char settings[512], now_settings[512];
     conn_settings(settings, sizeof settings);
-    uint64_t last_ping = plat_now_ms(), minute_at = 0;
+    uint64_t last_ping = plat_now_ms(), minute_at = 0, pos_at = 0;
+    float sent_pos[3] = {0, 0, 0};
     int voice_frames = 0;
     char buf[16384];
     size_t have = 0;
@@ -368,6 +404,45 @@ static void session(const char *server) {
                 ach_mp_add("voice", 1);
             }
         }
+        if (alive && plat_now_ms() - pos_at >= POS_EVERY_MS) {   // this game's position, when it moved (or each 2 s)
+            float p[3];
+            uint64_t now = plat_now_ms();
+            int have = game_player_pos(p);
+            plat_mutex_lock(&lock);
+            view.me_has_pos = have;
+            if (have) memcpy(view.me_pos, p, sizeof p);
+            plat_mutex_unlock(&lock);
+            if (have && (fabsf(p[0] - sent_pos[0]) + fabsf(p[1] - sent_pos[1]) + fabsf(p[2] - sent_pos[2]) > 0.3f ||
+                         now - pos_at >= 2000 || !pos_at)) {
+                char x[24], y[24], z[24];
+                snprintf(x, sizeof x, "%.1f", p[0]), snprintf(y, sizeof y, "%.1f", p[1]), snprintf(z, sizeof z, "%.1f", p[2]);
+                const char *pos[] = {"POS", x, y, z};
+                alive = send_line(s, 4, pos);
+                memcpy(sent_pos, p, sizeof p);
+                pos_at = now;
+                // close to a friend in the same layer: the meeting achievement
+                plat_mutex_lock(&lock);
+                int met = 0;
+                for (int i = 0; i < MP_MAX_PLAYERS; i++)
+                    if (friend_pos[i].name[0] && now - friend_pos[i].at_ms < POS_STALE_MS &&
+                        mp_layer(friend_pos[i].pos[1]) == mp_layer(p[1]) &&
+                        hypotf(friend_pos[i].pos[0] - p[0], friend_pos[i].pos[2] - p[2]) < 30)
+                        met = 1;
+                plat_mutex_unlock(&lock);
+                if (met) ach_mp_max("meet", 1);
+            }
+            if (!have) pos_at = now;
+        }
+        if (alive && plat_xchg32(&mark_pending, 0)) {
+            float p[3];
+            if (game_player_pos(p)) {
+                char x[24], y[24], z[24];
+                snprintf(x, sizeof x, "%.1f", p[0]), snprintf(y, sizeof y, "%.1f", p[1]), snprintf(z, sizeof z, "%.1f", p[2]);
+                const char *mark[] = {"MARK", x, y, z};
+                alive = send_line(s, 4, mark);
+                ach_mp_add("marks", 1);
+            }
+        }
         if (alive && plat_now_ms() - last_ping > PING_MS) {
             const char *ping[] = {"PING"};
             alive = send_line(s, 1, ping);
@@ -432,9 +507,35 @@ void mp_tick(void) {
 }
 
 void mp_view(MpView *out) {
+    uint64_t now = plat_now_ms();
     plat_mutex_lock(&lock);
     *out = view;
+    for (int i = 0; i < out->nplayers; i++) {   // the friends' positions, while fresh
+        MpPlayer *p = &out->players[i];
+        p->has_pos = 0;
+        for (int k = 0; k < MP_MAX_PLAYERS; k++)
+            if (friend_pos[k].name[0] && !strcmp(friend_pos[k].name, p->name) && now - friend_pos[k].at_ms < POS_STALE_MS) {
+                memcpy(p->pos, friend_pos[k].pos, sizeof p->pos);
+                p->has_pos = 1;
+            }
+        if (!strcmp(p->name, me) && view.me_has_pos) memcpy(p->pos, view.me_pos, sizeof p->pos), p->has_pos = 1;
+    }
+    int w = 0;   // markers past their time, or of players gone, drop out
+    for (int i = 0; i < out->nmarkers; i++) {
+        int here = 0;
+        for (int k = 0; k < out->nplayers; k++) here |= !strcmp(out->players[k].name, out->markers[i].name);
+        if (here && now - out->markers[i].at_ms < MP_MARK_MS) out->markers[w++] = out->markers[i];
+    }
+    out->nmarkers = w;
     plat_mutex_unlock(&lock);
+}
+
+int mp_mark(void) {
+    plat_mutex_lock(&lock);
+    int ok = view.state == MP_CONNECTED && view.me_has_pos;
+    plat_mutex_unlock(&lock);
+    if (ok) plat_xchg32(&mark_pending, 1);
+    return ok;
 }
 
 int mp_lines(MpLine *out, int max) {

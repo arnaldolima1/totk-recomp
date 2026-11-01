@@ -131,6 +131,10 @@ PRESETS = {
                          cond={'kind': 'mp', 'counter': 'group_unlocks'}, max=100),
     'mp_tiers': dict(label='Multijogador: níveis de desafios do grupo concluídos',
                      cond={'kind': 'mp', 'counter': 'tiers'}, max=24),
+    'mp_meet': dict(label='Multijogador: encontrou um amigo no mundo (a menos de 30 m)',
+                    cond={'kind': 'mp', 'counter': 'meet'}, max=1),
+    'mp_marks': dict(label='Multijogador: marcadores colocados no radar', cond={'kind': 'mp', 'counter': 'marks'},
+                     max=1000),
 }
 # Numbers the prologue inflates: under Hyrule Castle Link has 30 hearts and three stamina wheels, and the game saves
 # them (MaxLife 120, MaxStamina 3000) before setting 3 hearts and one wheel when he wakes in the Room of Awakening. A
@@ -340,6 +344,9 @@ DEFAULTS = [
      _p('mp_tiers', 1)),
     ('mp_alianca', 'Aliança de Hyrule', 'Conclua 12 níveis de desafios do grupo.', 'epic', 'shrine',
      _p('mp_tiers', 12)),
+    ('mp_encontro', 'Encontro em Hyrule', 'Encontre um amigo no mundo: fiquem a menos de 30 metros um do outro.',
+     'rare', 'map', _p('mp_meet', 1)),
+    ('mp_guia', 'Guia de Hyrule', 'Coloque 20 marcadores no radar dos amigos.', 'rare', 'flag', _p('mp_marks', 20)),
     ('mp_lendas', 'Lendas Unidas', 'Conclua os 24 níveis de desafios do grupo.', 'legendary', 'triforce',
      _p('mp_tiers', 24)),
     ('platina', 'Lenda de Hyrule', 'Desbloqueie todas as outras conquistas (as de multijogador ficam de fora).',

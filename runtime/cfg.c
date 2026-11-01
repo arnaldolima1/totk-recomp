@@ -30,7 +30,7 @@ static int save_ok = 1;                         // the last cfg_save_to wrote (o
 // Every name the runtime reads (and the patch sets in generated/), without the prefix. A file key outside this list is
 // logged as unknown. A new variable goes here too, or its ini key logs a harmless "unknown key" line.
 static const char *const known[] = {
-    "AB", "ACH_POPUP", "ACH_SOUND", "ANISO", "APP_POOL", "MP", "MP_CHAT_KEY", "MP_NAME", "MP_PASSWORD", "MP_SERVER", "MP_VOICE", "MP_VOICE_KEY", "MP_VOICE_MODE", "MP_VOICE_VOL", "ASPECT", "ASPECT_PATCH", "ASSUME_FOCUS", "ASTC", "ASTC_BC",
+    "AB", "ACH_POPUP", "ACH_SOUND", "ANISO", "APP_POOL", "MP", "MP_CHAT_KEY", "MP_NAME", "MP_PASSWORD", "MP_SERVER", "MP_VOICE", "MP_VOICE_KEY", "MP_VOICE_MODE", "MP_VOICE_VOL", "MP_RADAR", "MP_MARK_KEY", "ASPECT", "ASPECT_PATCH", "ASSUME_FOCUS", "ASTC", "ASTC_BC",
     "ASTC_TIME", "ASYNC_PREEMPT", "AUDIO", "AUDIO_OFF", "AUDIO_PREFILL_MS", "AMIIBO_DIR",
     "BACKGROUND_WINDOW", "BIND_A", "BIND_B", "BIND_DOWN", "BIND_L", "BIND_LCLICK", "BIND_LEFT", "BIND_LSTICK_DOWN", "BIND_LSTICK_LEFT",
     "BIND_LSTICK_RIGHT", "BIND_LSTICK_UP", "BIND_MINUS",
@@ -72,7 +72,7 @@ static const struct { const char *key, *section; } sections[] = {
     {"DEVICE_PROFILE", "display"}, {"ASSUME_FOCUS", "display"},
     {"MENU_LANG", "language"}, {"LANG", "language"}, {"OPERATION_MODE", "language"},
     {"VOLUME", "audio"},
-    {"MP", "multiplayer"}, {"MP_SERVER", "multiplayer"}, {"MP_NAME", "multiplayer"}, {"MP_PASSWORD", "multiplayer"}, {"MP_CHAT_KEY", "multiplayer"}, {"MP_VOICE", "multiplayer"}, {"MP_VOICE_MODE", "multiplayer"}, {"MP_VOICE_KEY", "multiplayer"}, {"MP_VOICE_VOL", "multiplayer"},
+    {"MP", "multiplayer"}, {"MP_SERVER", "multiplayer"}, {"MP_NAME", "multiplayer"}, {"MP_PASSWORD", "multiplayer"}, {"MP_CHAT_KEY", "multiplayer"}, {"MP_VOICE", "multiplayer"}, {"MP_VOICE_MODE", "multiplayer"}, {"MP_VOICE_KEY", "multiplayer"}, {"MP_VOICE_VOL", "multiplayer"}, {"MP_RADAR", "multiplayer"}, {"MP_MARK_KEY", "multiplayer"},
     {"MOTION", "input"}, {"RUMBLE_STRENGTH", "input"}, {"RUMBLE_CURVE", "input"}, {"RUMBLE_TRIGGERS", "input"}, {"DS_LIGHT", "input"}, {"DS_TRIGGERS", "input"},
     {"PAD_LAYOUT", "input"}, {"STICK_DEADZONE", "input"}, {"STICK_SENS", "input"}, {"MOUSE_SENS", "input"}, {"MOUSE_SMOOTH", "input"}, {"WALK_KEY", "input"}, {"WALK_SCALE", "input"},
     {"INPUT_RECORD", "input"},
@@ -108,6 +108,7 @@ static const CfgMeta metas[] = {
     {"MP", "0", "0|1", LIVE}, {"MP_SERVER", "", NULL, LIVE}, {"MP_NAME", "", NULL, LIVE}, {"MP_PASSWORD", "", NULL, LIVE},
     {"MP_CHAT_KEY", "t", "t|y|enter|off", LIVE}, {"MP_VOICE", "1", "0|1", LIVE}, {"MP_VOICE_MODE", "push", "push|open", LIVE},
     {"MP_VOICE_KEY", "v", "v|b|g|h|capslock", LIVE}, {"MP_VOICE_VOL", "100", "0..200", LIVE},
+    {"MP_RADAR", "1", "0|1", LIVE}, {"MP_MARK_KEY", "g", "g|b|h|n|off", LIVE},
     {"OUTPUT_RES", "1920x1080", NULL, RESTART}, {"RENDER_SCALE", "game", "game|50|67|75|100|125|150|200", RESTART},
     {"UPSCALER", "fsr", "fsr|bilinear", LIVE}, {"SHARPNESS", "80", "0..100", LIVE},
     {"ASPECT", "fit", "fit|stretch", LIVE}, {"FOV", "100", "70..140", LIVE},

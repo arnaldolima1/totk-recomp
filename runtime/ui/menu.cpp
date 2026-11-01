@@ -788,6 +788,10 @@ static void tab_sound(float scale) {
     static const char *const voice_names[] = {"V", "B", "G", "H", "Caps Lock"};
     opt_choice_list("TOTK_MP_VOICE_KEY", UI_MENU_MP_VOICE_KEY, voice_keys, voice_names, 5, UI_MENU_MP_VOICE_KEY_DESC);
     opt_slider("TOTK_MP_VOICE_VOL", UI_MENU_MP_VOICE_VOL, 0, 200, UI_MENU_MP_VOICE_VOL_DESC, 10, "%.0f %%");
+    opt_toggle("TOTK_MP_RADAR", UI_MENU_MP_RADAR, UI_MENU_MP_RADAR_DESC);
+    static const char *const mark_keys[] = {"g", "b", "h", "n", "off"};
+    const char *mark_names[] = {"G", "B", "H", "N", menu_text(UI_MENU_OFF)};
+    opt_choice_list("TOTK_MP_MARK_KEY", UI_MENU_MP_MARK_KEY, mark_keys, mark_names, 5, UI_MENU_MP_MARK_KEY_DESC);
     opt_end();
 }
 
@@ -1280,8 +1284,8 @@ static bool voice_active(void) {
     return voice_transmitting() || voice_speakers(names, VOICE_SPEAKERS) > 0;
 }
 
-// While voice runs: "Talking" when this game sends its microphone, and the friends heard now, at the top left.
-static void voice_draw(const MenuTarget *t, float scale) {
+// (unused since the radar panel shows who talks; kept for a build without positions)
+[[maybe_unused]] static void voice_draw(const MenuTarget *t, float scale) {
     (void)t;
     char names[VOICE_SPEAKERS][VOICE_NAME_MAX];
     int n = voice_speakers(names, VOICE_SPEAKERS), me = voice_transmitting();
@@ -1311,6 +1315,10 @@ static void mp_voice_line(float scale) {
     else if (!strcmp(cfg_value("TOTK_MP_VOICE_MODE"), "open")) snprintf(hint, sizeof hint, menu_text(UI_MENU_MP_HINT_OPEN), chat);
     else snprintf(hint, sizeof hint, menu_text(UI_MENU_MP_HINT_PUSH), chat, key_label("TOTK_MP_VOICE_KEY"));
     ImGui::TextColored(kUiMuted, "%s", hint);
+    if (strcmp(cfg_value("TOTK_MP_MARK_KEY"), "off")) {
+        snprintf(hint, sizeof hint, menu_text(UI_MENU_MP_HINT_MARK), key_label("TOTK_MP_MARK_KEY"));
+        ImGui::TextColored(kUiMuted, "%s", hint);
+    }
     if (!cfg_bool("TOTK_MP_VOICE")) return;
     if (voice_mic_error()) {
         ImGui::TextColored(kUiWarn, "%s", menu_text(UI_MENU_MP_NO_MIC));
@@ -1527,6 +1535,151 @@ static void mp_subtabs(float scale, int unread) {
     ImGui::Dummy(ImVec2(1, 6 * scale));
 }
 
+// ---- the friends' radar (net_mp.c positions): north up, as the game's map, at the top right under the frame rate.
+// Friends are dots with their initial, hollow with an arrow when they are in another layer (sky, surface, depths);
+// markers are diamonds. The scale follows the farthest friend, 100 m to 3 km; one beyond it sits on the rim. Under it,
+// a line per friend: name, distance and layer, green while they talk; then "Talking" while this game sends its voice.
+static const UiTextId kLayerName[3] = {UI_MENU_MP_LAYER_SURFACE, UI_MENU_MP_LAYER_SKY, UI_MENU_MP_LAYER_DEPTHS};
+
+static void mp_distance(float d, char *out, size_t cap) {
+    if (d >= 1000) snprintf(out, cap, "%.1f km", d / 1000);
+    else snprintf(out, cap, "%.0f m", d);
+}
+
+static bool radar_on(const MpView &v) {
+    return v.state == MP_CONNECTED && cfg_bool("TOTK_MP_RADAR") && v.me_has_pos && frame_step_world_us() >= 0;
+}
+
+static bool voice_active(void);
+
+static bool radar_active(void) {
+    MpView v;
+    mp_view(&v);
+    if (!radar_on(v)) return voice_active();
+    for (int i = 0; i < v.nplayers; i++)
+        if (v.players[i].has_pos && strcmp(v.players[i].name, v.me)) return true;
+    return v.nmarkers > 0 || voice_active();
+}
+
+static void radar_draw(const MenuTarget *t, float scale) {
+    if (full_menu()) return;
+    MpView v;
+    mp_view(&v);
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    ImFont *font = ImGui::GetFont();
+    float fs = ImGui::GetFontSize() * 0.78f, R = 78 * scale, margin = 18 * scale;
+    float right = (float)t->width - margin, y = 64 * scale;
+    char speak[VOICE_SPEAKERS][VOICE_NAME_MAX];
+    int nspeak = voice_speakers(speak, VOICE_SPEAKERS);
+    auto talking = [&](const char *name) {
+        for (int i = 0; i < nspeak; i++)
+            if (!strcmp(speak[i], name)) return true;
+        return false;
+    };
+    int friends = 0;
+    float far = 0;
+    if (radar_on(v))
+        for (int i = 0; i < v.nplayers; i++) {
+            const MpPlayer &p = v.players[i];
+            if (!p.has_pos || !strcmp(p.name, v.me)) continue;
+            friends++;
+            far = fmaxf(far, hypotf(p.pos[0] - v.me_pos[0], p.pos[2] - v.me_pos[2]));
+        }
+    if (radar_on(v) && (friends || v.nmarkers)) {
+        for (int i = 0; i < v.nmarkers; i++)
+            far = fmaxf(far, hypotf(v.markers[i].pos[0] - v.me_pos[0], v.markers[i].pos[2] - v.me_pos[2]));
+        float range = far * 1.15f;
+        static const float steps[] = {100, 250, 500, 1000, 2000, 3000};
+        float shown = steps[5];
+        for (float s : steps)
+            if (range <= s) { shown = s; break; }
+        ImVec2 c(right - R, y + R);
+        dl->AddCircleFilled(c, R, ui_col(kUiPanel, 0.78f), 48);
+        dl->AddCircle(c, R, ui_col(kUiGold, 0.55f), 48, 1.4f * scale);
+        dl->AddCircle(c, R * 0.5f, ui_col(kUiMuted, 0.25f), 48, 1.0f * scale);
+        dl->AddLine(ImVec2(c.x - R, c.y), ImVec2(c.x + R, c.y), ui_col(kUiMuted, 0.18f), 1.0f * scale);
+        dl->AddLine(ImVec2(c.x, c.y - R), ImVec2(c.x, c.y + R), ui_col(kUiMuted, 0.18f), 1.0f * scale);
+        ImVec2 ns = font->CalcTextSizeA(fs, FLT_MAX, 0, "N");
+        dl->AddText(font, fs, ImVec2(c.x - ns.x / 2, c.y - R + 3 * scale), ui_col(kUiGoldHi), "N");
+        char scale_text[32];
+        mp_distance(shown, scale_text, sizeof scale_text);
+        ImVec2 ss = font->CalcTextSizeA(fs * 0.85f, FLT_MAX, 0, scale_text);
+        dl->AddText(font, fs * 0.85f, ImVec2(c.x - ss.x / 2, c.y + R - ss.y - 3 * scale), ui_col(kUiMuted), scale_text);
+        auto place = [&](const float *pos, bool *edge) {   // x east, z south: screen right and down
+            float dx = (pos[0] - v.me_pos[0]) / shown * R, dy = (pos[2] - v.me_pos[2]) / shown * R, d = hypotf(dx, dy);
+            float lim = R - 9 * scale;
+            *edge = d > lim;
+            if (*edge) dx *= lim / d, dy *= lim / d;
+            return ImVec2(c.x + dx, c.y + dy);
+        };
+        for (int i = 0; i < v.nmarkers; i++) {   // markers under the players
+            bool edge;
+            ImVec2 m = place(v.markers[i].pos, &edge);
+            float k = 6 * scale;
+            ImU32 col = ui_col(mp_name_col(v.markers[i].name));
+            dl->AddQuadFilled(ImVec2(m.x, m.y - k), ImVec2(m.x + k, m.y), ImVec2(m.x, m.y + k), ImVec2(m.x - k, m.y), col);
+            dl->AddQuad(ImVec2(m.x, m.y - k), ImVec2(m.x + k, m.y), ImVec2(m.x, m.y + k), ImVec2(m.x - k, m.y),
+                        ui_col(ImVec4(0, 0, 0, 1), 0.7f), 1.2f * scale);
+        }
+        int my_layer = mp_layer(v.me_pos[1]);
+        for (int i = 0; i < v.nplayers; i++) {
+            const MpPlayer &p = v.players[i];
+            if (!p.has_pos || !strcmp(p.name, v.me)) continue;
+            bool edge;
+            ImVec2 q = place(p.pos, &edge);
+            float r = 8 * scale;
+            ImVec4 col = mp_name_col(p.name);
+            int layer = mp_layer(p.pos[1]);
+            if (talking(p.name)) dl->AddCircle(q, r + 3 * scale, ui_col(kUiZonai), 0, 2 * scale);
+            if (layer == my_layer) dl->AddCircleFilled(q, r, ui_col(col));
+            else dl->AddCircle(q, r, ui_col(col), 0, 2.2f * scale);
+            char ini[8];
+            mp_initial(p.name, ini);
+            ImVec2 is = font->CalcTextSizeA(fs * 0.85f, FLT_MAX, 0, ini);
+            dl->AddText(font, fs * 0.85f, ImVec2(q.x - is.x / 2, q.y - is.y / 2),
+                        ui_col(layer == my_layer ? ImVec4(0.05f, 0.07f, 0.07f, 1) : col), ini);
+            if (layer != my_layer) {   // above or below this player: a small arrow beside the dot
+                bool up = (layer == MP_LAYER_SKY) || (layer == MP_LAYER_SURFACE && my_layer == MP_LAYER_DEPTHS);
+                float ax = q.x + r + 4 * scale, k = 4 * scale;
+                if (up) dl->AddTriangleFilled(ImVec2(ax, q.y - k), ImVec2(ax - k, q.y + k * 0.6f), ImVec2(ax + k, q.y + k * 0.6f), ui_col(col));
+                else dl->AddTriangleFilled(ImVec2(ax, q.y + k), ImVec2(ax - k, q.y - k * 0.6f), ImVec2(ax + k, q.y - k * 0.6f), ui_col(col));
+            }
+        }
+        dl->AddCircleFilled(c, 4 * scale, ui_col(kUiCream));   // this player
+        y += R * 2 + 8 * scale;
+    }
+    // the list: friends with their distance and layer (or just who talks, without positions)
+    float lh = fs + 10 * scale;
+    for (int i = 0; i < v.nplayers; i++) {
+        const MpPlayer &p = v.players[i];
+        if (!strcmp(p.name, v.me)) continue;
+        bool talk = talking(p.name);
+        bool where = radar_on(v) && p.has_pos;
+        if (!where && !talk) continue;
+        char text[128], dist[32] = "";
+        if (where) {
+            mp_distance(hypotf(p.pos[0] - v.me_pos[0], p.pos[2] - v.me_pos[2]), dist, sizeof dist);
+            snprintf(text, sizeof text, "%s  ·  %s  ·  %s", p.name, dist, menu_text(kLayerName[mp_layer(p.pos[1])]));
+        } else {
+            snprintf(text, sizeof text, "%s", p.name);
+        }
+        ImVec2 ts = font->CalcTextSizeA(fs, FLT_MAX, 0, text);
+        float w = ts.x + 30 * scale, x = right - w;
+        dl->AddRectFilled(ImVec2(x, y), ImVec2(right, y + lh), ui_col(kUiPanel, 0.78f), lh / 2);
+        dl->AddCircleFilled(ImVec2(x + 12 * scale, y + lh / 2), 5 * scale, ui_col(talk ? kUiZonai : mp_name_col(p.name)));
+        dl->AddText(font, fs, ImVec2(x + 22 * scale, y + 5 * scale), ui_col(talk ? kUiZonai : kUiCream), text);
+        y += lh + 4 * scale;
+    }
+    if (voice_transmitting()) {
+        const char *me = menu_text(UI_MENU_MP_TALKING);
+        ImVec2 ts = font->CalcTextSizeA(fs, FLT_MAX, 0, me);
+        float w = ts.x + 30 * scale, x = right - w;
+        dl->AddRectFilled(ImVec2(x, y), ImVec2(right, y + lh), ui_col(kUiPanel, 0.85f), lh / 2);
+        dl->AddCircleFilled(ImVec2(x + 12 * scale, y + lh / 2), 5 * scale, ui_col(kUiDanger));
+        dl->AddText(font, fs, ImVec2(x + 22 * scale, y + 5 * scale), ui_col(kUiCream), me);
+    }
+}
+
 // Players: one card each, the most achievements first.
 static void mp_page_players(const MpView &v, float h, float scale) {
     ImGui::BeginChild("##mp_players", ImVec2(0, h));
@@ -1562,9 +1715,16 @@ static void mp_page_players(const MpView &v, float h, float scale) {
         dl->AddText(font, fs * 1.2f, ImVec2(ac.x - is.x / 2, ac.y - is.y / 2), ui_col(ImVec4(0.05f, 0.07f, 0.07f, 1)), ini);
         float tx = ac.x + r + 12 * scale;
         dl->AddText(font, fs, ImVec2(tx, p.y + pad + 2 * scale), ui_col(me ? kUiGoldHi : kUiCream), pl.name);
-        char sub[64];
-        if (me) snprintf(sub, sizeof sub, "%s%s", menu_text(UI_MENU_MP_YOU), talk ? "  ·  " : "");
-        else sub[0] = 0;
+        char sub[96];
+        if (me) {
+            snprintf(sub, sizeof sub, "%s%s", menu_text(UI_MENU_MP_YOU), talk ? "  ·  " : "");
+        } else if (pl.has_pos && v.me_has_pos) {
+            char dist[32];
+            mp_distance(hypotf(pl.pos[0] - v.me_pos[0], pl.pos[2] - v.me_pos[2]), dist, sizeof dist);
+            snprintf(sub, sizeof sub, "%s  ·  %s%s", menu_text(kLayerName[mp_layer(pl.pos[1])]), dist, talk ? "  ·  " : "");
+        } else {
+            sub[0] = 0;
+        }
         if (talk) snprintf(sub + strlen(sub), sizeof sub - strlen(sub), "%s", menu_text(UI_MENU_MP_TALKING));
         dl->AddText(font, small, ImVec2(tx, p.y + pad + fs * 1.25f), ui_col(talk ? kUiZonai : kUiMuted), sub);
         char rank[8];
@@ -2481,7 +2641,7 @@ extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const cha
     toast = note_tick() || toast;   // an achievement notice needs the overlay's frame as the shader notice does
     mp_tick();
     toast = mp_notes_tick() || toast;
-    toast = voice_active() || toast;   // the voice indicators need the overlay while someone talks
+    toast = radar_active() || toast;   // the radar and the voice indicators need the overlay
     amiibo_tick();
     bool open = g_open.load(std::memory_order_relaxed);
     if (!open) {
@@ -2543,7 +2703,7 @@ extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const cha
     g_wants_text.store(open && io.WantTextInput, std::memory_order_relaxed);
     if (open && g_chat.load()) layout_chat(t->width, t->height, scale);
     else if (open) layout_menu(t->width, t->height, scale);
-    voice_draw(t, scale);
+    radar_draw(t, scale);
     perf_draw(t, scale);
     toast_draw(t, scale);
     note_draw(t, scale);

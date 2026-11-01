@@ -51,6 +51,8 @@ space. Nothing is encrypted or authenticated beyond the room's password: rooms a
 | game | `CHAT` | text |
 | game | `ACH` | achievement id, name, rarity |
 | game | `VOICE` | an Opus frame, base64 (20 ms of 48 kHz mono) |
+| game | `POS` | x, y, z: the player's position (each 200 ms while moving, else each 2 s) |
+| game | `MARK` | x, y, z: a marker where the player stands |
 | game | `PING` | (every 30 s; the room drops a game silent for 120 s) |
 | room | `WELCOME` | protocol, room name |
 | room | `ERROR` | code (`version`, `password`, `name`, `full`), text |
@@ -58,6 +60,8 @@ space. Nothing is encrypted or authenticated beyond the room's password: rooms a
 | room | `CHAT` | player, text |
 | room | `ACH` | player, achievement id, name, rarity |
 | room | `VOICE` | player, the frame as received (to everyone but its sender) |
+| room | `POS` | player, x, y, z (to everyone else; the last of each to a player who joins) |
+| room | `MARK` | player, x, y, z (to everyone, its player too; markers under 15 minutes old to a player who joins) |
 | room | `EVENT` | kind (`join`, `leave`, `challenge`), text |
 | room | `CHALLENGES` | count, then per track: figure, the room's total, tiers reached, four targets |
 | room | `CHALLENGE` | figure (or `done`), the room's total, target, text (the closest tier, for older games) |
@@ -81,10 +85,19 @@ default set has eleven.
 and `ACH` for each unlock (`ach_take_net_unlock`), relays the menu's chat, pings, and reconnects every 5 s after a lost
 connection. A refusal (`ERROR`) stops the retries until the settings change or *Connect* is pressed again.
 
+## Presence
+
+`runtime/frame_rate.c` `game_player_pos` reads the player's position from the game: the scene the main module points
+to, its resident actors (component 13), the one named `Player`, its position at +0x2b4 (the walk MacNativeGames
+documents for each version). x is east, y up, z south, in metres, as the game's map shows them (it prints -z). The
+game sends it in `POS` lines and keeps its friends' by name for six seconds.
+
+The radar (`runtime/ui/menu.cpp` `radar_draw`, setting `mp_radar`) is north up, as the map: friends are dots with their
+initial, hollow with an arrow when in another layer, and markers are diamonds. The layer comes from the height (`mp_layer`:
+sky over 900 m, depths under -200 m). The mark key (`mp_mark_key`, G) sends a `MARK`; each player has one, for 15
+minutes. The player cards show each friend's layer and distance. Two multiplayer achievements count meetings (within
+30 m in the same layer) and markers.
+
 ## Later layers
 
-2. Presence: the player's position read from the game, for a radar towards friends and shared map markers (the text
-   chat box and voice chat above came first).
 3. Friends in the world: an actor per friend, moved by the position and animation the room relays.
-
-Both need the game's live data (position, actors) located in the 1.4.3 code, which the save does not hold.

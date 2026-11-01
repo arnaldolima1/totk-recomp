@@ -19,7 +19,17 @@ enum { MP_STAT_SHRINES, MP_STAT_LIGHTROOTS, MP_STAT_TOWERS, MP_STAT_KOROKS, MP_S
 typedef struct {
     char name[MP_NAME_MAX], place[64];
     int stats[MP_STATS];
+    int has_pos;            // a position came from the room in the last few seconds
+    float pos[3];           // x east, y up, z south (metres; game_player_pos)
 } MpPlayer;
+
+// A shared marker: a point a player marked (the mark key), one per player, for MP_MARK_MS.
+enum { MP_MAX_MARKERS = MP_MAX_PLAYERS, MP_MARK_MS = 15 * 60 * 1000 };
+typedef struct {
+    char name[MP_NAME_MAX];
+    float pos[3];
+    uint64_t at_ms;
+} MpMarker;
 
 // A group challenge track (tools/mp_server.py TRACKS): one figure, four tiers (bronze, silver, gold, legendary) over
 // the room's total.
@@ -34,6 +44,10 @@ typedef struct {
     int state;
     char room[64], error[200], server[128];
     char me[MP_NAME_MAX];   // this game's name in the room
+    int me_has_pos;         // this game's own position, read with the ones it sends
+    float me_pos[3];
+    int nmarkers;
+    MpMarker markers[MP_MAX_MARKERS];
     int ntracks;
     MpTrack tracks[MP_TRACKS];
     int nplayers;
@@ -55,6 +69,11 @@ int mp_lines(MpLine *out, int max);    // the chat log, oldest first; returns ho
 int mp_take_toast(MpLine *out);        // the next line to show as a notice, 1 when there was one
 int mp_send_chat(const char *text);    // queued for the thread; 0 when not connected
 void mp_reconnect(void);               // after the settings changed: drop the connection and try again now
+int mp_mark(void);                     // marks where the player stands, for everyone in the room; 0 when not possible
+
+// The layer of the world a height is in, for the radar and the player cards.
+enum { MP_LAYER_SURFACE, MP_LAYER_SKY, MP_LAYER_DEPTHS };
+static inline int mp_layer(float y) { return y > 900 ? MP_LAYER_SKY : y < -200 ? MP_LAYER_DEPTHS : MP_LAYER_SURFACE; }
 
 #ifdef __cplusplus
 }

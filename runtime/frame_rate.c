@@ -184,6 +184,8 @@ static int player_pos(float xyz[3]) {
     return 0;
 }
 
+int game_player_pos(float xyz[3]) { return player_pos(xyz); }
+
 static void speed_report(uint64_t now, double step, int interval) {
     if (!win_t0) {
         win_t0 = now;

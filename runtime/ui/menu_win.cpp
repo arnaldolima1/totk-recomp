@@ -16,6 +16,7 @@ extern "C" {
 #include "input.h"
 #include "input_win.h"
 #include "ui/menu.h"
+#include "net_mp.h"
 #include "voice.h"
 }
 
@@ -84,6 +85,9 @@ extern "C" int menu_window_msg(HWND h, UINT m, WPARAM w, LPARAM l, LRESULT *res)
         [[fallthrough]];
     case WM_KEYUP:
     case WM_SYSKEYUP:
+        // the mark key: a marker where the player stands, while playing; the key goes on to the game as well
+        if ((m == WM_KEYDOWN || m == WM_SYSKEYDOWN) && !(l & (1 << 30)) && !menu_is_open() && is_key("TOTK_MP_MARK_KEY", w))
+            mp_mark();
         // push to talk: down only while playing (not typing), up always; the key goes on to the game as well
         if (is_key("TOTK_MP_VOICE_KEY", w) && (!menu_is_open() || m == WM_KEYUP || m == WM_SYSKEYUP))
             voice_ptt(m == WM_KEYDOWN || m == WM_SYSKEYDOWN);

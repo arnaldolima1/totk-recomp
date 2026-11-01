@@ -57,12 +57,14 @@ class Player:
         self.place = ''
         self.joined = time.time()
         self.last = time.time()
+        self.pos = None   # the last POS line's fields (x, y, z)
 
 
 class Room:
     def __init__(self, name, password, state_path):
         self.name, self.password = name, password
         self.players = []
+        self.marks = {}   # player name: ((x, y, z), time), the newest marker of each
         self.state_path = state_path
         self.state = {'tiers': {}, 'best': {}}
         if state_path and state_path.is_file():
@@ -172,6 +174,12 @@ async def handle(room, reader, writer):
                 p.name = name
                 await room.send(p, line('WELCOME', str(PROTOCOL), room.name))
                 await room.broadcast(line('EVENT', 'join', f'{name} entrou na sala.'), skip=p)
+                for q in room.players:   # where everyone stands and their markers, for the newcomer
+                    if q is not p and q.name and q.pos:
+                        await room.send(p, line('POS', q.name, *q.pos))
+                for who, (mark, at) in room.marks.items():
+                    if time.time() - at < 15 * 60:
+                        await room.send(p, line('MARK', who, *mark))
                 await room.progress_changed()
                 print(f'{time.strftime("%H:%M:%S")} {name} entrou ({peer[0]})', flush=True)
             elif not p.name:
@@ -184,6 +192,19 @@ async def handle(room, reader, writer):
                     except ValueError:
                         pass
                 await room.progress_changed()
+            elif kind == 'POS' and len(f) >= 4 and p.name:   # the player's position, to everyone else
+                try:
+                    p.pos = tuple(f'{float(v):.1f}' for v in f[1:4])
+                except ValueError:
+                    continue
+                await room.broadcast(line('POS', p.name, *p.pos), skip=p)
+            elif kind == 'MARK' and len(f) >= 4 and p.name:   # a marker, to everyone (its player sees it too)
+                try:
+                    mark = tuple(f'{float(v):.1f}' for v in f[1:4])
+                except ValueError:
+                    continue
+                room.marks[p.name] = (mark, time.time())
+                await room.broadcast(line('MARK', p.name, *mark))
             elif kind == 'VOICE' and len(f) >= 2 and p.name:   # a 20 ms Opus frame, base64: to everyone else
                 b64 = ''.join(c for c in f[1][:600] if c.isascii() and (c.isalnum() or c in '+/='))   # line() would cut it at 500
                 await room.broadcast(f'VOICE\t{p.name}\t{b64}\n'.encode('utf-8'), skip=p)

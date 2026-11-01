@@ -16,6 +16,7 @@ extern "C" {
 #include "input.h"
 #include "input_sdl.h"
 #include "ui/menu.h"
+#include "net_mp.h"
 #include "voice.h"
 }
 
@@ -85,6 +86,9 @@ extern "C" void menu_sdl_event(const SDL_Event *e) {
         if (!e->key.repeat && !menu_is_open() && is_key("TOTK_MP_CHAT_KEY", e->key.scancode) && menu_chat_open()) return;
         [[fallthrough]];
     case SDL_EVENT_KEY_UP:
+        // the mark key: a marker where the player stands, while playing; the key goes on to the game as well
+        if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && !menu_is_open() && is_key("TOTK_MP_MARK_KEY", e->key.scancode))
+            mp_mark();
         // push to talk: down only while playing (not typing), up always; the key goes on to the game as well
         if (is_key("TOTK_MP_VOICE_KEY", e->key.scancode) && (!menu_is_open() || e->type == SDL_EVENT_KEY_UP))
             voice_ptt(e->type == SDL_EVENT_KEY_DOWN);
