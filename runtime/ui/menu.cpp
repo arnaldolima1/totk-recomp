@@ -1057,7 +1057,8 @@ static void tab_mods(float scale) {
             snprintf(desc + k, sizeof desc - k, "%s%s%s%s%s%s\n\n%s", over[0] ? "\n\n" : "", over,
                      other[0] ? "\n\n" : "", other, problem != UI_TEXT_COUNT ? "\n\n" : "",
                      problem != UI_TEXT_COUNT ? menu_text(problem) : "", menu_text(UI_MENU_MODS_MOVE_HINT));
-        int s = opt_text_row(id, m->name, menu_text(m->enabled ? UI_MENU_ON : UI_MENU_OFF), after, desc, true);
+        const char *note = m->enabled && m->problem != MOD_OK ? menu_text(UI_MENU_MODS_UNUSED) : after;
+        int s = opt_text_row(id, m->name, menu_text(m->enabled ? UI_MENU_ON : UI_MENU_OFF), note, desc, true);
         if (s == 2 || s == -1 || s == 1) {
             mods_set_enabled(i, !m->enabled);
             opt_save_soon();
