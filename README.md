@@ -71,7 +71,7 @@ To update, run a newer `TotK-Setup.exe` on the same folder; saves and settings a
 
 ## Credits
 
-- **[valentderah](https://github.com/valentderah)**: creator and maintainer of TotK Recomp ([valentderah/totk-pc-recomp](https://github.com/valentderah/totk-pc-recomp)), and the contributors to that repository, among them Lucas-blip-png (colour profiles, field of view), shenjackyuanjie (the 1.1.1 update, the shader walk), wdiasjunior (the Linux port and Steam Deck), lcd1232 (the Linux installer's text) and JieML1100 (the equipment-switch fix)
+- **[valentderah](https://github.com/valentderah)**: creator and maintainer of TotK Recomp ([valentderah/totk-pc-recomp](https://github.com/valentderah/totk-pc-recomp)), and the contributors to that repository, among them Lucas-blip-png (colour profiles, field of view), shenjackyuanjie (the 1.1.1 update, the shader walk), wdiasjunior (the Linux port and Steam Deck), lcd1232 (the Linux installer's text), JieML1100 (the equipment-switch fix), and the authors of the open pull requests this fork took in: koosc (texture write-back fixes), wdiasjunior (the fixed sun shadow map), shin2344234 (the stick camera speed), shenjackyuanjie (the walk key), ProSep (HDR10), itaskaev2 and applezra (anisotropic filtering) and leonelalej (Amiibo)
 - **[arnaldolima1](https://github.com/arnaldolima1)**: this fork's launcher, achievements, PlayStation prompts, Brazilian Portuguese and the other changes in [This fork](#this-fork)
 - **UltraTears**: the look of the in-game menu and the fork the launcher grew from
 

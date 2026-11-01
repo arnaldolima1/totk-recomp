@@ -64,7 +64,9 @@ static void refresh_dir(void) {
     std::error_code ec;
     fs::path dir_path(g_current_dir);
 
-    // Fall back to "." if directory does not exist or is not a directory
+    // The default folder is made when it is missing, so the page opens on an empty amiibo folder rather than on the
+    // install folder's own files. Fall back to "." if a chosen directory does not exist or is not a directory.
+    if (g_current_dir == kDefaultAmiiboDir && !fs::exists(dir_path, ec)) fs::create_directories(dir_path, ec);
     if (!fs::exists(dir_path, ec) || !fs::is_directory(dir_path, ec)) {
         if (g_current_dir != ".") {
             set_current_dir(".");

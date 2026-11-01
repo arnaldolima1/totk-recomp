@@ -1365,7 +1365,12 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
     case TAB_SOUND: tab_sound(scale); break;
     case TAB_CONTROLS: tab_controls(scale); break;
     case TAB_MENU: tab_menu(scale); break;
-    case TAB_AMIIBO: tab_amiibo(scale); break;
+    case TAB_AMIIBO:   // its own panes in a child that leaves the bottom row free, as opt_begin does for the others
+        ImGui::BeginChild("##amiibo", ImVec2(0, fmaxf(ImGui::GetContentRegionAvail().y - g_page_bottom, 100 * scale)),
+                          ImGuiChildFlags_NavFlattened);
+        tab_amiibo(scale);
+        ImGui::EndChild();
+        break;
     case TAB_ADVANCED: tab_advanced(scale); break;
     case TAB_ACHIEVEMENTS: tab_achievements(scale); break;
     }
