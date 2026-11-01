@@ -3,10 +3,10 @@
 A front end over the CLI (docs/installer.md): it collects the game files, the keys file path, the optional firmware
 folder, the game language and the install folder, runs `python -m installer ...` as a subprocess and shows its JSON
 events. Decisions live in guilogic.py; this file only draws. The window text is in
-installer/text/<en|ru|pt-BR>.json under "ui.*" and "launcher.*" ids.
+installer/text/<en|ru|pt-BR|zh-Hans>.json under "ui.*" and "launcher.*" ids.
 
     --selftest [--shots DIR]   build every screen in every language and close by itself (PNG per screen with --shots)
-    --lang en|ru|pt-BR         window language (default: the Windows display language)
+    --lang en|ru|pt-BR|zh-Hans window language (default: the Windows display language)
 """
 import argparse
 import json
@@ -24,8 +24,8 @@ except ImportError:
 
 from . import ini
 from . import layout as layouts
-from .guilogic import (DONE, FAILED, PENDING, RUNNING, SKIPPED, UI_LANGUAGES, Catalog, Form, Model, Process,
-                       amount, default_game_language, describe_event, parse_line, windows_ui_language)
+from .guilogic import (DONE, FAILED, PENDING, RUNNING, SKIPPED, UI_LANGUAGE_LABELS, UI_LANGUAGES, Catalog, Form, Model,
+                       Process, amount, default_game_language, describe_event, parse_line, windows_ui_language)
 
 POLL_MS = 100
 GLYPH = {PENDING: '\u25cb', RUNNING: '\u25b6', DONE: '\u2714', SKIPPED: '\u2013', FAILED: '\u2716'}
@@ -86,7 +86,7 @@ class App:
         sw.pack(side='right')
         self.ui_var = tk.StringVar(value=self.cat.lang)
         for code in UI_LANGUAGES:
-            ttk.Radiobutton(sw, text=code.upper(), value=code, variable=self.ui_var, style='Toolbutton',
+            ttk.Radiobutton(sw, text=UI_LANGUAGE_LABELS[code], value=code, variable=self.ui_var, style='Toolbutton',
                             command=self.switch_language).pack(side='left', padx=1)
         self.body = ttk.Frame(root, padding=PAD)
         self.body.pack(fill='both', expand=True)

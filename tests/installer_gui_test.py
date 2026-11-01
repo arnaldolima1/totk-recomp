@@ -31,8 +31,9 @@ from installer import state as statefile  # noqa: E402
 from installer.events import Reporter  # noqa: E402
 from installer.runner import Context  # noqa: E402
 from installer.steps import Fonts, all_steps  # noqa: E402
-from installer.guilogic import (DONE, FAILED, PENDING, RUNNING, SKIPPED, UI_LANGUAGES, Catalog, Form, Model,  # noqa: E402
-                                Process, amount, describe_event, parse_line, windows_ui_language)
+from installer.guilogic import (DONE, FAILED, PENDING, RUNNING, SKIPPED, UI_LANGUAGE_LABELS,  # noqa: E402
+                                UI_LANGUAGES, Catalog, Form, Model, Process, amount, default_game_language,
+                                describe_event, parse_line, ui_language_for_langid, windows_ui_language)
 
 INSTALLED = ROOT / 'build' / 'install-test'
 FIXTURE = ROOT / 'build' / 'inst-gui' / 'e2e-install'
@@ -255,6 +256,17 @@ class CatalogTest(unittest.TestCase):
                          if sorted(re.findall(r'\{\w+\}', en[k])) != sorted(re.findall(r'\{\w+\}', other[k]))]
                 self.assertEqual(holes, [])
 
+    def test_language_names_tell_the_codes_apart(self):
+        # gui.App.selected_lang maps the shown name back to its code across every window language
+        names = {}
+        for lang in UI_LANGUAGES:
+            cat = Catalog(lang)
+            for id in cat.english:
+                if id.startswith('lang.'):
+                    names.setdefault(cat(id), set()).add(id)
+        self.assertEqual({n: ids for n, ids in names.items() if len(ids) > 1}, {})
+        self.assertEqual(sorted(UI_LANGUAGE_LABELS), sorted(UI_LANGUAGES))
+
     def test_every_id_the_window_uses_exists(self):
         cat = Catalog('en')
         ids = ['ui.' + n for n in ('title', 'start', 'cancel', 'open_folder', 'notice', 'space_one', 'space_two',
@@ -263,10 +275,11 @@ class CatalogTest(unittest.TestCase):
         ids += ['ui.state_' + n for n in ('started', 'done', 'skipped', 'pending', 'running', 'failed')]
         for lang in UI_LANGUAGES:
             cat.set_language(lang)
+            self.assertEqual(cat.lang, lang)
             self.assertEqual([i for i in ids if not cat.has(i)], [])
 
     def test_codes_become_names(self):
-        for lang, korean in (('en', 'Korean'), ('ru', 'Корейский'), ('pt-BR', 'Coreano')):
+        for lang, korean in (('en', 'Korean'), ('ru', 'Корейский'), ('pt-BR', 'Coreano'), ('zh-Hans', '韩语')):
             cat = Catalog(lang)
             self.assertIn(korean, cat('warn.lang_needs_fonts', lang='ko'))
             self.assertNotIn(' ko ', cat('warn.lang_needs_fonts', lang='ko'))
@@ -296,6 +309,16 @@ class CatalogTest(unittest.TestCase):
 
     def test_windows_language_is_a_known_value(self):
         self.assertIn(windows_ui_language(), UI_LANGUAGES)
+
+    def test_windows_langid_picks_the_window_language(self):
+        for langid, lang in ((0x0419, 'ru'), (0x0819, 'ru'), (0x0416, 'pt-BR'), (0x0816, 'en'),
+                             (0x0804, 'zh-Hans'), (0x1004, 'zh-Hans'),
+                             (0x0404, 'en'), (0x0c04, 'en'), (0x1404, 'en'), (0x0409, 'en'), (0x0411, 'en')):
+            self.assertEqual(ui_language_for_langid(langid), lang, hex(langid))
+
+    def test_chinese_window_starts_with_a_game_language_that_needs_no_shared_fonts(self):
+        self.assertEqual(default_game_language('zh-Hans'), 'en-US')
+        self.assertEqual(default_game_language('ru'), 'ru')
 
 
 BREAK_CHILD = 'import time\nprint("ready", flush=True)\ntime.sleep(60)\n'
