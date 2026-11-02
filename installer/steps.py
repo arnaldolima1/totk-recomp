@@ -1070,6 +1070,7 @@ class Prepare(Step):
         if code:
             rep.warning('warn.achievements_failed', code=code, log=str(log))
         link_figure(ctx)
+        link_sounds(ctx)
         editor_shortcuts(ctx)
 
         shader_list = layout.shader_list
@@ -1124,6 +1125,17 @@ def link_figure(ctx):
     shutil.rmtree(work, ignore_errors=True)
     if code:
         rep.warning('warn.link_figure_failed', code=code, log=str(log))
+
+
+def link_sounds(ctx):
+    """profile/link-sounds.bin: the game's own footsteps, swings and other sounds of Link that each friend's figure plays
+    in a multiplayer room (runtime/friend_sfx.c), decoded from this install's RomFS by tools/link_sounds.py. Optional:
+    without it friends are silent, so the setup warns and goes on."""
+    layout, dest, rep = ctx.layout, ctx.dest, ctx.reporter
+    code, log = run_tool(ctx, 'prepare-sounds', layout.tools / 'link_sounds.py',
+                         [dest / 'romfs', dest / 'profile' / 'link-sounds.bin'])
+    if code:
+        rep.warning('warn.link_sounds_failed', code=code, log=str(log))
 
 
 def editor_shortcuts(ctx):

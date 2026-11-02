@@ -47,6 +47,9 @@ unsigned ach_stats(AchStats *out);   // returns a count that grows with every ev
 unsigned ach_look(char out[3][64]);   // the armor pieces worn at the last save read (head, upper, lower; "" none);
                                       // the result grows when they change (0: none read yet)
 int ach_take_net_unlock(void);       // the next unlock to tell the room (an index for ach_get), -1 when none
+// The newest save's flags of one type (0 bool, 2 int, ... as progress.sav numbers them), in the file's order: up to
+// cap (hash, value) pairs; returns how many (0 before a save was read). Reads the file again on every call.
+int ach_save_flags(int type, uint32_t *hash, uint32_t *value, int cap);
 int ach_find(const char *id);        // the index of an achievement id, -1 when this install has none
 
 // Multiplayer counters (net_mp.c): what happens in rooms, kept in <profile>/achievements-mp.tsv; the multiplayer

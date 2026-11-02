@@ -15,7 +15,7 @@ extern "C" {
 // Great Sky Island yet, achievements.h AchStats.awake): the game joins once it is over.
 enum { MP_OFF, MP_CONNECTING, MP_CONNECTED, MP_RETRYING, MP_REFUSED, MP_LOCKED };
 // A room holds four players, as in Four Swords (tools/mp_server.py): each has a slot, 0..3, that picks their colour.
-enum { MP_MAX_PLAYERS = 32, MP_NAME_MAX = 32, MP_SLOTS = 4 };
+enum { MP_MAX_PLAYERS = 32, MP_NAME_MAX = 32, MP_SLOTS = 4, MP_ANIM_MAX = 48, MP_SFX_MAX = 72 };
 enum { MP_STAT_SHRINES, MP_STAT_LIGHTROOTS, MP_STAT_TOWERS, MP_STAT_KOROKS, MP_STAT_HEARTS, MP_STAT_ACHIEVEMENTS,
        MP_STATS };
 
@@ -23,7 +23,12 @@ typedef struct {
     char name[MP_NAME_MAX], place[64];
     int stats[MP_STATS];
     int has_pos;            // a position came from the room in the last few seconds
-    float pos[3];           // x east, y up, z south (metres; game_player_pos)
+    float pos[3];           // x east, y up, z south (metres; game_player_pos); a friend's along their path (net_mp.c)
+    float vel[3];           // a friend's velocity there (m/s), 0 standing
+    float yaw;              // the way a friend faces (game_player_pose), NAN when their game does not send it
+    char anim[MP_ANIM_MAX]; // the animation a friend's Link plays (game_player_anim), "" when their game does not send it
+    float frames[3];        // its frame: from + (to - from) u, to below from when a loop started over (net_mp.c place_on)
+    float rot[4];           // a friend's Link's whole rotation (x, y, z, w; game_player_quat), from the yaw when not sent
     char look[3][48];       // the armor pieces the player wears (head, upper, lower; "" none), from LOOK lines
     int slot;               // 0..MP_SLOTS-1 from the room's SLOTS line, -1 before it came (an older server)
 } MpPlayer;
@@ -59,6 +64,7 @@ typedef struct {
     MpPlayer players[MP_MAX_PLAYERS];
     char challenge[160];
     int challenge_total, challenge_target, challenges_done;   // challenges_done: every group challenge is reached
+    int ping_ms;            // the round trip to the room (PING to PONG, every 2 s, smoothed), 0 not measured yet
 } MpView;
 
 enum { MP_LINE_CHAT, MP_LINE_ACH, MP_LINE_EVENT };
@@ -76,6 +82,9 @@ int mp_send_chat(const char *text);    // queued for the thread; 0 when not conn
 void mp_reconnect(void);               // after the settings changed: drop the connection and try again now
 int mp_mark(void);                     // marks where the player stands, for everyone in the room; 0 when not possible
 int mp_slot_of(const char *name);      // that player's slot in the room, -1 when unknown
+// The voice clips that friend's Link started (comma-separated, PV000_02), each once, when the friend's shown place
+// (mp_view, POS_DELAY_MS behind) reaches the moment it started; the length, 0 none.
+int mp_take_sfx(const char *name, char *out, size_t cap);
 
 // The layer of the world a height is in, for the radar and the player cards.
 enum { MP_LAYER_SURFACE, MP_LAYER_SKY, MP_LAYER_DEPTHS };

@@ -530,8 +530,35 @@ unsigned ach_look(char out[3][64]) {
     return g;
 }
 
+static char last_save_dir[1100];   // the save storage evaluate read last (ach_save_flags)
+
+int ach_save_flags(int want, uint32_t *hash, uint32_t *value, int cap) {
+    char path[1200];
+    plat_mutex_lock(&lock);
+    char dir[sizeof last_save_dir];
+    memcpy(dir, last_save_dir, sizeof dir);
+    plat_mutex_unlock(&lock);
+    if (!dir[0] || !newest_progress(dir, path, sizeof path)) return 0;
+    uint64_t size = 0;
+    uint8_t *d = plat_file_read(path, &size);
+    if (!d) return 0;
+    int n = 0, type = -1;
+    uint64_t end = size >= 0x20 && rd32(d) == 0x01020304u ? rd32(d + 8) : 0;
+    if (end > size) end = size;
+    for (uint64_t p = 0x20; p + 8 <= end && n < cap; p += 8) {
+        uint32_t h = rd32(d + p), v = rd32(d + p + 4);
+        if (!h) type = (int)v;
+        else if (type == want) hash[n] = h, value[n] = v, n++;
+    }
+    free(d);
+    return n;
+}
+
 static void evaluate(const char *save_dir, int trusted) {
     char path[1200];
+    plat_mutex_lock(&lock);
+    snprintf(last_save_dir, sizeof last_save_dir, "%s", save_dir);
+    plat_mutex_unlock(&lock);
     if (!newest_progress(save_dir, path, sizeof path)) return;
     Save s = {0};
     s.d = plat_file_read(path, &s.size);

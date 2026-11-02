@@ -16,6 +16,8 @@ typedef SOCKET Sock;
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -32,7 +34,7 @@ typedef int Sock;
 #include "voice.h"
 
 #define PROTOCOL "1"
-enum { DEFAULT_PORT = 5577, LOG_LINES = 80, TOASTS = 16, OUTBOX = 16, RETRY_MS = 5000, PING_MS = 30000 };
+enum { DEFAULT_PORT = 5577, LOG_LINES = 80, TOASTS = 16, OUTBOX = 16, RETRY_MS = 5000, PING_MS = 2000 };
 
 static PlatMutex lock = PLAT_MUTEX_INIT;
 static MpView view;
@@ -43,12 +45,35 @@ static int toast_head, toast_tail;
 static char outbox[OUTBOX][320];
 static int out_head, out_tail;
 static volatile int32_t started, kick;
+static volatile int64_t ping_sent;   // when the PING awaiting its PONG went (ms), 0 none
 static char me[MP_NAME_MAX];   // this game's name as the room keeps it (room_name): its own chat lines get no notice
 
-// Friends' positions by name (POS lines), merged into the roster's players by mp_view.
-enum { POS_STALE_MS = 6000, POS_EVERY_MS = 200 };
-static struct { char name[MP_NAME_MAX]; float pos[3]; uint64_t at_ms; } friend_pos[MP_MAX_PLAYERS];
-// Friends' armor by name (LOOK lines: what each wore at their last save), merged into the roster by mp_view.
+// Friends' positions by name (POS lines), merged into the roster's players by mp_view. A moving player sends one every
+// POS_EVERY_MS stamped with their own clock; the last POS_RING of each friend are kept, and mp_view shows the friend
+// POS_DELAY_MS behind the newest, between two real places, so the figure follows the path they took (up a slope, over
+// a jump) instead of a guess cutting through the ground.
+enum { POS_STALE_MS = 6000, POS_EVERY_MS = 50, POS_IDLE_MS = 1000, POS_RING = 24, POS_DELAY_MS = 90, POS_AHEAD_MS = 200,
+       POS_VEL_MS = 250 };
+typedef struct {
+    float pos[3], yaw;
+    float q[4];             // the whole rotation (x, y, z, w; game_player_quat); w 2 when not sent
+    int64_t t;
+    char anim[MP_ANIM_MAX];
+    float frame;            // the frame of anim the sender's game showed (NAN when not sent)
+    char sfx[MP_SFX_MAX];   // the voice clips Link started then, comma-separated ("" none)
+    int sfx_taken;          // mp_take_sfx gave them out
+} PosSample;
+// t: the sender's clock (ms); yaw NAN when not sent; anim the animation Link plays, "" when not sent
+static struct {
+    char name[MP_NAME_MAX];
+    float pos[3];          // the newest place (radar, the meeting achievement)
+    uint64_t at_ms;        // when it came
+    PosSample ring[POS_RING];
+    int n, head;           // samples kept; the next slot
+    int64_t offset;        // this game's clock minus the sender's, the smallest seen lately (the fastest delivery)
+} friend_pos[MP_MAX_PLAYERS];
+// Friends' armor by name (LOOK lines: what each wears now, or at their last save from a game that cannot read it
+// live), merged into the roster by mp_view.
 static struct { char name[MP_NAME_MAX]; char look[3][48]; } friend_look[MP_MAX_PLAYERS];
 static volatile int32_t mark_pending;   // mp_mark asked; the connection's thread sends it
 
@@ -133,6 +158,25 @@ static int send_line(Sock s, int nfields, const char *const *fields) {
     return send_all(s, buf, n);
 }
 
+// POS x y z yaw t anim quat sfx: centimetres, the way Link faces (radians, "" when unread), this game's clock in
+// milliseconds, the animation Link plays and its frame (game_player_anim: "Name:frame", "" when unread), his whole
+// rotation (game_player_quat:
+// "x,y,z,w", "" when unread) and the voice clips he started since the last line (game_player_voices, comma-separated).
+static int send_pos(Sock s, const float p[3], float yaw, const float q[4], int64_t t, const char *anim, float frame,
+                    const char *sfx) {
+    char x[24], y[24], z[24], w[24], tt[24], qs[64], an[MP_ANIM_MAX + 16];
+    if (anim[0] && isfinite(frame)) snprintf(an, sizeof an, "%s:%.2f", anim, frame);
+    else snprintf(an, sizeof an, "%s", anim);
+    snprintf(x, sizeof x, "%.2f", p[0]), snprintf(y, sizeof y, "%.2f", p[1]), snprintf(z, sizeof z, "%.2f", p[2]);
+    if (isfinite(yaw)) snprintf(w, sizeof w, "%.3f", yaw);
+    else w[0] = 0;
+    snprintf(tt, sizeof tt, "%lld", (long long)t);
+    if (q[3] <= 1) snprintf(qs, sizeof qs, "%.4f,%.4f,%.4f,%.4f", q[0], q[1], q[2], q[3]);
+    else qs[0] = 0;
+    const char *pos[] = {"POS", x, y, z, w, tt, an, qs, sfx};
+    return send_line(s, 9, pos);
+}
+
 // host[:port] into a connected socket, or SOCK_BAD with *why set.
 static Sock dial(const char *server, const char **why) {
     char host[128], port[16];
@@ -160,6 +204,11 @@ static Sock dial(const char *server, const char **why) {
     }
     freeaddrinfo(res);
     if (s == SOCK_BAD) *why = "connect";
+    else {   // lines go out as written: Nagle would hold a place or a voice frame until the last one is acknowledged,
+             // and Windows delays that acknowledgement up to 200 ms
+        int one = 1;
+        setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof one);
+    }
     return s;
 }
 
@@ -206,17 +255,53 @@ static void on_line(char *line, Sock s) {
     f[n++] = line;
     for (char *p = line; *p && n < cap; p++)
         if (*p == '\t') *p = 0, f[n++] = p + 1;
-    if (!strcmp(f[0], "POS") && n >= 5) {   // POS player x y z
+    if (!strcmp(f[0], "POS") && n >= 5) {   // POS player x y z [yaw t [anim [quat [sfx]]]]: an older game, the place alone
+        uint64_t now = plat_now_ms();
+        PosSample smp;
+        for (int k = 0; k < 3; k++) smp.pos[k] = (float)atof(f[2 + k]);
+        smp.yaw = n >= 6 && f[5][0] ? (float)atof(f[5]) : NAN;
+        smp.t = n >= 7 && f[6][0] ? strtoll(f[6], NULL, 10) : (int64_t)now;
+        smp.anim[0] = 0, smp.sfx[0] = 0, smp.sfx_taken = 0, smp.frame = NAN;
+        if (n >= 8) {   // Name or Name:frame
+            field(smp.anim, sizeof smp.anim, f[7]);
+            char *colon = strchr(smp.anim, ':');
+            if (colon) {
+                *colon = 0;
+                float fr = (float)atof(colon + 1);
+                if (isfinite(fr) && fr >= 0) smp.frame = fr;
+            }
+        }
+        smp.q[3] = 2;
+        float q[4], ql = 0;
+        if (n >= 9 && sscanf(f[8], "%f,%f,%f,%f", &q[0], &q[1], &q[2], &q[3]) == 4 &&
+            (ql = sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3])) > 0.5f && ql < 1.5f)
+            for (int k = 0; k < 4; k++) smp.q[k] = q[k] / ql;
+        if (n >= 10) field(smp.sfx, sizeof smp.sfx, f[9]);
+        if (!isfinite(smp.pos[0]) || !isfinite(smp.pos[1]) || !isfinite(smp.pos[2])) return;
         plat_mutex_lock(&lock);
         int slot = -1, oldest = 0;
         for (int i = 0; i < MP_MAX_PLAYERS; i++) {
             if (!strcmp(friend_pos[i].name, f[1])) slot = i;
             if (friend_pos[i].at_ms < friend_pos[oldest].at_ms) oldest = i;
         }
-        if (slot < 0) slot = oldest;
+        if (slot < 0) slot = oldest, friend_pos[slot].n = 0;   // a new friend in this slot
         field(friend_pos[slot].name, sizeof friend_pos[0].name, f[1]);
-        for (int k = 0; k < 3; k++) friend_pos[slot].pos[k] = (float)atof(f[2 + k]);
-        friend_pos[slot].at_ms = plat_now_ms();
+        int fresh = friend_pos[slot].n == 0;
+        if (!fresh) {   // the sender's clock went back (their game restarted), or they travelled: start over
+            const PosSample *last = &friend_pos[slot].ring[(friend_pos[slot].head + POS_RING - 1) % POS_RING];
+            float d = hypotf(smp.pos[0] - last->pos[0], smp.pos[2] - last->pos[2]) + fabsf(smp.pos[1] - last->pos[1]);
+            if (smp.t <= last->t || smp.t - last->t > 60000 || d > 50) fresh = 1;
+        }
+        if (fresh) friend_pos[slot].n = 0, friend_pos[slot].head = 0, friend_pos[slot].offset = (int64_t)now - smp.t;
+        // the delivery time drifts and jitters: the offset follows the quickest delivery, and creeps back up slowly
+        // so that one early line does not hold it low for good
+        int64_t off = (int64_t)now - smp.t;
+        friend_pos[slot].offset = off < friend_pos[slot].offset ? off : friend_pos[slot].offset + 1;
+        friend_pos[slot].ring[friend_pos[slot].head] = smp;
+        friend_pos[slot].head = (friend_pos[slot].head + 1) % POS_RING;
+        if (friend_pos[slot].n < POS_RING) friend_pos[slot].n++;
+        memcpy(friend_pos[slot].pos, smp.pos, sizeof smp.pos);
+        friend_pos[slot].at_ms = now;
         plat_mutex_unlock(&lock);
         return;
     }
@@ -256,6 +341,17 @@ static void on_line(char *line, Sock s) {
         uint8_t pkt[VOICE_PACKET_MAX];
         int len = b64_decode(pkt, sizeof pkt, f[2]);
         if (len > 0) voice_receive(f[1], pkt, len);
+        return;
+    }
+    if (!strcmp(f[0], "PONG")) {   // the room's answer to the last PING: the round trip, smoothed over a few;
+        // before the lock the lines below take
+        int64_t sent = plat_xchg64(&ping_sent, 0);
+        if (sent) {
+            int rtt = (int)((int64_t)plat_now_ms() - sent);
+            plat_mutex_lock(&lock);
+            view.ping_ms = view.ping_ms > 0 ? (3 * view.ping_ms + rtt + 2) / 4 : (rtt > 0 ? rtt : 1);
+            plat_mutex_unlock(&lock);
+        }
         return;
     }
     plat_mutex_lock(&lock);
@@ -355,8 +451,16 @@ static void session(const char *server) {
     unsigned sent_gen = 0, sent_look = 0, ver = cfg_version();
     char settings[512], now_settings[512];
     conn_settings(settings, sizeof settings);
-    uint64_t last_ping = plat_now_ms(), minute_at = 0, pos_at = 0, gate_at = plat_now_ms();
-    float sent_pos[3] = {0, 0, 0};
+    uint64_t last_ping = plat_now_ms(), minute_at = 0, pos_at = 0, sent_at = 0, gate_at = plat_now_ms();
+    float sent_pos[3] = {0, 0, 0}, sent_yaw = 0;
+    PosSample prev = {{0, 0, 0}, NAN, {0, 0, 0, 2}, -1, "", NAN, "", 0};   // the place read on the tick before, sent or not
+    char sent_anim[MP_ANIM_MAX] = "";
+    float sent_q[4] = {0, 0, 0, 1};
+    uint64_t voice_slot[16] = {0};
+    char held_voice[16] = "";   // a voice named without its variant, held a moment for the variant to show
+    uint64_t held_at = 0;
+    char said[4][16] = {"", "", "", ""};   // the voices sent lately (one handle can sit in two slots at once)
+    uint64_t said_at[4] = {0, 0, 0, 0};
     int voice_frames = 0;
     char buf[16384];
     size_t have = 0;
@@ -412,12 +516,29 @@ static void session(const char *server) {
             alive = send_line(s, 8, status);
             sent_gen = gen;
         }
-        char worn[3][64];   // the armor worn at the last save read, for the friends' figures of it
-        unsigned look_gen = ach_look(worn);
-        if (alive && look_gen && look_gen != sent_look) {
-            const char *line[] = {"LOOK", worn[0], worn[1], worn[2]};
-            alive = send_line(s, 4, line);
-            sent_look = look_gen;
+        // the armor Link wears: read live from the game each second (game_player_armor), sent when it changes; where
+        // that cannot be read (another game version), what the last save read says
+        static uint64_t look_at;
+        static char live_sent[3][48];
+        static int live_ok;
+        char live[3][48] = {{0}};   // zeroed: compared whole with what went last
+        if (alive && plat_now_ms() - look_at >= 1000) look_at = plat_now_ms(), live_ok = game_player_armor(live);
+        else live_ok = 0;
+        if (live_ok) {
+            if (memcmp(live, live_sent, sizeof live) || !sent_look) {
+                const char *line[] = {"LOOK", live[0], live[1], live[2]};
+                alive = send_line(s, 4, line);
+                rt_log("mp: wearing head '%s' upper '%s' lower '%s'", live[0], live[1], live[2]);
+                memcpy(live_sent, live, sizeof live), sent_look = ~0u;
+            }
+        } else if (sent_look != ~0u) {
+            char worn[3][64];   // the armor worn at the last save read
+            unsigned look_gen = ach_look(worn);
+            if (alive && look_gen && look_gen != sent_look) {
+                const char *line[] = {"LOOK", worn[0], worn[1], worn[2]};
+                alive = send_line(s, 4, line);
+                sent_look = look_gen;
+            }
         }
         for (int idx; alive && (idx = ach_take_net_unlock()) >= 0;) {
             AchView a;
@@ -452,22 +573,62 @@ static void session(const char *server) {
                 ach_mp_add("voice", 1);
             }
         }
-        if (alive && plat_now_ms() - pos_at >= POS_EVERY_MS) {   // this game's position, when it moved (or each 2 s)
-            float p[3];
+        if (alive && plat_now_ms() - pos_at >= POS_EVERY_MS) {   // this game's place while it moves (or each second)
+            float p[3], yaw = NAN;
             uint64_t now = plat_now_ms();
-            int have = game_player_pos(p);
+            pos_at = now;
+            int have = game_player_pose(p, &yaw);
+            char anim[MP_ANIM_MAX];
+            float frame = NAN;
+            if (!have || !game_player_anim(anim, sizeof anim, &frame)) anim[0] = 0;
+            float q[4] = {0, 0, 0, 2};
+            if (!have || !game_player_quat(q)) q[3] = 2;
+            // the voices Link started: a variant goes at once; a name without one (the game picks the variant a
+            // moment later) waits up to 300 ms for it, then goes as it is (the friend's game picks one then)
+            char sfx[MP_SFX_MAX] = "", got[8][16];
+            int ng = have ? game_player_voices(got, 8, voice_slot) : 0;
+            for (int g = 0; g < ng; g++) {
+                // the same voice, or its name without the variant after the variant went, within 600 ms: once
+                int again = 0;
+                for (int q = 0; q < 4; q++)
+                    again |= now - said_at[q] < 600 && !strncmp(said[q], got[g], strlen(got[g]) == 5 ? 5 : 16);
+                if (again) continue;
+                if (strlen(got[g]) == 5) {
+                    if (!held_voice[0]) snprintf(held_voice, sizeof held_voice, "%s", got[g]), held_at = now;
+                    continue;
+                }
+                if (held_voice[0] && !strncmp(got[g], held_voice, 5)) held_voice[0] = 0;
+                if (strlen(sfx) + 17 < sizeof sfx) snprintf(sfx + strlen(sfx), sizeof sfx - strlen(sfx), "%s%s", sfx[0] ? "," : "", got[g]);
+                int old = 0;
+                for (int q = 1; q < 4; q++)
+                    if (said_at[q] < said_at[old]) old = q;
+                snprintf(said[old], sizeof said[old], "%s", got[g]), said_at[old] = now;
+            }
+            if (held_voice[0] && now - held_at >= 300) {
+                if (strlen(sfx) + 17 < sizeof sfx) snprintf(sfx + strlen(sfx), sizeof sfx - strlen(sfx), "%s%s", sfx[0] ? "," : "", held_voice);
+                held_voice[0] = 0;
+            }
             plat_mutex_lock(&lock);
             view.me_has_pos = have;
             if (have) memcpy(view.me_pos, p, sizeof p);
             plat_mutex_unlock(&lock);
-            if (have && (fabsf(p[0] - sent_pos[0]) + fabsf(p[1] - sent_pos[1]) + fabsf(p[2] - sent_pos[2]) > 0.3f ||
-                         now - pos_at >= 2000 || !pos_at)) {
-                char x[24], y[24], z[24];
-                snprintf(x, sizeof x, "%.1f", p[0]), snprintf(y, sizeof y, "%.1f", p[1]), snprintf(z, sizeof z, "%.1f", p[2]);
-                const char *pos[] = {"POS", x, y, z};
-                alive = send_line(s, 4, pos);
+            float turned = isfinite(yaw) ? fabsf(remainderf(yaw - sent_yaw, 6.2831853f)) : 0;
+            int moved = have && (fabsf(p[0] - sent_pos[0]) + fabsf(p[1] - sent_pos[1]) + fabsf(p[2] - sent_pos[2]) > 0.02f ||
+                                 turned > 0.03f || strcmp(anim, sent_anim) || sfx[0] ||
+                                 (q[3] <= 1 && fabsf(q[0] * sent_q[0] + q[1] * sent_q[1] + q[2] * sent_q[2] + q[3] * sent_q[3]) < 0.9998f));
+            // with the animation's frame known, every tick goes: the friend's figure then plays the frames this game
+            // shows (a flip, a fall, an attack in place), not a guess at their pace
+            if (have && (moved || isfinite(frame) || now - sent_at >= POS_IDLE_MS || !sent_at)) {
+                // after standing still, the place of the tick before goes first with its own time: the friend's game
+                // then sees the stop last until the step began, not a slow slide over the whole pause
+                if (sent_at && now - sent_at > 2 * POS_EVERY_MS && prev.t > (int64_t)sent_at)
+                    alive = send_pos(s, prev.pos, prev.yaw, prev.q, prev.t, prev.anim, prev.frame, "");
+                if (alive) alive = send_pos(s, p, yaw, q, (int64_t)now, anim, frame, sfx);
+                snprintf(sent_anim, sizeof sent_anim, "%s", anim);
+                if (q[3] <= 1) memcpy(sent_q, q, sizeof q);
                 memcpy(sent_pos, p, sizeof p);
-                pos_at = now;
+                if (isfinite(yaw)) sent_yaw = yaw;
+                sent_at = now;
                 // close to a friend in the same layer: the meeting achievement
                 plat_mutex_lock(&lock);
                 int met = 0;
@@ -479,7 +640,12 @@ static void session(const char *server) {
                 plat_mutex_unlock(&lock);
                 if (met) ach_mp_max("meet", 1);
             }
-            if (!have) pos_at = now;
+            if (have) {
+                memcpy(prev.pos, p, sizeof p), prev.yaw = yaw, prev.t = (int64_t)now;
+                memcpy(prev.q, q, sizeof q);
+                snprintf(prev.anim, sizeof prev.anim, "%s", anim);
+                prev.frame = frame;
+            }
         }
         if (alive && plat_xchg32(&mark_pending, 0)) {
             float p[3];
@@ -499,8 +665,9 @@ static void session(const char *server) {
                 }
             }
         }
-        if (alive && plat_now_ms() - last_ping > PING_MS) {
+        if (alive && plat_now_ms() - last_ping > PING_MS) {   // keeps the connection and measures it (the ping shown)
             const char *ping[] = {"PING"};
+            plat_xchg64(&ping_sent, (int64_t)plat_now_ms());
             alive = send_line(s, 1, ping);
             last_ping = plat_now_ms();
         }
@@ -509,6 +676,7 @@ static void session(const char *server) {
     voice_connected(0);
     plat_mutex_lock(&lock);
     if (view.state != MP_REFUSED) view.state = MP_RETRYING, snprintf(view.error, sizeof view.error, "lost");
+    view.ping_ms = 0;
     view.nplayers = 0;
     plat_mutex_unlock(&lock);
     rt_log("mp: disconnected from %s", server);
@@ -564,7 +732,108 @@ void mp_tick(void) {
     // plat_cas32(p, new, expected) returns the old value: 0 only for the first call
     if (plat_cas32(&started, 1, 0) == 0) {
         if (!plat_thread_spawn(thread_main, NULL, "multiplayer", 0)) rt_log("mp: no thread for the multiplayer client");
+        gmd_start();   // gmd.c: the shared-progress research probe, when TOTK_GMD_PROBE asks for it
+        anim_probe_start();   // anim_probe.c: where Link's animation is named, when TOTK_ANIM_PROBE asks for it
     }
+}
+
+// Friend k's place at t on the sender's clock: between the two samples around t; past the newest, on along the last
+// step for at most POS_AHEAD_MS, then held (*held set). yaw is the way they face (NAN when their game does not send
+// it), anim the animation of the last sample before t. Under the lock.
+// A sample's rotation: as sent, or about the vertical alone from its yaw (an older game).
+static void sample_quat(const PosSample *s, float q[4]) {
+    if (s->q[3] <= 1) {
+        memcpy(q, s->q, 4 * sizeof *q);
+        return;
+    }
+    float y = isfinite(s->yaw) ? s->yaw : 0;
+    q[0] = 0, q[1] = sinf(y / 2), q[2] = 0, q[3] = cosf(y / 2);
+}
+
+// frames: the frame of the animation shown at t from the two samples around it, as (from, to, u): from + (to - from)
+// u, with to below from when a loop started over between them (the reader, knowing its length, adds it); NAN from
+// when not sent.
+static void place_on(int k, int64_t t, float pos[3], float *yaw, int *held, const char **anim, float rot[4], float frames[3]) {
+    int n = friend_pos[k].n, head = friend_pos[k].head;
+    const PosSample *ring = friend_pos[k].ring;
+#define SAMPLE(i) (&ring[(head + POS_RING - n + (i)) % POS_RING])   // 0 the oldest kept, n - 1 the newest
+    const PosSample *a = SAMPLE(0), *b = SAMPLE(n > 1 ? 1 : 0);
+    for (int i = n - 1; i > 0; i--)
+        if (SAMPLE(i - 1)->t <= t || i == 1) {
+            a = SAMPLE(i - 1), b = SAMPLE(i);
+            break;
+        }
+#undef SAMPLE
+    float span = (float)(b->t - a->t), u = 0;
+    if (span > 0) {
+        u = (float)(t - a->t) / span;
+        if (u < 0) u = 0;
+        float most = 1.0f + POS_AHEAD_MS / span;   // past the newest: on along the step, not for ever
+        if (u > most) u = most;
+    }
+    if (held) *held = t - b->t > POS_AHEAD_MS;
+    if (anim) *anim = u >= 1 ? b->anim : a->anim;   // the animation of the last sample before t
+    if (frames) {
+        const PosSample *at = u >= 1 ? b : a;
+        frames[0] = at->frame, frames[1] = NAN, frames[2] = 0;
+        if (span > 0 && !strcmp(a->anim, b->anim) && isfinite(a->frame) && isfinite(b->frame))
+            frames[0] = a->frame, frames[1] = b->frame, frames[2] = u;   // past b too: on at the same pace
+        else if (isfinite(at->frame))   // one sample to go by: on at 30 a second from it
+            frames[1] = at->frame + 30.0f, frames[2] = (float)(t - at->t) / 1000.0f;
+    }
+    if (rot) {   // between the two rotations the shorter way (a back flip turns a third of a turn a sample)
+        float qa[4], qb[4], w = fminf(u, 1.0f), d = 0, l = 0;
+        sample_quat(a, qa), sample_quat(b, qb);
+        for (int c = 0; c < 4; c++) d += qa[c] * qb[c];
+        float sb = d < 0 ? -1.0f : 1.0f;
+        for (int c = 0; c < 4; c++) rot[c] = qa[c] + (sb * qb[c] - qa[c]) * w, l += rot[c] * rot[c];
+        l = sqrtf(l);
+        for (int c = 0; c < 4; c++) rot[c] = l > 1e-6f ? rot[c] / l : (c == 3);
+    }
+    for (int c = 0; c < 3; c++) pos[c] = a->pos[c] + (b->pos[c] - a->pos[c]) * u;
+    if (!yaw) return;
+    if (isfinite(a->yaw) && isfinite(b->yaw))
+        *yaw = a->yaw + remainderf(b->yaw - a->yaw, 6.2831853f) * fminf(u, 1.0f);
+    else
+        *yaw = isfinite(b->yaw) ? b->yaw : NAN;
+}
+
+// Friend k's place at this game's time now: POS_DELAY_MS behind the newest sample on the sender's clock. vel (m/s) is
+// the way it went over the last POS_VEL_MS, not over one step: a step is 50 ms and its length jitters with the
+// sender's timing, which would make the figure's gait flicker. 0 once held.
+static void place_at(int k, uint64_t now, float pos[3], float vel[3], float *yaw, char anim[MP_ANIM_MAX], float rot[4],
+                     float frames[3]) {
+    int64_t t = (int64_t)now - friend_pos[k].offset - POS_DELAY_MS;
+    int held = 0;
+    float before[3];
+    const char *playing = "";
+    place_on(k, t, pos, yaw, &held, &playing, rot, frames);
+    snprintf(anim, MP_ANIM_MAX, "%s", playing);
+    place_on(k, t - POS_VEL_MS, before, NULL, NULL, NULL, NULL, NULL);
+    for (int c = 0; c < 3; c++) vel[c] = held ? 0 : (pos[c] - before[c]) * 1000.0f / POS_VEL_MS;
+}
+
+int mp_take_sfx(const char *name, char *out, size_t cap) {
+    uint64_t now = plat_now_ms();
+    size_t len = 0;
+    out[0] = 0;
+    plat_mutex_lock(&lock);
+    for (int k = 0; k < MP_MAX_PLAYERS; k++) {
+        if (!friend_pos[k].name[0] || strcmp(friend_pos[k].name, name)) continue;
+        int64_t t = (int64_t)now - friend_pos[k].offset - POS_DELAY_MS;   // as place_at shows them
+        for (int i = 0; i < friend_pos[k].n; i++) {
+            PosSample *smp = &friend_pos[k].ring[(friend_pos[k].head + POS_RING - friend_pos[k].n + i) % POS_RING];
+            if (smp->sfx_taken || !smp->sfx[0] || smp->t > t) continue;
+            smp->sfx_taken = 1;
+            if (t - smp->t > 1000) continue;   // long past (the friend came into view, a stall): not news
+            size_t add = strlen(smp->sfx);
+            if (len + add + 2 >= cap) break;
+            if (len) out[len++] = ',';
+            memcpy(out + len, smp->sfx, add + 1), len += add;
+        }
+    }
+    plat_mutex_unlock(&lock);
+    return (int)len;
 }
 
 void mp_view(MpView *out) {
@@ -573,12 +842,13 @@ void mp_view(MpView *out) {
     *out = view;
     for (int i = 0; i < out->nplayers; i++) {   // the friends' positions, while fresh
         MpPlayer *p = &out->players[i];
-        p->has_pos = 0;
+        p->has_pos = 0, p->yaw = NAN, p->anim[0] = 0, p->rot[0] = p->rot[1] = p->rot[2] = 0, p->rot[3] = 1;
+        p->frames[0] = p->frames[1] = NAN, p->frames[2] = 0;
+        memset(p->vel, 0, sizeof p->vel);
         for (int k = 0; k < MP_MAX_PLAYERS; k++)
-            if (friend_pos[k].name[0] && !strcmp(friend_pos[k].name, p->name) && now - friend_pos[k].at_ms < POS_STALE_MS) {
-                memcpy(p->pos, friend_pos[k].pos, sizeof p->pos);
-                p->has_pos = 1;
-            }
+            if (friend_pos[k].name[0] && !strcmp(friend_pos[k].name, p->name) && now - friend_pos[k].at_ms < POS_STALE_MS &&
+                friend_pos[k].n > 0)
+                p->has_pos = 1, place_at(k, now, p->pos, p->vel, &p->yaw, p->anim, p->rot, p->frames);
         if (!strcmp(p->name, me) && view.me_has_pos) memcpy(p->pos, view.me_pos, sizeof p->pos), p->has_pos = 1;
         memset(p->look, 0, sizeof p->look);
         for (int k = 0; k < MP_MAX_PLAYERS; k++)

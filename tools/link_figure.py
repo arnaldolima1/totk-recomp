@@ -12,14 +12,20 @@ McSharp's command line (BladesawStudios/McSharp, MIT; the release ships it in bi
 Model/Player_Animation.anim.bfres.zs with the RomFS's zstd dictionaries (Pack/ZsDic.pack.zs). The installer runs this
 form (installer/steps.py, prepare) and keeps the result as profile/link-figure.bin.
 
-Output (little-endian): b'LNKF', u32 version 3, u32 vertex count, u32 triangle count, u32 atlas side, u32 ASTC
+Output (little-endian): b'LNKF', u32 version 4, u32 vertex count, u32 triangle count, u32 atlas side, u32 ASTC
 picture count; per vertex 3 floats (metres, model space: x right, y up, z forward); per triangle 3 u32 indices; per
 triangle one u8 material class (CLASSES; bit 7: no texture, the runtime colours it by class); per triangle 6 floats,
 its corners' atlas coordinates (0..1); the atlas, side x side RGBA8 rows; then per ASTC picture u32 x, y, width,
 height, block width, block height, byte count and its linear blocks, which the runtime decodes into the atlas there;
-then u32 bone count, u32 animation count, per vertex four (u16 bone, u16 weight of 65535), and per animation its name
-(32 bytes), u32 frame count, f32 ground speed (m/s) and per frame per bone a row-major 3x4 skinning matrix (posed world
-x inverse bind world) that takes a bind-pose vertex to the posed one. Frames run at 30 a second.
+then u32 bone count, u32 animation count, per vertex four (u16 bone, u16 weight of 65535); the skeleton: u32 root
+bone (the one carrying the animation's own motion, which the runtime leaves out, 0xffffffff none), per bone i32 parent (-1 none), its bind local
+transform as 9 floats (scale xyz, euler XYZ rotation, translation xyz) and its inverse bind world matrix (row-major 3x4,
+12 floats), then per bone its name (32 bytes); then per animation (ANIMS first, the others in the file's order) its name (48 bytes), u32 frame count, u32
+flags (bit 0 loops), f32 ground speed (m/s, ANIMS only, else 0), u32 animated bone count, u32 curve count, u32 key
+count; per animated bone u16 bone, u16 curve count and 9 floats, its local transform where no curve moves it; per curve
+u8 channel (0..8, the 9 floats' order), u8 0, u16 key count; per key u16 frame x 32 and 4 halves, the cubic's
+coefficients over the key's segment (t 0..1) with the curve's scale and offset already in. The runtime evaluates them
+(runtime/link_figure.c link_figure_pose). Frames run at 30 a second.
 """
 import math
 import struct
@@ -180,49 +186,70 @@ def build(models):
     return skel, verts, weights, tris, classes, uvs, texs
 
 
-# The animations the figure plays, by the friend's speed (runtime/link_figure.c picks them): standing, walking,
-# running, dashing.
+# The animations the figure plays by the friend's speed when their game names none (an older game): standing,
+# walking, running, dashing. They lead the list, in this order (runtime/link_figure.h LF_*); every other skeletal
+# animation of Player_Animation follows, for the one a friend's game names (runtime/net_mp.c POS lines).
 ANIMS = ['Nml_Wait', 'Nml_Move_Walk', 'Nml_Move_Run', 'Nml_Move_Dash']
 
 
-def bake(skel, anim):
-    """Per frame, each joined bone's skinning matrix (posed world x inverse bind world), and the animation's ground speed
-    (metres a second at 30 frames a second, from the root's forward travel, which is then left out: the friend's own
-    position moves the figure)."""
-    bind_w = skel.bind_worlds()
-    inv = [inverse34(m) for m in bind_w]
+def channel(target):
+    """A curve's place among a bone's 9 floats (scale xyz, rotation xyz, translation xyz); None for a rotation's w."""
+    if 0x04 <= target <= 0x0C:
+        return (target - 0x04) // 4
+    if 0x20 <= target <= 0x28:
+        return 3 + (target - 0x20) // 4
+    if 0x10 <= target <= 0x18:
+        return 6 + (target - 0x10) // 4
+    return None
+
+
+def pack_anim(skel, anim):
+    """One animation for the file: its bones (joined index, curves, the local transform where no curve moves it) and
+    the speed its root travels forward (m/s at 30 frames a second, from its translation z; the runtime leaves the
+    root's motion out, the friend's own place and facing move the figure)."""
+    bones, curves, keys = bytearray(), bytearray(), bytearray()
+    nb = nc = nk = 0
+    root_z = None
+    for name, ba in anim['bones'].items():
+        i = skel.index.get(name)
+        if i is None:
+            continue
+        scale, rot, pos = (list(v) for v in skel.bind[i])
+        if 'scale' in ba['base']:
+            scale = list(ba['base']['scale'])
+        if 'rot' in ba['base']:
+            rot = list(ba['base']['rot'][:3])
+        if 'pos' in ba['base']:
+            pos = list(ba['base']['pos'])
+        own = []
+        for c in ba['curves']:
+            ch = channel(c['target'])
+            if ch is None or not c['frames']:
+                continue
+            own.append((ch, c))
+            if name == 'Root' and ch == 8:
+                root_z = c
+        bones += struct.pack('<HH9f', i, len(own), *scale, *rot, *pos)
+        nb += 1
+        for ch, c in own:
+            curves += struct.pack('<BBH', ch, 0, len(c['frames']))
+            sc, off = c['scale'], c['offset']
+            for f, k in zip(c['frames'], c['keys']):
+                k = (list(k) + [0.0] * 4)[:4]
+                if c['type'] == 1:      # linear: value and delta
+                    k = [k[0], k[1], 0.0, 0.0]
+                elif c['type'] == 2:    # one value a frame
+                    k = [k[0], 0.0, 0.0, 0.0]
+                co = [k[0] * sc + off, k[1] * sc, k[2] * sc, k[3] * sc]
+                keys += struct.pack('<H4e', min(65535, max(0, round(f * 32))), *(max(-65504.0, min(65504.0, v)) for v in co))
+            nc += 1
+            nk += len(c['frames'])
     frames = max(1, anim['frames'])
-    out, root_z = [], []
-    for f in range(frames):
-        locals_ = []
-        for i, name in enumerate(skel.names):
-            scale, rot, pos = (list(v) for v in skel.bind[i])
-            ba = anim['bones'].get(name)
-            if ba:
-                if 'scale' in ba['base']:
-                    scale = list(ba['base']['scale'])
-                if 'rot' in ba['base']:
-                    rot = list(ba['base']['rot'][:3])
-                if 'pos' in ba['base']:
-                    pos = list(ba['base']['pos'])
-                for c in ba['curves']:
-                    v = bfres.curve_at(c, f)
-                    o = c['target']
-                    if 0x04 <= o <= 0x0C:
-                        scale[(o - 0x04) // 4] = v
-                    elif 0x10 <= o <= 0x18:
-                        pos[(o - 0x10) // 4] = v
-                    elif 0x20 <= o <= 0x28:
-                        rot[(o - 0x20) // 4] = v
-            if name == 'Root':
-                root_z.append(pos[2])
-                pos = [0.0, pos[1], 0.0]
-            locals_.append(trs(scale, rot, pos))
-        W = skel.worlds(locals_)
-        out.append([mul34(W[i], inv[i]) for i in range(len(W))])
-    travel = (root_z[-1] - root_z[0]) if len(root_z) > 1 else 0.0
-    speed = abs(travel) / ((frames - 1) / 30.0) if frames > 1 else 0.0
-    return out, speed
+    speed = 0.0
+    if root_z is not None and frames > 1:
+        travel = bfres.curve_at(root_z, frames - 1) - bfres.curve_at(root_z, 0)
+        speed = abs(travel) / ((frames - 1) / 30.0)
+    return frames, speed, (nb, nc, nk, bytes(bones + curves + keys))
 
 
 def inverse34(m):
@@ -310,9 +337,9 @@ def atlas_uv(rect, tri_uv):
     return out
 
 
-def write(path, verts, weights, tris, classes, uvs, texs, place, atlas, astc, nbones, anims):
+def write(path, verts, weights, tris, classes, uvs, texs, place, atlas, astc, skel, anims):
     out = bytearray(b'LNKF')
-    out += struct.pack('<IIIII', 3, len(verts), len(tris), ATLAS, len(astc))
+    out += struct.pack('<IIIII', 4, len(verts), len(tris), ATLAS, len(astc))
     for v in verts:
         out += struct.pack('<3f', *v)
     for t in tris:
@@ -326,18 +353,23 @@ def write(path, verts, weights, tris, classes, uvs, texs, place, atlas, astc, nb
     out += flags + coords + atlas
     for x, y, w, h, bw, bh, blocks in astc:
         out += struct.pack('<7I', x, y, w, h, bw, bh, len(blocks)) + blocks
-    out += struct.pack('<II', nbones, len(anims))
+    out += struct.pack('<II', len(skel.names), len(anims))
     for ws in weights:   # four (u16 bone, u16 weight of 65535) per vertex
         ws = (ws + [(0, 0.0)] * 4)[:4]
         q = [round(w * 65535) for _, w in ws]
         q[0] += 65535 - sum(q)
         for (b, _), w in zip(ws, q):
             out += struct.pack('<HH', b, w)
-    for name, frames, speed in anims:
-        out += name.encode()[:31].ljust(32, b'\0') + struct.pack('<If', len(frames), speed)
-        for pal in frames:
-            for m in pal:
-                out += struct.pack('<12f', *m[0], *m[1], *m[2])
+    out += struct.pack('<I', skel.index.get('Root', 0xffffffff))
+    for i, w in enumerate(skel.bind_worlds()):
+        scale, rot, pos = skel.bind[i]
+        m = inverse34(w)
+        out += struct.pack('<i9f12f', skel.parent[i], *scale, *rot, *pos, *m[0], *m[1], *m[2])
+    for name in skel.names:
+        out += name.encode()[:31].ljust(32, b'\0')
+    for name, frames, loop, speed, (nb, nc, nk, blob) in anims:
+        out += name.encode()[:47].ljust(48, b'\0') + struct.pack('<IIfIII', frames, 1 if loop else 0, speed, nb, nc, nk)
+        out += blob
     Path(path).write_bytes(out)
 
 
@@ -423,28 +455,19 @@ def main(argv):
     names = sorted({x for x in texs if x})
     place, atlas, astc = build_atlas(romfs, names)
     anim_file = Path(argv[1]) / 'Player_Animation.anim.bfres'
-    found = bfres.read_skeletal_anims(anim_file.read_bytes(), set(ANIMS))
+    found = bfres.read_skeletal_anims(anim_file.read_bytes(), None)
     anims = []
-    for n in ANIMS:
+    for n in ANIMS + [n for n in found if n not in ANIMS]:
         if n in found:
-            frames, speed = bake(skel, found[n])
-            anims.append((n, frames, speed))
-            print(f'  animation {n}: {len(frames)} frames, {speed:.2f} m/s')
-    write(argv[3], verts, weights, tris, classes, uvs, texs, place, atlas, astc, len(skel.names), anims)
+            frames, speed, packed = pack_anim(skel, found[n])
+            anims.append((n, frames, found[n]['loop'], speed if n in ANIMS else 0.0, packed))
+            if n in ANIMS:
+                print(f'  animation {n}: {frames} frames, {speed:.2f} m/s')
+    write(argv[3], verts, weights, tris, classes, uvs, texs, place, atlas, astc, skel, anims)
     print(f'{len(verts)} vertices, {len(tris)} triangles, {len(skel.names)} bones, {len(place)} textures '
           f'({len(astc)} ASTC), {len(anims)} animations -> {argv[3]}')
     if len(argv) > 4:
-        posed = [skin(verts[i], weights[i], anims[0][1][0]) for i in range(len(verts))] if anims else verts
-        preview(argv[4], posed, tris, classes)
-
-
-def skin(p, ws, pal):
-    acc = [0.0, 0.0, 0.0]
-    for b, w in ws:
-        q = apply(pal[b], p)
-        for c in range(3):
-            acc[c] += w * q[c]
-    return acc
+        preview(argv[4], verts, tris, classes)
 
 
 if __name__ == '__main__':

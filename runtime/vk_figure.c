@@ -474,6 +474,7 @@ static int pose_figures(const LinkFigure *lf) {
             link_figure_pose(lf, g->prev_anim, prev, pose2);
             for (uint64_t q = 0; q < 3ull * lf->nverts; q++) p[q] = pose2[q] + (p[q] - pose2[q]) * blend;
         }
+        link_figure_rotate(lf, posed.pose[i], g->rot);   // the friend's whole rotation: a flip turns them over
         for (int k = 0; k < 3; k++) posed.feet[i][k] = g->feet[k] + g->vel[k] * ahead, posed.hair[i][k] = srgb_to_linear(g->hair[k]);
         posed.yaw[i] = g->yaw;
     }

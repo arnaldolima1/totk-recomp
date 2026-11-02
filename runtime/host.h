@@ -138,6 +138,9 @@ void mem_init(void);                                       // reserve every regi
                                                            // (up to 20 times, TOTK_REEXEC), then fatal
 const RtGuestLayout *mem_layout(void);
 uint32_t mem_set_heap_size(uint64_t size, uint64_t *addr);                      // 0x01
+void mem_heap_range(uint64_t *base, uint64_t *size);                            // the heap now (gmd.c)
+void gmd_start(void);                                                           // gmd.c: TOTK_GMD_PROBE
+void anim_probe_start(void);                                                    // anim_probe.c: TOTK_ANIM_PROBE
 uint32_t mem_set_permission(uint64_t a, uint64_t n, uint32_t perm);             // 0x02
 uint32_t mem_set_attribute(uint64_t a, uint64_t n, uint32_t mask, uint32_t at); // 0x03
 uint32_t mem_map(uint64_t dst, uint64_t src, uint64_t n);                       // 0x04
@@ -289,6 +292,7 @@ typedef struct {
     float frame, prev_frame, fps;    // their frames, and the frames a second both advance by
     float blend;                     // 0..1: how far into anim (it rises by 4 a second)
     float feet[3], vel[3], yaw;      // world metres, metres a second, radians (ui/menu.cpp draw_link_mesh)
+    float rot[9];                    // the figure's rotation, row-major 3x3 (link_figure_orient); yaw then 0
     float hair[3];                   // sRGB 0..1
 } GfxFigure;
 int gfx_figures_wanted(void);
@@ -296,6 +300,14 @@ void gfx_figures_set(const GfxFigure *f, int n);
 int game_player_pos(float xyz[3]);                         // the player's position (x east, y up, z south, metres) while
                                                            // a world is loaded, 1 when read; guest reads that cannot
                                                            // fault, any thread (frame_rate.c player_pos)
+int game_player_pose(float xyz[3], float *yaw);            // the same with the way Link faces (radians from +z towards +x;
+                                                           // NAN when unreadable)
+uint64_t game_player_actor(void);                          // the Player actor's guest address, 0 when none (anim_probe.c)
+int game_player_anim(char *out, size_t cap, float *frame);   // the animation Link plays and its frame (1.4.3), 1 when read
+int game_resident_actors(char out[][48], int max);         // names of the resident actors (anim_probe.c)
+int game_player_armor(char out[3][48]);                   // what Link wears now: head, upper, lower (1.4.3)
+int game_player_quat(float q[4]);                         // Link's whole rotation, a unit quaternion (x, y, z, w)
+int game_player_voices(char out[][16], int max, uint64_t slot[16]);   // the voice clips Link started (1.4.3)
 int gfx_world_to_screen(const float world[3], float out[2], float *dist);   // a world position (metres) on the window
                                                            // as fractions of its width and height, from the game's
                                                            // camera of the latest frame; dist: metres from the camera.

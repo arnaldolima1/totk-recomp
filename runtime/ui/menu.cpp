@@ -39,6 +39,7 @@ static int g_font_bad;
 
 extern "C" {
 #include "achievements.h"
+#include "friend_sfx.h"
 #include "link_figure.h"
 #include "net_mp.h"
 #include "voice.h"
@@ -80,6 +81,7 @@ typedef struct {
     float frame, prev_frame, fps;    // their frames, and the frames a second both advance by
     float blend;                     // 0..1: how far into anim (it rises by 4 a second)
     float feet[3], vel[3], yaw;      // world metres, metres a second, radians (ui/menu.cpp draw_link_mesh)
+    float rot[9];                    // the figure's rotation, row-major 3x3 (link_figure_orient); yaw then 0
     float hair[3];                   // sRGB 0..1
 } GfxFigure;
 int gfx_figures_wanted(void);
@@ -1959,8 +1961,8 @@ static bool draw_link_mesh(ImDrawList *dl, const LinkFigure *lf, const float *pv
     return true;
 }
 
-// Each friend's figure state, by name: the way they face (where they last walked, kept while they stand), their ground
-// speed (smoothed), and the animation playing (link_figure.h LF_*: standing, walking, running, dashing, picked by the
+// Each friend's figure state, by name: the way they face (as their game sends it; from an older game, where they last
+// walked, kept while they stand), their ground speed (smoothed), and the animation playing (link_figure.h LF_*: standing, walking, running, dashing, picked by the
 // speed) with its frame; a change of animation blends from the old one over a quarter second.
 struct FigureState {
     char name[MP_NAME_MAX];
@@ -1971,64 +1973,250 @@ struct FigureState {
     float want_s;                     // how long the speed has asked for want
     float fps;                        // frames a second the animations advance by
     float vel[3];                     // the drawn place's velocity (m/s, smoothed)
+    // the animation's own turn (figure_animate): the root's turn since the animation began, less the friend's own
+    float turn;                       // radians added to yaw when drawn
+    float root0, yaw_run;             // the root's turn at the start; the friend's yaw turned since then (unwrapped)
+    // its sounds (figure_sounds)
+    int snd_anim;                     // the animation the sounds last saw
+    float snd_frame;                  // and its frame then
+    bool lifted[2];                   // each foot has risen off the ground since its last step
+    bool ankle_ok;
+    float swing_in;                   // seconds until the swing's whoosh, <= 0 none
+    char swing[64];
+    char voice[16];                   // the last voice played, and when
+    uint64_t voice_ms;
 };
 
-static FigureState *figure_state(const char *name, const float pos[3]) {
+static FigureState *figure_state(const MpPlayer &p) {
     static FigureState seen[MP_MAX_PLAYERS];
     int k = -1, free_k = 0;
     for (int i = 0; i < MP_MAX_PLAYERS; i++) {
-        if (!strcmp(seen[i].name, name)) k = i;
+        if (!strcmp(seen[i].name, p.name)) k = i;
         if (!seen[i].name[0]) free_k = i;
     }
     uint64_t now = plat_now_ms();
     if (k < 0) {
         k = free_k;
         memset(&seen[k], 0, sizeof seen[k]);
-        snprintf(seen[k].name, sizeof seen[k].name, "%s", name);
-        memcpy(seen[k].pos, pos, sizeof seen[k].pos);
+        snprintf(seen[k].name, sizeof seen[k].name, "%s", p.name);
+        memcpy(seen[k].pos, p.pos, sizeof seen[k].pos);
         seen[k].at_ms = now, seen[k].blend = 1;
     }
     FigureState *s = &seen[k];
     float dt = (float)(now - s->at_ms) / 1000.0f;
     if (dt <= 0) return s;
     if (dt > 0.5f) dt = 0.5f;
-    float dx = pos[0] - s->pos[0], dz = pos[2] - s->pos[2], d = sqrtf(dx * dx + dz * dz);
-    float v = d / dt;
+    float dx = p.pos[0] - s->pos[0], dz = p.pos[2] - s->pos[2], d = sqrtf(dx * dx + dz * dz);
+    float v = hypotf(p.vel[0], p.vel[2]);   // net_mp.c: the velocity of the friend's own step
     if (v > 40) v = 0;   // a jump (fast travel)
-    s->speed += (v - s->speed) * fminf(1.0f, dt * 2.0f);   // positions come in steps (200 ms): a slow average
-    if (d > 0.02f) s->yaw = atan2f(dx, dz);
-    float kv = fminf(1.0f, dt * 8.0f);
-    for (int c = 0; c < 3; c++) s->vel[c] += ((pos[c] - s->pos[c]) / dt - s->vel[c]) * kv;
-    memcpy(s->pos, pos, sizeof s->pos);
+    s->speed += (v - s->speed) * fminf(1.0f, dt * 6.0f);
+    float was_yaw = s->yaw;
+    if (isfinite(p.yaw)) s->yaw = p.yaw;
+    else if (d > 0.02f) s->yaw = atan2f(dx, dz);
+    s->yaw_run += remainderf(s->yaw - was_yaw, 6.2831853f);
+    memcpy(s->vel, p.vel, sizeof s->vel);
+    memcpy(s->pos, p.pos, sizeof s->pos);
     s->at_ms = now;
     return s;
 }
 
-// Advances a friend's animation for dt seconds: the animation by speed (between the made-for speeds of the next two),
-// played at the rate that matches the friend's speed, so the feet keep pace.
-static void figure_animate(FigureState *s, const LinkFigure *lf, float dt) {
-    // the animation for the speed, with a margin around each threshold so a speed near one does not flip between two
-    static const float up[3] = {0.45f, 2.9f, 4.5f}, down[3] = {0.25f, 2.5f, 4.1f};
-    int want = s->anim;
-    while (want < LF_DASH && s->speed > up[want]) want++;
-    while (want > LF_WAIT && s->speed < down[want - 1]) want--;
-    if (want >= lf->nanims) want = lf->nanims - 1;
-    // and only once it has held for 0.3 s
-    if (want != s->want) s->want = want, s->want_s = 0;
-    else s->want_s += dt;
-    if (want != s->anim && s->want_s >= 0.3f) {
-        float phase = s->frame / (float)lf->anims[s->anim].frames;   // the stride's place, kept between moving gaits
-        s->prev_anim = s->anim, s->prev_frame = s->frame, s->blend = 0;
-        s->anim = want;
-        s->frame = (s->anim != LF_WAIT && s->prev_anim != LF_WAIT) ? (phase - floorf(phase)) * (float)lf->anims[want].frames : 0;
+// Advances a friend's animation for dt seconds. When their game names the animation their Link plays (named, net_mp.c
+// POS lines) the figure plays that one from its start; else the animation by speed (between the made-for speeds of
+// the next two). Walking, running and dashing play at the rate that matches the friend's speed, so the feet keep pace;
+// every other animation at its own 30 frames a second.
+static void switch_anim(FigureState *s, const LinkFigure *lf, int to) {
+    bool gaits = s->anim >= LF_WALK && s->anim <= LF_DASH && to >= LF_WALK && to <= LF_DASH;
+    float phase = s->frame / (float)lf->anims[s->anim].frames;   // the stride's place, kept between moving gaits
+    s->prev_anim = s->anim, s->prev_frame = s->frame, s->blend = 0;
+    s->anim = to;
+    s->frame = gaits ? (phase - floorf(phase)) * (float)lf->anims[to].frames : 0;
+    s->root0 = link_figure_root_yaw(lf, to, s->frame), s->yaw_run = 0;
+}
+
+// The game blends its turning gaits (Nml_Move_Run_Curve_R180, Nml_Move_Dash_Curve_L_180, Nml_Move_Hard_Curve_L: a
+// lean into the curve) into the straight one with a small weight, and the friend's game names only the animation
+// leading the blend (frame_rate.c game_player_anim). Played whole they bend the figure hard, so for them the figure
+// keeps the gait the speed picks.
+static bool curve_gait(const char *name) {
+    return name && !strncmp(name, "Nml_Move_", 9) && strstr(name, "_Curve");
+}
+
+// The game's pose and face layers (A_Pose_Shield_Wait, Face_*, Voice_*) are blended over another animation with a
+// weight, and now and then one of them leads the slot the friend's game reads (a pose with the shield for a moment while
+// Link tumbles down). Played whole, the figure would stand up in the middle of a fall: it goes on with what it plays.
+static bool pose_layer(const char *name) {
+    return name && (!strncmp(name, "A_Pose_", 7) || !strncmp(name, "Face_", 5) || !strncmp(name, "Voice_", 6));
+}
+
+static void figure_animate(FigureState *s, const LinkFigure *lf, const char *named, const float frames[3], float dt) {
+    if (pose_layer(named) && s->anim > LF_DASH) {   // keep the animation playing, at its pace
+        s->frame += dt * s->fps;
+        s->prev_frame += dt * 30.0f;
+        s->blend = fminf(1.0f, s->blend + dt * 6.0f);
+        return;
+    }
+    // Knocked down, Link tumbles as a rag doll: the game's physics lays his body on the ground, and the slot shows only
+    // a crouched one-frame reference (Rolldown_D/U/L/R, which side faces up). The figure lies as the matching
+    // getting-up animation begins (its first frame: on his back, on his face, on a side) until the real one starts.
+    static const char *const lying[4][2] = {{"Rolldown_U", "Nml_Damage_L_B_Standup"}, {"Rolldown_D", "Nml_Damage_L_F_Standup"},
+                                            {"Rolldown_L", "Nml_Damage_L_L_Standup"}, {"Rolldown_R", "Nml_Damage_L_R_Standup"}};
+    for (int i = 0; named && i < 4; i++) {
+        int down = strcmp(named, lying[i][0]) ? -1 : link_figure_find(lf, lying[i][1]);
+        if (down < 0) continue;
+        if (down != s->anim) switch_anim(s, lf, down);
+        s->frame = 0, s->fps = 0, s->turn = 0;
+        s->prev_frame += dt * 30.0f;
+        s->blend = fminf(1.0f, s->blend + dt * 6.0f);
+        return;
+    }
+    int game = curve_gait(named) ? -1 : link_figure_find(lf, named);
+    if (game >= 0) {
+        if (game != s->anim) switch_anim(s, lf, game);
+        s->want = game, s->want_s = 0;
+        if (isfinite(frames[0]) && isfinite(frames[1])) {   // the frame the friend's game showed, and its pace
+            float to = frames[1];
+            if (to < frames[0]) to += (float)lf->anims[game].frames;   // a loop started over between the two
+            float f = frames[0] + (to - frames[0]) * frames[2];
+            if (dt > 0) s->fps = fminf(120.0f, fmaxf(0.0f, (f - s->frame) / dt));
+            s->frame = f;
+            s->prev_frame += dt * 30.0f;
+            s->blend = fminf(1.0f, s->blend + dt * 6.0f);
+            s->turn = 0;
+            if (!lf->anims[s->anim].loop) s->turn = link_figure_root_yaw(lf, s->anim, s->frame) - s->root0 - s->yaw_run;
+            return;
+        }
+    } else {
+        // the animation for the speed, with a margin around each threshold so a speed near one does not flip between
+        // two (TotK's sprint goes at 7-8 m/s: the dash takes over above a run's 4-5 m/s)
+        static const float up[3] = {0.45f, 2.9f, 5.6f}, down[3] = {0.25f, 2.5f, 5.0f};
+        int want = s->anim > LF_DASH ? LF_WAIT : s->anim;   // after a named one: from standing
+        while (want < LF_DASH && s->speed > up[want]) want++;
+        while (want > LF_WAIT && s->speed < down[want - 1]) want--;
+        if (want >= lf->nanims) want = lf->nanims - 1;
+        // and only once it has held for 0.3 s (straight away out of a named animation, a curve's lean coming in)
+        if (want != s->want) s->want = want, s->want_s = 0;
+        else s->want_s += dt;
+        if (want != s->anim && (s->want_s >= 0.3f || s->anim > LF_DASH)) switch_anim(s, lf, want);
     }
     float rate = 1;
-    float made = lf->anims[s->anim].speed;
-    if (made > 0.1f) rate = fminf(1.6f, fmaxf(0.6f, s->speed / made));
+    float made = s->anim >= LF_WALK && s->anim <= LF_DASH ? lf->anims[s->anim].speed : 0;
+    // a sprint goes at 7-8 m/s (game_player_pos) on a dash made for 4.6: the game plays it about 1.6 times as fast
+    if (made > 0.1f) rate = fminf(2.0f, fmaxf(0.6f, s->speed / made));
     s->fps = 30.0f * rate;
     s->frame += dt * 30.0f * rate;
     s->prev_frame += dt * 30.0f * rate;
     s->blend = fminf(1.0f, s->blend + dt * 4.0f);
+    // An animation that turns Link on its own (its root bone turns): the game turns the actor along in some (a run's
+    // turn about), and the friend's yaw already shows it; in others the actor stays and only the body turns (the
+    // spin attack). The figure shows the root's turn less what the friend's yaw turned since the animation began, so
+    // both come out once. A looping animation starts its turn over each loop: none for those.
+    s->turn = 0;
+    if (!lf->anims[s->anim].loop) s->turn = link_figure_root_yaw(lf, s->anim, s->frame) - s->root0 - s->yaw_run;
+}
+
+// A friend's sounds for this step of their figure (friend_sfx.c plays the game's own clips, tools/link_sounds.py):
+// footsteps when an ankle comes down to the ground (it rests at 0.12 m in every gait), a hand or a stroke each half
+// loop of climbing and swimming, and at the start of an animation what it does: a jump or a landing on the ground,
+// a sword drawn or put away, a swing (its whoosh a moment in), the paraglider opened or folded, a roll. And Link's
+// voice, the very clip the friend's game played (mp_take_sfx). Louder the
+// nearer the friend is to the camera, from the side they are on; silent beyond 50 m. The ground is grass on the
+// surface and stone on the sky islands and in the depths, as the friend's own ground is not known.
+static const float FRIEND_SFX_LEVEL = 0.15f;
+static const float FRIEND_VOICE_LEVEL = 0.6f;   // of FRIEND_SFX_LEVEL: his voice a little under his steps
+static void figure_sounds(FigureState *s, const LinkFigure *lf, const MpPlayer &p, float dt) {
+    float vp[16], eye[3], map[4];
+    const char *an = s->anim >= 0 && s->anim < lf->nanims ? lf->anims[s->anim].name : "";
+    float d = 1e9f;
+    if (gfx_view(vp, eye, map)) {
+        float dx = p.pos[0] - eye[0], dy = p.pos[1] + 1 - eye[1], dz = p.pos[2] - eye[2];
+        d = sqrtf(dx * dx + dy * dy + dz * dz);
+    }
+    char voices[160];   // the voice clips the friend's Link started, as their game names them (net_mp.c)
+    int nv = mp_take_sfx(p.name, voices, sizeof voices);
+    if (d >= 50) {
+        s->snd_anim = s->anim, s->snd_frame = s->frame, s->ankle_ok = false, s->swing_in = 0;
+        return;
+    }
+    // the clips are mixed at full scale; the game plays its own Link's well below that, so a friend's are brought down
+    // to sit beside them (FRIEND_SFX_LEVEL), and further with the distance
+    float gain = FRIEND_SFX_LEVEL / sqrtf(1 + d * d / 16) * fminf(1.0f, (50 - d) / 10);
+    float cx = vp[0] * p.pos[0] + vp[1] * (p.pos[1] + 1) + vp[2] * p.pos[2] + vp[3];
+    float cw = vp[12] * p.pos[0] + vp[13] * (p.pos[1] + 1) + vp[14] * p.pos[2] + vp[15];
+    float pan = fmaxf(-1.0f, fminf(1.0f, cx / (fabsf(cw) + 0.5f))) * 0.8f;
+    const char *ground = mp_layer(p.pos[1]) == MP_LAYER_SURFACE ? "Grass" : "Stone";
+    char name[96];
+    auto play = [&](const char *base, float k) { friend_sfx_play(base, gain * k, pan); };
+    auto on_ground = [&](const char *what, float k) {
+        snprintf(name, sizeof name, "Mt_%s_Pl_%s", ground, what);
+        play(name, k);
+    };
+    if (s->swing_in > 0 && (s->swing_in -= dt) <= 0) play(s->swing, 1.0f);
+    for (char *v = nv ? voices : NULL, *next; v && *v; v = next) {
+        next = strchr(v, ',');
+        if (next) *next++ = 0;
+        // one voice at a time per friend: Link does not shout twice within 0.7 s, so a second one is the same shout
+        // seen twice (a charged attack starts its voice from two calls)
+        uint64_t now_ms = plat_now_ms();
+        if (s->voice[0] && now_ms - s->voice_ms < 700) continue;
+        snprintf(s->voice, sizeof s->voice, "%s", v), s->voice_ms = now_ms;
+        play(v, FRIEND_VOICE_LEVEL);
+    }
+    bool climb = !strncmp(an, "Climb_Wall_Move_", 16), swim = !strncmp(an, "Swim_Move_", 10) || !strcmp(an, "Swim_Wait");
+    if (s->anim != s->snd_anim) {   // an animation starts
+        const char *was = s->snd_anim >= 0 && s->snd_anim < lf->nanims ? lf->anims[s->snd_anim].name : "";
+        bool floating = !strncmp(an, "Float_", 6), was_floating = !strncmp(was, "Float_", 6);
+        bool blade = strstr(an, "Sword") || strstr(an, "Lsword") || strstr(an, "Spear");
+        if (floating && !was_floating) play("Pl_Parashawl_Equip", 0.8f);
+        if (was_floating && !floating) play("Pl_Parashawl_UnEquip", 0.8f);
+        if (strstr(an, "_Jump") && !strstr(an, "Land") && !strstr(an, "Attack")) on_ground("Jump", 0.8f);
+        else if (strstr(an, "_Land")) on_ground("LandMiddle", 0.9f);
+        if (!strncmp(an, "Equip_", 6) && blade && strstr(an, "_On_")) play("Weapon_Sword_Metal_Equip", 0.7f);
+        if (!strncmp(an, "Equip_", 6) && blade && strstr(an, "_Off_")) play("Weapon_Sword_Metal_UnEquip", 0.7f);
+        if (!strncmp(an, "Rolldown", 8)) play("Pl_FrontRoll", 0.8f);
+        if (!strcmp(an, "Swim_Move_Dash")) play("PL_Water_SwimDash", 0.8f);
+        if (strstr(an, "Attack") && blade && strncmp(an, "Equip_", 6)) {
+            bool finish = strstr(an, "_SF") || strstr(an, "Charge") || strstr(an, "Spin");
+            snprintf(s->swing, sizeof s->swing, "%s",
+                     finish ? "NSword_WhooshFinish_Player_M_Sharp_Metal" : "NSword_Whoosh_Player_M_Sharp_Metal");
+            s->swing_in = 0.12f;
+        }
+        s->snd_anim = s->anim, s->snd_frame = s->frame, s->ankle_ok = false;
+    }
+    if (climb || swim) {   // a hand or a stroke each half loop
+        float half = (float)lf->anims[s->anim].frames / 2;
+        float was_half = floorf(s->snd_frame / half), now_half = floorf(s->frame / half);
+        if (half > 0 && now_half != was_half) {
+            if (climb) on_ground((int)now_half & 1 ? "ClimbStrong_HandR" : "ClimbStrong_HandL", 0.8f);
+            else if (!strcmp(an, "Swim_Wait")) {   // treading water: a soft kick each loop
+                if ((int)now_half & 1) play("Water_Pl_SwimKick_Hand", 0.4f);
+            } else play(s->speed > 1.5f ? "Water_Pl_SwimHand_SmallFast" : "Water_Pl_SwimHand_SmallSlow", 0.7f);
+        }
+    }
+    s->snd_frame = s->frame;
+    // footsteps: an ankle coming down to the ground, while moving (or in a landing, a step, a stop)
+    static int ankles[2] = {-2, -2};
+    if (ankles[0] == -2) ankles[0] = link_figure_bone(lf, "Ankle_L"), ankles[1] = link_figure_bone(lf, "Ankle_R");
+    float at[2][3];
+    bool walking = !climb && !swim && strncmp(an, "Float_", 6) && strncmp(an, "Fall", 4);
+    if (!walking || ankles[0] < 0 || ankles[1] < 0 || !link_figure_bones_at(lf, s->anim, s->frame, ankles, 2, at)) {
+        s->ankle_ok = false;
+        return;
+    }
+    bool stepping = s->speed > 0.3f || strstr(an, "Land") || strstr(an, "Stair") || strstr(an, "Brake") || strstr(an, "_St_");
+    // a foot counts as lifted above 0.145 m and steps when it comes back to 0.128 m: a walk lowers it slowly
+    for (int k = 0; k < 2; k++) {
+        float y = at[k][1];
+        if (!s->ankle_ok) s->lifted[k] = false;
+        if (y > 0.145f) s->lifted[k] = true;
+        else if (s->lifted[k] && y <= 0.128f) {
+            s->lifted[k] = false;
+            bool fast = s->speed > 3.0f;
+            if (stepping)
+                on_ground(fast ? (k ? "MoveFast_HeelR" : "MoveFast_HeelL") : (k ? "MoveSlow_HeelR" : "MoveSlow_HeelL"),
+                          fast ? 0.75f : 0.6f);
+        }
+    }
+    s->ankle_ok = true;
 }
 
 // ---- friends in the world: a figure where each friend stands (draw_figure), with name and distance above, and a
@@ -2063,6 +2251,16 @@ static void world_tags(const MenuTarget *t, const MpView &v, float scale, bool (
             if (vis[k + j] >= 0) seen += vis[k + j], known++;
         k += 3;
         float shown = known ? seen / known : 1;   // unknown (no test yet, off the depth target): drawn as seen
+        // the animation moves on (and sounds) off screen too: a friend behind the camera is heard
+        const LinkFigure *lf = link_figure();
+        FigureState *fs_ = figure_state(p);
+        if (lf) {
+            uint64_t now = plat_now_ms();
+            float dt = fs_->anim_ms ? fminf(0.1f, (float)(now - fs_->anim_ms) / 1000.0f) : 0;
+            fs_->anim_ms = now;
+            figure_animate(fs_, lf, p.anim, p.frames, dt);
+            figure_sounds(fs_, lf, p, dt);
+        }
         float head[3] = {p.pos[0], p.pos[1] + 1.8f, p.pos[2]}, f[2], h[2], dist;
         if (!gfx_world_to_screen(p.pos, f, &dist) || !gfx_world_to_screen(head, h, NULL)) continue;
         ImVec2 feet(f[0] * W, f[1] * H), top(h[0] * W, h[1] * H);
@@ -2072,22 +2270,17 @@ static void world_tags(const MenuTarget *t, const MpView &v, float scale, bool (
         ImVec4 col = mp_name_col(p.name);
         float a = dist < 15 ? 0.3f + 0.025f * dist : 0.68f;   // fainter up close, not to hide the view
         a = 0.12f + (a - 0.12f) * shown;                     // behind the scene: a faint figure
-        const LinkFigure *lf = link_figure();
-        FigureState *fs_ = figure_state(p.name, p.pos);
         bool drawn = false;
         if (lf) {
             static std::vector<float> pose, pose2;
-            uint64_t now = plat_now_ms();
-            float dt = fs_->anim_ms ? fminf(0.1f, (float)(now - fs_->anim_ms) / 1000.0f) : 0;
-            fs_->anim_ms = now;
-            figure_animate(fs_, lf, dt);
             if (gbuf && ngfig < MP_MAX_PLAYERS) {   // posed by the renderer at the moment it draws
                 GfxFigure &g = gfig[ngfig];
                 g.anim = fs_->anim, g.prev_anim = fs_->prev_anim;
                 g.frame = fs_->frame, g.prev_frame = fs_->prev_frame, g.fps = fs_->fps, g.blend = fs_->blend;
                 memcpy(g.feet, p.pos, sizeof g.feet);
                 memcpy(g.vel, fs_->vel, sizeof g.vel);
-                g.yaw = fs_->yaw;
+                g.yaw = 0;
+                link_figure_orient(p.rot, fs_->turn, g.rot);
                 g.hair[0] = col.x * 0.9f + 0.08f, g.hair[1] = col.y * 0.9f + 0.08f, g.hair[2] = col.z * 0.9f + 0.08f;
                 ngfig++;
                 drawn = true;
@@ -2098,7 +2291,10 @@ static void world_tags(const MenuTarget *t, const MpView &v, float scale, bool (
                     link_figure_pose(lf, fs_->prev_anim, fs_->prev_frame, pose2.data());
                     for (size_t q = 0; q < pose.size(); q++) pose[q] = pose2[q] + (pose[q] - pose2[q]) * fs_->blend;
                 }
-                drawn = draw_link_mesh(dl, lf, pose.data(), p.pos, fs_->yaw, col, 1.0f, W, H);
+                float rot[9];
+                link_figure_orient(p.rot, fs_->turn, rot);
+                link_figure_rotate(lf, pose.data(), rot);
+                drawn = draw_link_mesh(dl, lf, pose.data(), p.pos, 0, col, 1.0f, W, H);
             }
         }
         if (!drawn) draw_figure(dl, feet, tall, col, a);
@@ -2193,57 +2389,10 @@ static void minimap_dots(const MenuTarget *t, const MpView &v, float scale, bool
     }
 }
 
-// Friends' positions arrive every 200 ms while they move. Between two, each friend keeps going at the velocity of the
-// last two (for at most a quarter second, so a stop does not overshoot), and the drawn place follows that guess with a
-// short lag (a tenth of a second), so a running friend moves evenly instead of in steps. A jump of over 50 m (fast
-// travel) or a second without news snaps.
-static void smooth_positions(MpView &v) {
-    static struct {
-        char name[MP_NAME_MAX];
-        float got[3], vel[3], shown[3];   // the last received place, the velocity, the drawn place
-        uint64_t got_ms, at;
-    } held[MP_MAX_PLAYERS];
-    uint64_t now = plat_now_ms();
-    for (int i = 0; i < v.nplayers; i++) {
-        MpPlayer &p = v.players[i];
-        if (!p.has_pos || !strcmp(p.name, v.me)) continue;
-        int k = -1, old = 0;
-        for (int j = 0; j < MP_MAX_PLAYERS; j++) {
-            if (!strcmp(held[j].name, p.name)) k = j;
-            if (held[j].at < held[old].at) old = j;
-        }
-        auto *h = k >= 0 ? &held[k] : NULL;
-        if (!h || now - h->at > 1000 ||
-            hypotf(p.pos[0] - h->got[0], p.pos[2] - h->got[2]) + fabsf(p.pos[1] - h->got[1]) > 50) {
-            h = &held[k < 0 ? old : k];
-            snprintf(h->name, sizeof h->name, "%s", p.name);
-            memcpy(h->got, p.pos, sizeof p.pos), memcpy(h->shown, p.pos, sizeof p.pos);
-            memset(h->vel, 0, sizeof h->vel);
-            h->got_ms = h->at = now;
-            continue;
-        }
-        if (memcmp(p.pos, h->got, sizeof p.pos)) {   // a new place: the velocity since the last one
-            float span = (float)(now - h->got_ms) / 1000.0f;
-            for (int c = 0; c < 3; c++) h->vel[c] = span > 0.05f ? (p.pos[c] - h->got[c]) / fminf(span, 0.5f) : 0;
-            memcpy(h->got, p.pos, sizeof p.pos);
-            h->got_ms = now;
-        }
-        float ahead = fminf(0.25f, (float)(now - h->got_ms) / 1000.0f);
-        float a = 1 - expf(-(float)(now - h->at) / 100.0f);
-        for (int c = 0; c < 3; c++) {
-            float guess = h->got[c] + h->vel[c] * ahead;
-            h->shown[c] += (guess - h->shown[c]) * a;
-        }
-        memcpy(p.pos, h->shown, sizeof p.pos);
-        h->at = now;
-    }
-}
-
 static void radar_draw(const MenuTarget *t, float scale) {
     if (full_menu()) return;
     MpView v;
-    mp_view(&v);
-    smooth_positions(v);
+    mp_view(&v);   // friends already along their path (net_mp.c place_at)
     ImDrawList *dl = ImGui::GetForegroundDrawList();
     ImFont *font = ImGui::GetFont();
     float fs = ImGui::GetFontSize() * 0.78f, margin = 18 * scale;
@@ -2258,8 +2407,19 @@ static void radar_draw(const MenuTarget *t, float scale) {
     if (radar_on(v))
         world_tags(t, v, scale, [](const char *name, void *ctx) { return (*(decltype(talking) *)ctx)(name); }, &talking);
     if (radar_on(v)) minimap_dots(t, v, scale, [](const char *name, void *ctx) { return (*(decltype(talking) *)ctx)(name); }, &talking);
-    // the list: friends with their distance and layer (or just who talks, without positions)
     float lh = fs + 10 * scale;
+    if (v.state == MP_CONNECTED && v.ping_ms > 0) {   // the room's round trip, on top: green, then amber, then red
+        char text[32];
+        snprintf(text, sizeof text, "Ping %d ms", v.ping_ms);
+        ImVec2 ts = font->CalcTextSizeA(fs, FLT_MAX, 0, text);
+        float w = ts.x + 30 * scale, x = right - w;
+        ImVec4 c = v.ping_ms < 80 ? kUiZonai : v.ping_ms < 160 ? kUiWarn : kUiDanger;
+        dl->AddRectFilled(ImVec2(x, y), ImVec2(right, y + lh), ui_col(kUiPanel, 0.78f), lh / 2);
+        dl->AddCircleFilled(ImVec2(x + 12 * scale, y + lh / 2), 5 * scale, ui_col(c));
+        dl->AddText(font, fs, ImVec2(x + 22 * scale, y + 5 * scale), ui_col(kUiCream), text);
+        y += lh + 4 * scale;
+    }
+    // the list: friends with their distance and layer (or just who talks, without positions)
     for (int i = 0; i < v.nplayers; i++) {
         const MpPlayer &p = v.players[i];
         if (!strcmp(p.name, v.me)) continue;

@@ -60,9 +60,9 @@ space. Nothing is encrypted or authenticated beyond the room's password: rooms a
 | game | `CHAT` | text |
 | game | `ACH` | achievement id, name, rarity |
 | game | `VOICE` | an Opus frame, base64 (20 ms of 48 kHz mono) |
-| game | `POS` | x, y, z: the player's position (each 200 ms while moving, else each 2 s) |
+| game | `POS` | x, y, z: the player's position in metres (centimetres given), yaw: the way Link faces (radians from +z towards +x, empty when unread), t: the game's clock in ms, anim: the animation Link plays (1.4.3, empty when unread); while moving, turning or changing animation, else each second (one each 50 ms at most) |
 | game | `MARK` | x, y, z: a marker where the player stands |
-| game | `PING` | (every 30 s; the room drops a game silent for 120 s) |
+| game | `PING` | (every 2 s: the round trip to its `PONG` is the ping shown over the friends' list; the room drops a game silent for 120 s) |
 | room | `WELCOME` | protocol, room name |
 | room | `ERROR` | code (`version`, `password`, `name`, `full`), text |
 | room | `ROSTER` | count, then per player: name, place and the six figures of `STATUS` |
@@ -70,7 +70,7 @@ space. Nothing is encrypted or authenticated beyond the room's password: rooms a
 | room | `CHAT` | player, text |
 | room | `ACH` | player, achievement id, name, rarity |
 | room | `VOICE` | player, the frame as received (to everyone but its sender) |
-| room | `POS` | player, x, y, z (to everyone else; the last of each to a player who joins) |
+| room | `POS` | player, x, y, z, yaw, t, anim (to everyone else; the last place alone to a player who joins) |
 | room | `MARK` | player, x, y, z (to everyone, its player too; markers under 15 minutes old to a player who joins) |
 | room | `EVENT` | kind (`join`, `leave`, `challenge`), text |
 | room | `CHALLENGES` | count, then per track: figure, the room's total, tiers reached, four targets |
@@ -106,7 +106,40 @@ connection. A refusal (`ERROR`) stops the retries until the settings change or *
 `runtime/frame_rate.c` `game_player_pos` reads the player's position from the game: the scene the main module points
 to, its resident actors (component 13), the one named `Player`, its position at +0x2b4 (the walk MacNativeGames
 documents for each version). x is east, y up, z south, in metres, as the game's map shows them (it prints -z). The
-game sends it in `POS` lines and keeps its friends' by name for six seconds.
+game sends it in `POS` lines with the way Link faces (`game_player_pose`: the third column of the actor's rotation at
++0x2c0) and its own clock, and keeps its friends' by name for six seconds. Of each friend the last 24 places are kept
+(`net_mp.c` `place_at`): a friend is shown 90 ms behind their newest place, between the two real places around that
+moment on their clock (the offset to it follows the quickest delivery), so the figure takes the path they took, up a
+slope or over a jump, instead of a guess that cuts through the ground. Past the newest place it goes on along the
+last step for at most 200 ms, then stands. Both the game and the room turn Nagle's algorithm off (`TCP_NODELAY`): with
+it a small line waits until the one before is acknowledged, which Windows delays up to 200 ms, and positions and voice
+frames would come in bursts.
+
+On 1.4.3 a `POS` line also carries what Link does, read from the game (all `runtime/frame_rate.c`, found with the
+research probe `runtime/anim_probe.c`, `TOTK_ANIM_PROBE`):
+
+- his whole rotation as a quaternion (`game_player_quat`, the actor's 3x3 at +0x2c0): a back flip or a side jump turns
+  the actor over, which angles about each axis cannot carry past 90 degrees;
+- the animation he plays and its frame (`game_player_anim`): the animation player at `[[[actor+0x238]+0xc8]+0x118]`,
+  its first slot's FSKA at +0x80 (blended layers follow every 0xb0) and that slot's frame at +0x58. The game starts some
+  animations past their first frame and plays them at its own pace, so the figure plays the frames the friend's game
+  shows rather than counting its own;
+- the voice clips he starts (`game_player_voices`): his sound link handles, four a block in blocks reached from
+  +0x608, point at the asset calls of the game's `SLink2` file, whose key names are the clips of `Player_Voice`
+  (`PV000_02`).
+
+A game sends a line every 50 ms while it knows the frame. The figure (`ui/menu.cpp` `figure_animate`) plays that
+animation; it keeps the speed-picked gait for the game's turning leans (`*_Curve*`) and ignores its pose and face
+layers (`A_Pose_*`, `Face_*`, `Voice_*`), which the game blends over another animation and which lead the slot now and
+then. Link's root bone carries the animation's own motion, which the game applies to the actor: the figure holds the
+root where its curves start (`link_figure.c` `pose_worlds`) and adds only the turn the actor did not make
+(`link_figure_root_yaw`). Knocked down, Link tumbles as a rag doll that no animation describes; while the game shows
+its one-frame `Rolldown_*` reference the figure lies as the matching getting-up animation begins.
+
+What Link wears is read live too (`game_player_armor`: the model parts listed at `[actor+0x168]+0x2e0`) and sent in
+`LOOK` lines when it changes; another game version sends what its last save holds.
+
+The ping over the friends' list is the round trip of a `PING` (every 2 s) to its `PONG`.
 
 Friends show on the game's own minimap and in the world (`runtime/ui/menu.cpp` `radar_draw`, setting `mp_radar`).
 The overlay takes the game's camera from the G-buffer pass (`runtime/vk_exec_draw.c` `cam_take`: the 2368-byte block
@@ -118,8 +151,7 @@ once that pass is done, reads it back when the submission completes, and compare
 friend's; it runs only while friends are drawn (`TOTK_SPEED_PROBE=1` logs it, with the player's own chest as a check); on the minimap (`minimap_dots`) a dot with their initial, hollow with an arrow when in another layer, and
 markers are diamonds. The minimap turns with the camera and shows about 1 m per pixel of a 1440-row picture, its centre
 0.1819 and 0.1667 picture heights from the right and bottom edges (measured by walking a known distance on 1.4.3). A
-list at the top right gives each friend's distance and layer. Positions glide between the 200 ms updates
-(`smooth_positions`). The layer comes from the height (`mp_layer`:
+list at the top right gives each friend's distance and layer. The layer comes from the height (`mp_layer`:
 sky over 900 m, depths under -200 m). The mark key (`mp_mark_key`, G) sends a `MARK`; each player has one, for 15
 minutes. The player cards show each friend's layer and distance. Two multiplayer achievements count meetings (within
 30 m in the same layer) and markers.
@@ -130,5 +162,14 @@ Each friend is drawn in the world as a textured, animated Link of the game's own
 (`runtime/vk_figure.c`, `docs/maxwell.md` section 9), so the game lights, shadows and fogs them like its own
 characters. The figure, `profile/link-figure.bin`, is built at install time from the player's own RomFS
 (`installer/steps.py` `link_figure`, `tools/link_figure.py`): the parts' `.bfres.mc` models through McSharp's
-MeshCodec decoder (the release's `bin/mcsharp`), the textures from TexToGo, and the walk, run, dash and idle
-animations. Without it friends show as outlines.
+MeshCodec decoder (the release's `bin/mcsharp`), the textures from TexToGo, and the curves of all 1560 of Link's
+skeletal animations (`Player_Animation`, about 35 MB), which the runtime evaluates at the frame it shows. Without it
+friends show as outlines.
+
+Their sounds come from the game too: `profile/link-sounds.bin` (`installer/steps.py` `link_sounds`,
+`tools/link_sounds.py`) holds Link's footsteps on grass, soil and stone, jumps and landings, sword swings, drawing and
+sheathing, climbing, swimming, the paraglider, the roll and his 337 voice clips, decoded from the RomFS's BARS files
+(DSP ADPCM). `ui/menu.cpp` `figure_sounds` plays a step when a figure's ankle comes down to the ground (it rests at
+0.12 m in every gait), the other sounds as their animations start, and each voice clip the friend's game names, from
+the friend's side and quieter with the distance (silent beyond 50 m); `runtime/friend_sfx.c` mixes them over the
+game's output.

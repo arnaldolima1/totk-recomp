@@ -44,6 +44,7 @@
 // any frame rate when game time follows wall time).
 #include <math.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -185,7 +186,25 @@ static uint64_t read_ptr(uint64_t a) {
 // TOTK_GAME_V121/V143). The 1.1.0 slot was measured from its own dereference chain: 181 scene accesses in that build
 // read it, and one of them reproduces this walk (the 14-component check, component 13, the 0x70 stride and the name
 // compare) instruction for instruction.
-static int player_pos(float xyz[3]) {
+// The names of the resident actors (the list player_actor walks), up to max, each cut to 48 bytes; how many.
+int game_resident_actors(char out[][48], int max) {
+    uint64_t module = read_ptr(MOD_MAIN_BASE + (RT_V143 ? 0x3add238 : RT_V110 ? 0x4630a68 : 0x4728538)),
+             scene = module ? read_ptr(module + 0x1e8) : 0;
+    int32_t count = 0;
+    if (!scene || !read_guest(scene + 0x50, &count, 4) || count < 14 || count > 256) return 0;
+    uint64_t comps = read_ptr(scene + 0x58), resident = comps ? read_ptr(comps + 13 * 8) : 0;
+    if (!resident || !read_guest(resident + 0x20, &count, 4) || count < 1 || count > 64) return 0;
+    uint64_t links = read_ptr(resident + 0x28);
+    int n = 0;
+    for (int i = 0; links && i < count && n < max; i++) {
+        uint64_t data = read_ptr(links + (uint64_t)i * 0x70 + 8), actor = data ? read_ptr(data + 0x40) : 0;
+        uint64_t name = actor ? read_ptr(actor + 0x218) : 0;
+        if (name && read_guest(name, out[n], 48)) out[n][47] = 0, n++;
+    }
+    return n;
+}
+
+static uint64_t player_actor(void) {
     uint64_t module = read_ptr(MOD_MAIN_BASE + (RT_V143 ? 0x3add238 : RT_V110 ? 0x4630a68 : 0x4728538)),
              scene = module ? read_ptr(module + 0x1e8) : 0;
     int32_t count = 0;
@@ -197,16 +216,158 @@ static int player_pos(float xyz[3]) {
         uint64_t data = read_ptr(links + (uint64_t)i * 0x70 + 8), actor = data ? read_ptr(data + 0x40) : 0;
         uint64_t name = actor ? read_ptr(actor + 0x218) : 0;
         char text[7];
-        // While a save loads the Player actor is already listed but still at the origin (0, 0, 0); a player
-        // standing within a metre of the map's exact centre is rare enough to count as no position yet too.
-        if (name && read_guest(name, text, 7) && !memcmp(text, "Player", 7))
-            return read_guest(actor + 0x2b4, xyz, 12) && isfinite(xyz[0]) && isfinite(xyz[2]) &&
-                   fabsf(xyz[0]) + fabsf(xyz[2]) > 1.0f;
+        if (name && read_guest(name, text, 7) && !memcmp(text, "Player", 7)) return actor;
     }
     return 0;
 }
 
+// While a save loads the Player actor is already listed but still at the origin (0, 0, 0); a player standing within a
+// metre of the map's exact centre is rare enough to count as no position yet too.
+static int player_pos(float xyz[3]) {
+    uint64_t actor = player_actor();
+    return actor && read_guest(actor + 0x2b4, xyz, 12) && isfinite(xyz[0]) && isfinite(xyz[2]) &&
+           fabsf(xyz[0]) + fabsf(xyz[2]) > 1.0f;
+}
+
 int game_player_pos(float xyz[3]) { return player_pos(xyz); }
+uint64_t game_player_actor(void) { return player_actor(); }
+
+// The actor's rotation, a row-major 3x3 at +0x2c0 next to the position (MacNativeGames world_survey.c reads it the
+// same way): Link faces his local +z, so the third column is his forward in the world, and the yaw is its angle from
+// +z towards +x.
+int game_player_pose(float xyz[3], float *yaw) {
+    uint64_t actor = player_actor();
+    float rot[9];
+    if (!actor || !read_guest(actor + 0x2b4, xyz, 12) || !isfinite(xyz[0]) || !isfinite(xyz[2]) ||
+        fabsf(xyz[0]) + fabsf(xyz[2]) <= 1.0f)
+        return 0;
+    *yaw = NAN;
+    if (read_guest(actor + 0x2c0, rot, sizeof rot) && isfinite(rot[2]) && isfinite(rot[8]) &&
+        rot[2] * rot[2] + rot[8] * rot[8] > 0.01f)
+        *yaw = atan2f(rot[2], rot[8]);
+    return 1;
+}
+
+// Link's whole rotation as a unit quaternion (x, y, z, w): the actor's row-major 3x3 at +0x2c0, whose columns are his
+// right, up and forward in the world. A back flip or a side jump turns the whole actor over, not only the animation,
+// and goes upside down on the way: a quaternion carries that through, where angles about each axis flip over at 90
+// degrees.
+int game_player_quat(float q[4]) {
+    uint64_t actor = player_actor();
+    float m[9];
+    if (!actor || !read_guest(actor + 0x2c0, m, sizeof m)) return 0;
+    for (int i = 0; i < 9; i++)
+        if (!isfinite(m[i]) || fabsf(m[i]) > 2) return 0;
+    float tr = m[0] + m[4] + m[8], s;
+    if (tr > 0) {
+        s = sqrtf(tr + 1) * 2;
+        q[3] = 0.25f * s, q[0] = (m[7] - m[5]) / s, q[1] = (m[2] - m[6]) / s, q[2] = (m[3] - m[1]) / s;
+    } else if (m[0] > m[4] && m[0] > m[8]) {
+        s = sqrtf(1 + m[0] - m[4] - m[8]) * 2;
+        q[3] = (m[7] - m[5]) / s, q[0] = 0.25f * s, q[1] = (m[1] + m[3]) / s, q[2] = (m[2] + m[6]) / s;
+    } else if (m[4] > m[8]) {
+        s = sqrtf(1 + m[4] - m[0] - m[8]) * 2;
+        q[3] = (m[2] - m[6]) / s, q[0] = (m[1] + m[3]) / s, q[1] = 0.25f * s, q[2] = (m[5] + m[7]) / s;
+    } else {
+        s = sqrtf(1 + m[8] - m[0] - m[4]) * 2;
+        q[3] = (m[3] - m[1]) / s, q[0] = (m[2] + m[6]) / s, q[1] = (m[5] + m[7]) / s, q[2] = 0.25f * s;
+    }
+    float l = sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+    if (!(l > 0.5f && l < 1.5f)) return 0;
+    for (int i = 0; i < 4; i++) q[i] /= l;
+    return 1;
+}
+
+// What Link wears now (1.4.3, measured with anim_probe.c): the actor's [+0x168]+0x2e0 holds his model's parts, a
+// pointer each at +0x20 + 0x18 k, and each part's name at its +0x18 (Armor_1043_Lower, Armor_Default_Upper when the
+// slot is bare, Armor_999_Head with no headgear, Armor_Default_Extra_00 for the body's own pieces). out[0..2] get the
+// head, upper and lower pieces' names, "" for none or a default; 1 when the list was read.
+int game_player_armor(char out[3][48]) {
+    static const char *const kind[3] = {"_Head", "_Upper", "_Lower"};
+    uint64_t actor = RT_V143 ? player_actor() : 0, a = actor ? read_ptr(actor + 0x168) : 0, list = a ? read_ptr(a + 0x2e0) : 0;
+    for (int k = 0; k < 3; k++) out[k][0] = 0;
+    if (!list) return 0;
+    int parts = 0;
+    for (int i = 0; i < 16; i++) {
+        uint64_t part = read_ptr(list + 0x20 + 0x18 * (uint64_t)i), name = part ? read_ptr(part + 0x18) : 0;
+        char t[48];
+        if (!name || !read_guest(name, t, sizeof t)) break;
+        t[47] = 0;
+        if (strncmp(t, "Armor_", 6)) break;
+        parts++;
+        if (!strncmp(t, "Armor_Default", 13) || !strncmp(t, "Armor_999_", 10)) continue;   // bare
+        size_t len = strlen(t);
+        for (int k = 0; k < 3; k++) {
+            size_t kl = strlen(kind[k]);
+            if (len > kl && !strcmp(t + len - kl, kind[k])) memcpy(out[k], t, len + 1);
+        }
+    }
+    return parts > 0;
+}
+
+// The sounds Link starts (1.4.3, measured with anim_probe.c): his sound link handles sit in small blocks reached from
+// the actor's +0x608 ([+0x1b0]+0x30, [+0x1b0]+0x28, [[+0x1a8]+0xa0]+0x30 and +0x38), four a block at +0x20 + 0x110 k;
+// each holds a pointer to the asset call it plays, in the game's sound link file (SLink2), whose first field points at
+// the call's key name. Only the names of Link's voice are given (PV000_02, or PV103 when the game picks the variant
+// later): Player_Voice holds a clip of each. out gets up to max names; slot[] (16, kept by the caller) remembers
+// each slot's handle, so a name is given once per time it starts.
+int game_player_voices(char out[][16], int max, uint64_t slot[16]) {
+    uint64_t actor = RT_V143 ? player_actor() : 0, s = actor ? read_ptr(actor + 0x608) : 0;
+    if (!s) return 0;
+    uint64_t b1 = read_ptr(s + 0x1b0), b2 = read_ptr(s + 0x1a8), b2a = b2 ? read_ptr(b2 + 0xa0) : 0;
+    uint64_t blocks[4] = {b1 ? read_ptr(b1 + 0x30) : 0, b1 ? read_ptr(b1 + 0x28) : 0, b2a ? read_ptr(b2a + 0x30) : 0,
+                          b2a ? read_ptr(b2a + 0x38) : 0};
+    int n = 0;
+    for (int b = 0; b < 4; b++)
+        for (int k = 0; k < 4; k++) {
+            uint64_t call = blocks[b] ? read_ptr(blocks[b] + 0x20 + 0x110 * k) : 0, *seen = &slot[b * 4 + k];
+            if (call == *seen) continue;
+            *seen = call;
+            uint64_t key = call ? read_ptr(call) : 0;
+            char t[16];
+            if (!key || !read_guest(key, t, sizeof t)) continue;
+            t[15] = 0;
+            int len = (int)strnlen(t, 15), digits = 0;
+            for (int i = 2; i < len; i++) digits += t[i] >= '0' && t[i] <= '9';
+            bool voice = t[0] == 'P' && t[1] == 'V' && (len == 5 || (len == 8 && t[5] == '_')) && digits == len - 2 - (len == 8);
+            if (voice && n < max) memcpy(out[n++], t, 16);
+        }
+    return n;
+}
+
+// The animation Link plays, 1.4.3 only (measured with anim_probe.c): the actor's model unit [actor+0x238], its
+// [+0xc8], that one's animation player [+0x118]; the player's first slot, at +0x80, points at the header of the
+// skeletal animation it plays (a BFRES FSKA of Player_Animation, "FSKA" first) whose name pointer at +8 leads to the
+// string pool entry: a u16 length, then the name. That slot follows every action (Climb_Wall_Move_U, Sword_*, Fall,
+// Swim_*); the slots after it at a 0xb0 stride hold blended layers (the upper body's pose, the face, the voice). The
+// frame that slot plays is the float at the player's +0x58: the game starts some animations past their first frame
+// (a back flip at 5.3), plays them at its own rate (a run at 1.5 times) and leaves some before their last (the flip
+// at 19.5 of 30, when the landing takes over). *frame gets it, NAN when unread.
+int game_player_anim(char *out, size_t cap, float *frame) {
+    out[0] = 0;
+    *frame = NAN;
+    uint64_t actor = RT_V143 ? player_actor() : 0, m = actor ? read_ptr(actor + 0x238) : 0;
+    uint64_t c = m ? read_ptr(m + 0xc8) : 0, player = c ? read_ptr(c + 0x118) : 0, fska = player ? read_ptr(player + 0x80) : 0;
+    char magic[4], text[66];
+    uint64_t name = 0;
+    if (!fska || !read_guest(fska, magic, 4) || memcmp(magic, "FSKA", 4) || !(name = read_ptr(fska + 8))) return 0;
+    float f;
+    if (read_guest(player + 0x58, &f, 4) && isfinite(f) && f >= 0 && f < 100000) *frame = f;
+    if (!read_guest(name, text, 64)) return 0;
+    text[64] = text[65] = 0;
+    // the length first (the BFRES string pool); a pointer straight at the text is taken too
+    for (int skip = 2; skip >= 0; skip -= 2) {
+        const char *t = text + skip;
+        size_t len = 0;
+        while (len < 62 && (t[len] == '_' || (t[len] >= '0' && t[len] <= '9') || (t[len] >= 'A' && t[len] <= 'Z') ||
+                            (t[len] >= 'a' && t[len] <= 'z')))
+            len++;
+        if (len < 3 || t[len] || len >= cap || (skip && (uint8_t)text[0] + ((uint8_t)text[1] << 8) != len)) continue;
+        memcpy(out, t, len), out[len] = 0;
+        return 1;
+    }
+    return 0;
+}
 
 static void speed_report(uint64_t now, double step, int interval) {
     if (!win_t0) {

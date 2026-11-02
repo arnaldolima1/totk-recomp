@@ -164,6 +164,12 @@ class Room:
 async def handle(room, reader, writer):
     p = Player(writer)
     peer = writer.get_extra_info('peername')
+    sock = writer.get_extra_info('socket')
+    if sock is not None:   # each line out at once: positions and voice frames are small and come every 20-50 ms
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            pass
     if len(room.players) >= MAX_CONNECTIONS:
         writer.write(line('ERROR', 'full', 'A sala está cheia (no máximo 4 jogadores).'))
         writer.close()
@@ -220,11 +226,25 @@ async def handle(room, reader, writer):
                         pass
                 await room.progress_changed()
             elif kind == 'POS' and len(f) >= 4 and p.name:   # the player's position, to everyone else
+                # x, y, z in metres, then (newer games) the way they face in radians, their clock in ms and the name
+                # of the animation their Link plays; the newcomer gets only the place, since the clock means nothing
+                # to them yet
+                # then their whole rotation (a quaternion "x,y,z,w") and the voice clips their Link started (PV000_02,...)
                 try:
-                    p.pos = tuple(f'{float(v):.1f}' for v in f[1:4])
+                    p.pos = tuple(f'{float(v):.2f}' for v in f[1:4])
+                    anim = f[6][:63] if len(f) > 6 and f[6].replace('_', '').replace(':', '').replace('.', '').isalnum() \
+                        and f[6].isascii() else ''   # Name or Name:frame
+                    sfx = f[8][:70] if len(f) > 8 and f[8].replace('_', '').replace(',', '').isalnum() and f[8].isascii() else ''
+                    quat = ','.join(f'{float(v):.4f}' for v in f[7].split(',')) if len(f) > 7 and f[7].count(',') == 3 else ''
+                    extra = [f'{float(f[4]):.3f}' if len(f) > 4 and f[4] else '',
+                             str(int(f[5])) if len(f) > 5 and f[5] else '', anim,
+                             quat, sfx]
+                    while extra and not extra[-1]:   # an older game's line stays as short as it came
+                        extra.pop()
                 except ValueError:
                     continue
-                await room.broadcast(line('POS', p.name, *p.pos), skip=p)
+                await room.broadcast(line('POS', p.name, *p.pos, *extra) if any(extra) else
+                                     line('POS', p.name, *p.pos), skip=p)
             elif kind == 'LOOK' and len(f) >= 4 and p.name:   # the armor a player wears, to everyone else
                 p.look = tuple(v if v.startswith('Armor_') and v.replace('_', '').isalnum() else '' for v in
                                (clean(x)[:47] for x in f[1:4]))

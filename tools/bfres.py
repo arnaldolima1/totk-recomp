@@ -333,7 +333,7 @@ def curve_at(c, f):
 
 
 def read_skeletal_anims(data, wanted):
-    """{name: animation} for the skeletal animations named in wanted. An animation: frame count, euler or quaternion,
+    """{name: animation} for the skeletal animations named in wanted (every one for None). An animation: frame count, euler or quaternion,
     and per bone (by name) its base scale / rotation / translation and the curves animating them (by data offset:
     scale 0x04.., translation 0x10.., rotation 0x20..)."""
     r = Reader(data)
@@ -343,7 +343,7 @@ def read_skeletal_anims(data, wanted):
     r.skip(16 + 32)
     vals, dct = r.u64(), r.u64()
     names = r.dict_keys(dct)
-    return {name: _read_fska(r, data, vals, i) for i, name in enumerate(names) if name in wanted}
+    return {name: _read_fska(r, data, vals, i) for i, name in enumerate(names) if wanted is None or name in wanted}
 
 
 def _fska_at(r, data, off):
@@ -388,7 +388,8 @@ def _read_fska(r, data, vals, i):
         c = r.at(curve_off)
         curves = [_curve(c, data) for _ in range(n_curve)]
         bones[bname] = {'base': base, 'curves': curves}
-    return {'name': name, 'frames': frames, 'quat': ((flags >> 12) & 7) == 0, 'bones': bones}
+    return {'name': name, 'frames': frames, 'quat': ((flags >> 12) & 7) == 0, 'loop': bool(flags & 4),
+            'bones': bones}
 
 
 def main(argv):

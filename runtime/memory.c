@@ -273,6 +273,11 @@ static uint64_t image_bytes(void) {
 static int overlaps(uint64_t a, uint64_t n, uint64_t b, uint64_t m) { return a < b + m && b < a + n; }
 static int inside(uint64_t a, uint64_t n, RtRange r) { return a >= r.base && n <= r.size && a - r.base <= r.size - n; }
 
+void mem_heap_range(uint64_t *base, uint64_t *size) {
+    *base = L.heap.base;
+    *size = heap_size;
+}
+
 // ---- 0x01 SetHeapSize
 uint32_t mem_set_heap_size(uint64_t size, uint64_t *addr) {
     plat_mutex_lock(&lock);
