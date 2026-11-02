@@ -187,5 +187,6 @@ int64_t audio_mixer_pace_ns(AudioRenderer *r, uint64_t now);
 // The achievement chime (platinum: the longer one) at volume 0..1, mixed over the game's output; nothing without a
 // device. Any thread.
 void audio_chime(int platinum, float volume);
+uint64_t audio_voice_consumed(const AudioRenderer *r, ServerVoice *v, int frames);   // source samples over one frame; advances v->fraction
 int audio_buffer_empty(const AudrenWaveBuffer *b);   // no samples to decode: played as soon as it is reached
 void audio_device_handler(IpcSession *s, const IpcRequest *rq, IpcResponse *rs);   // IAudioDevice
