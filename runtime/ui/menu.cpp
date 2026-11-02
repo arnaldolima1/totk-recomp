@@ -1509,7 +1509,7 @@ static void mp_field(const char *key, int step, UiTextId label, UiTextId hint, c
     ImGui::PopID();
 }
 
-enum { MP_SUB_PLAYERS, MP_SUB_CHALLENGES, MP_SUB_ACH, MP_SUB_CHAT, MP_SUB_ROOM, MP_SUBS };
+enum { MP_SUB_PLAYERS, MP_SUB_CHALLENGES, MP_SUB_ACH, MP_SUB_CHAT, MP_SUB_LOG, MP_SUB_ROOM, MP_SUBS };
 static int g_mp_sub;
 static int64_t g_mp_chat_seen;   // the newest chat line's time when the chat page was last shown (the unread badge)
 static int g_mp_chat_frame = -10;   // the ImGui frame the chat page was last laid out in (the notices hide under it)
@@ -1755,7 +1755,7 @@ static void mp_banner(const MpView &v, float scale) {
 // The sub-page buttons; the chat's shows how many lines came since it was last open.
 static void mp_subtabs(float scale, int unread) {
     static const UiTextId names[MP_SUBS] = {UI_MENU_MP_SUB_PLAYERS, UI_MENU_MP_SUB_CHALLENGES, UI_MENU_MP_SUB_ACH,
-                                            UI_MENU_MP_SUB_CHAT, UI_MENU_MP_SUB_ROOM};
+                                            UI_MENU_MP_SUB_CHAT, UI_MENU_MP_SUB_LOG, UI_MENU_MP_SUB_ROOM};
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 14 * scale);
     for (int i = 0; i < MP_SUBS; i++) {
         if (i) ImGui::SameLine(0, 8 * scale);
@@ -2657,6 +2657,51 @@ static void mp_page_chat(const MpView &v, float h, float scale) {
     g_mp_chat_frame = ImGui::GetFrameCount();
 }
 
+// The room's log: its events (who joined and left, shrines, Korok seeds, deaths, the group's challenges; net_mp.c
+// EVENT lines) and friends' unlocks, oldest first, each with its time and a mark in its player's colour.
+static void mp_page_log(float h, float scale) {
+    ImGui::BeginChild("##mp_events", ImVec2(0, h));
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImFont *font = ImGui::GetFont();
+    float fs = ImGui::GetFontSize(), w = ImGui::GetContentRegionAvail().x, gap = 8 * scale;
+    static MpLine lines[200];
+    int n = mp_lines(lines, 200), shown = 0;
+    static int last_shown = -1;
+    float tw = font->CalcTextSizeA(fs, FLT_MAX, 0, "00:00").x;
+    for (int i = 0; i < n; i++) {
+        const MpLine &l = lines[i];
+        if (l.kind == MP_LINE_CHAT) continue;
+        char t[400], when[16] = "";
+        if (l.kind == MP_LINE_ACH) {
+            char who[160];
+            snprintf(who, sizeof who, menu_text(UI_MENU_MP_FRIEND_ACH), l.from);
+            snprintf(t, sizeof t, "%s: %s", who, l.text);
+        } else {
+            snprintf(t, sizeof t, "%s", l.text);
+        }
+        time_t at = (time_t)l.when;
+        struct tm tm;
+#ifdef _WIN32
+        if (localtime_s(&tm, &at) == 0) strftime(when, sizeof when, "%H:%M", &tm);
+#else
+        if (localtime_r(&at, &tm)) strftime(when, sizeof when, "%H:%M", &tm);
+#endif
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        float x = p.x + tw + gap, textw = w - (x - p.x) - gap * 2;
+        ImVec2 ts = font->CalcTextSizeA(fs, FLT_MAX, textw, t);
+        dl->AddText(font, fs, p, ui_col(kUiMuted), when);
+        ImVec4 col = l.from[0] ? mp_name_col(l.from) : kUiMuted;
+        dl->AddRectFilled(ImVec2(x, p.y + 2 * scale), ImVec2(x + 3 * scale, p.y + ts.y - 2 * scale), ui_col(col), 2 * scale);
+        dl->AddText(font, fs, ImVec2(x + gap, p.y), ui_col(l.kind == MP_LINE_ACH ? kUiZonai : kUiCream), t, nullptr, textw);
+        ImGui::Dummy(ImVec2(w, ts.y + 6 * scale));
+        shown++;
+    }
+    if (!shown) ImGui::TextColored(kUiMuted, "%s", menu_text(UI_MENU_MP_LOG_EMPTY));
+    if (shown != last_shown) ImGui::SetScrollHereY(1.0f);   // a new event: the bottom
+    last_shown = shown;
+    ImGui::EndChild();
+}
+
 static void tab_multiplayer(float scale) {
     MpView v;
     mp_view(&v);
@@ -2686,6 +2731,7 @@ static void tab_multiplayer(float scale) {
         break;
     }
     case MP_SUB_CHAT: mp_page_chat(v, h, scale); break;
+    case MP_SUB_LOG: mp_page_log(h, scale); break;
     default:
         ImGui::BeginChild("##mp_room", ImVec2(0, h), ImGuiChildFlags_NavFlattened);
         mp_connection(v, scale);

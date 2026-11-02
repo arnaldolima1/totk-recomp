@@ -72,7 +72,7 @@ space. Nothing is encrypted or authenticated beyond the room's password: rooms a
 | room | `VOICE` | player, the frame as received (to everyone but its sender) |
 | room | `POS` | player, x, y, z, yaw, t, anim, quat, sfx, body (to everyone else; the last place alone to a player who joins) |
 | room | `MARK` | player, x, y, z (to everyone, its player too; markers under 15 minutes old to a player who joins) |
-| room | `EVENT` | kind (`join`, `leave`, `challenge`), text |
+| room | `EVENT` | kind (`join`, `leave`, `challenge`, `shrines`, `lightroots`, `towers`, `koroks`, `hearts`, `death`, `warp`), text (Portuguese), player, step, total, unix time, and `old` on the last 60 events a player gets when they join |
 | room | `CHALLENGES` | count, then per track: figure, the room's total, tiers reached, four targets |
 | room | `CHALLENGE` | figure (or `done`), the room's total, target, text (the closest tier, for older games) |
 | room | `PONG` | |
@@ -150,6 +150,13 @@ its one-frame `Rolldown_*` reference the figure lies as the matching getting-up 
 
 What Link wears is read live too (`game_player_armor`: the model parts listed at `[actor+0x168]+0x2e0`) and sent in
 `LOOK` lines when it changes; another game version sends what its last save holds.
+
+The room keeps a log (`tools/mp_server.py` `Room.event`): who joined and left, the group's challenges, a player's
+figures going up between two `STATUS` lines (a shrine, a lightroot, a tower, Korok seeds, heart containers; the figures
+come from the evaluated save, so these follow the game's saves) and what their Link's animation in `POS` lines shows
+(`Nml_Die*` and `Swim_Die`: died; `WarpHeightIn`: fast travel). A newer game words the kinds it knows in the menu's
+language (`net_mp.c` `event_text`) and lists them, with friends' unlocks, on the Multiplayer tab's Log page
+(`ui/menu.cpp` `mp_page_log`); the past events a newcomer gets show there without notices.
 
 The ping over the friends' list is the round trip of a `PING` (every 2 s) to its `PONG`.
 

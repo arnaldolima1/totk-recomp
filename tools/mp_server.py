@@ -21,6 +21,7 @@ Standard library only.
 """
 import argparse
 import asyncio
+import collections
 import json
 import os
 import socket
@@ -43,6 +44,21 @@ TRACKS = [
     ('achievements', (10, 30, 60, 120), 'conquistas'),
 ]
 TIERS = ('Bronze', 'Prata', 'Ouro', 'Lendário')
+# The room's log (EVENT lines): what a player's figures say they did, in Portuguese for games that name only the text;
+# a newer game words each kind it knows in its own language from the player, the step and the total.
+PROGRESS = {
+    'shrines': ('{p} completou um santuário ({t}).', '{p} completou {n} santuários ({t}).'),
+    'lightroots': ('{p} ativou uma raiz de luz ({t}).', '{p} ativou {n} raízes de luz ({t}).'),
+    'towers': ('{p} ativou uma torre ({t}).', '{p} ativou {n} torres ({t}).'),
+    'koroks': ('{p} achou uma semente de Korok ({t}).', '{p} achou {n} sementes de Korok ({t}).'),
+    'hearts': ('{p} ganhou um recipiente de coração ({t}).', '{p} ganhou {n} recipientes de coração ({t}).'),
+}
+# what a player's Link does that their POS lines' animation shows: (prefixes, kind, text, seconds before it counts again)
+ANIM_EVENTS = [
+    (('Nml_Die', 'Swim_Die'), 'death', '{p} morreu.', 10),
+    (('WarpHeightIn',), 'warp', '{p} viajou para outro lugar.', 10),
+]
+LOG_KEEP = 60   # events a newcomer gets
 
 
 def clean(s, limit=500):
@@ -65,6 +81,9 @@ class Player:
         self.pos = None   # the last POS line's fields (x, y, z)
         self.look = None  # the last LOOK line's fields (head, upper, lower armor names)
         self.slot = -1    # 0..3 once named (Room.free_slot)
+        self.stats_known = False   # a STATUS came: later ones that raise a figure are events
+        self.anim = ''             # the animation of the last POS line, without its frame
+        self.anim_at = {}          # event kind: when its animation last counted
 
 
 class Room:
@@ -72,6 +91,7 @@ class Room:
         self.name, self.password = name, password
         self.players = []
         self.marks = {}   # player name: ((x, y, z), time), the newest marker of each
+        self.log = collections.deque(maxlen=LOG_KEEP)   # the last events, for a newcomer
         self.state_path = state_path
         self.state = {'tiers': {}, 'best': {}, 'slots': {}}
         if state_path and state_path.is_file():
@@ -97,6 +117,17 @@ class Room:
         for p in list(self.players):
             if p is not skip and p.name:
                 await self.send(p, data)
+
+    async def event(self, kind, text, player='', n='', total='', skip=None):
+        """An EVENT line to everyone (kind, the text, the player, the step, the total, unix time), kept for newcomers."""
+        fields = (kind, text, player, str(n), str(total), str(int(time.time())))
+        self.log.append(fields)
+        await self.broadcast(line('EVENT', *fields), skip=skip)
+
+    async def send_log(self, p):
+        """The kept events to a newcomer, marked as past (its game lists them without notices)."""
+        for fields in self.log:
+            await self.send(p, line('EVENT', *fields, 'old'))
 
     def roster(self):
         """ROSTER count (name place stats...)..., then SLOTS count (name slot)...: the games colour each player by slot."""
@@ -154,8 +185,7 @@ class Room:
             while tiers.get(stat, 0) < len(targets) and self.total(stat) >= targets[tiers.get(stat, 0)]:
                 k = tiers.get(stat, 0)
                 tiers[stat] = k + 1
-                await self.broadcast(line('EVENT', 'challenge',
-                                          f'Desafio do grupo concluído: {TIERS[k]} de {noun} ({targets[k]})!'))
+                await self.event('challenge', f'Desafio do grupo concluído: {TIERS[k]} de {noun} ({targets[k]})!')
         self.save()
         await self.broadcast(self.roster())
         await self.broadcast(self.challenges_line())
@@ -204,7 +234,8 @@ async def handle(room, reader, writer):
                 p.name, p.slot = name, slot
                 room.state['slots'][name.lower()] = slot
                 await room.send(p, line('WELCOME', str(PROTOCOL), room.name))
-                await room.broadcast(line('EVENT', 'join', f'{name} entrou na sala.'), skip=p)
+                await room.send_log(p)
+                await room.event('join', f'{name} entrou na sala.', name, skip=p)
                 for q in room.players:   # where everyone stands and their markers, for the newcomer
                     if q is not p and q.name and q.pos:
                         await room.send(p, line('POS', q.name, *q.pos))
@@ -220,11 +251,19 @@ async def handle(room, reader, writer):
                 break
             elif kind == 'STATUS' and len(f) >= 2 + len(STATS):
                 p.place = clean(f[1])[:60]
+                before = dict(p.stats)
                 for k, v in zip(STATS, f[2:2 + len(STATS)]):
                     try:
                         p.stats[k] = max(0, min(100000, int(float(v))))
                     except ValueError:
                         pass
+                if p.stats_known:   # the first STATUS is where they stand, not something they did
+                    for k, (one, many) in PROGRESS.items():
+                        n = p.stats[k] - before[k]
+                        if 0 < n <= 50:
+                            await room.event(k, (one if n == 1 else many).format(p=p.name, n=n, t=p.stats[k]), p.name,
+                                             n, p.stats[k])
+                p.stats_known = True
                 await room.progress_changed()
             elif kind == 'POS' and len(f) >= 4 and p.name:   # the player's position, to everyone else
                 # x, y, z in metres, then (newer games) the way they face in radians, their clock in ms and the name
@@ -247,6 +286,14 @@ async def handle(room, reader, writer):
                         extra.pop()
                 except ValueError:
                     continue
+                base = anim.split(':')[0]
+                if base != p.anim:   # an animation began: one the log tells (a death, a fast travel)
+                    for prefixes, ev, text, wait in ANIM_EVENTS:
+                        if base.startswith(prefixes) and not p.anim.startswith(prefixes) and \
+                                time.time() - p.anim_at.get(ev, 0) >= wait:
+                            p.anim_at[ev] = time.time()
+                            await room.event(ev, text.format(p=p.name), p.name)
+                    p.anim = base
                 await room.broadcast(line('POS', p.name, *p.pos, *extra, limit=1024) if any(extra) else
                                      line('POS', p.name, *p.pos), skip=p)
             elif kind == 'LOOK' and len(f) >= 4 and p.name:   # the armor a player wears, to everyone else
@@ -276,7 +323,7 @@ async def handle(room, reader, writer):
         writer.close()
         if p.name:
             print(f'{time.strftime("%H:%M:%S")} {p.name} saiu', flush=True)
-            await room.broadcast(line('EVENT', 'leave', f'{p.name} saiu da sala.'))
+            await room.event('leave', f'{p.name} saiu da sala.', p.name)
             await room.broadcast(room.roster())
 
 

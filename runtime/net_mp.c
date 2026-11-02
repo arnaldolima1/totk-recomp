@@ -34,7 +34,7 @@ typedef int Sock;
 #include "voice.h"
 
 #define PROTOCOL "1"
-enum { DEFAULT_PORT = 5577, LOG_LINES = 80, TOASTS = 16, OUTBOX = 16, RETRY_MS = 5000, PING_MS = 2000 };
+enum { DEFAULT_PORT = 5577, LOG_LINES = 200, TOASTS = 16, OUTBOX = 16, RETRY_MS = 5000, PING_MS = 2000 };
 
 static PlatMutex lock = PLAT_MUTEX_INIT;
 static MpView view;
@@ -101,10 +101,11 @@ static void room_name(char *dst, size_t cap, const char *name) {
 }
 
 // Under lock.
-static void add_line(int kind, const char *from, const char *text, const char *ach_id, const char *rarity, int toast) {
+static void add_line_at(int kind, const char *from, const char *text, const char *ach_id, const char *rarity, int toast,
+                        int64_t when) {
     MpLine *l = &log_lines[log_next];
     memset(l, 0, sizeof *l);
-    l->kind = kind, l->when = now_unix();
+    l->kind = kind, l->when = when;
     field(l->from, sizeof l->from, from);
     field(l->text, sizeof l->text, text);
     field(l->ach_id, sizeof l->ach_id, ach_id);
@@ -115,6 +116,35 @@ static void add_line(int kind, const char *from, const char *text, const char *a
     if (toast && next != toast_head) {
         toasts[toast_tail] = *l;
         toast_tail = next;
+    }
+}
+
+static void add_line(int kind, const char *from, const char *text, const char *ach_id, const char *rarity, int toast) {
+    add_line_at(kind, from, text, ach_id, rarity, toast, now_unix());
+}
+
+// An EVENT line's text in this game's language for the kinds it knows (tools/mp_server.py Room.event: kind, the room's
+// text, the player, the step, the total), else the room's own text.
+static void event_text(const char *kind, const char *who, int step, int total, const char *room_text, char *out, size_t cap) {
+    static const struct { const char *kind; UiTextId one, many; } kinds[] = {
+        {"shrines", UI_MENU_MP_EV_SHRINES_1, UI_MENU_MP_EV_SHRINES_N},
+        {"lightroots", UI_MENU_MP_EV_LIGHTROOTS_1, UI_MENU_MP_EV_LIGHTROOTS_N},
+        {"towers", UI_MENU_MP_EV_TOWERS_1, UI_MENU_MP_EV_TOWERS_N},
+        {"koroks", UI_MENU_MP_EV_KOROKS_1, UI_MENU_MP_EV_KOROKS_N},
+        {"hearts", UI_MENU_MP_EV_HEARTS_1, UI_MENU_MP_EV_HEARTS_N},
+        {"death", UI_MENU_MP_EV_DEATH, UI_MENU_MP_EV_DEATH},
+        {"warp", UI_MENU_MP_EV_WARP, UI_MENU_MP_EV_WARP},
+        {"join", UI_MENU_MP_EV_JOIN, UI_MENU_MP_EV_JOIN},
+        {"leave", UI_MENU_MP_EV_LEAVE, UI_MENU_MP_EV_LEAVE},
+    };
+    snprintf(out, cap, "%s", room_text);
+    if (!who[0]) return;
+    for (size_t i = 0; i < sizeof kinds / sizeof *kinds; i++) {
+        if (strcmp(kind, kinds[i].kind)) continue;
+        if (kinds[i].one == kinds[i].many) snprintf(out, cap, menu_text(kinds[i].one), who);
+        else if (step > 1) snprintf(out, cap, menu_text(kinds[i].many), who, step, total);
+        else snprintf(out, cap, menu_text(kinds[i].one), who, total);
+        return;
     }
 }
 
@@ -420,8 +450,15 @@ static void on_line(char *line, Sock s) {
     } else if (!strcmp(f[0], "ACH") && n >= 5) {   // ACH from id name rarity
         add_line(MP_LINE_ACH, f[1], f[3], f[2], f[4], 1);
         if (strcmp(f[1], me)) ach_mp_add("friend_unlocks", 1);
-    } else if (!strcmp(f[0], "EVENT") && n >= 3) {
-        add_line(MP_LINE_EVENT, "", f[2], "", "", 1);
+    } else if (!strcmp(f[0], "EVENT") && n >= 3) {   // EVENT kind text [player step total when [old]]
+        char text[320];
+        const char *who = n >= 4 ? f[3] : "";
+        event_text(f[1], who, n >= 5 ? atoi(f[4]) : 0, n >= 6 ? atoi(f[5]) : 0, f[2], text, sizeof text);
+        int64_t when = n >= 7 && f[6][0] ? strtoll(f[6], NULL, 10) : now_unix();
+        int old = n >= 8 && !strcmp(f[7], "old"), again = 0;
+        for (int i = 0; old && i < log_count; i++)   // the room's past events again (after a reconnection): once
+            again |= log_lines[i].kind == MP_LINE_EVENT && log_lines[i].when == when && !strcmp(log_lines[i].text, text);
+        if (!again) add_line_at(MP_LINE_EVENT, who, text, "", "", !old, when);
     } else if (!strcmp(f[0], "CHALLENGE") && n >= 5) {
         view.challenges_done = !strcmp(f[1], "done");
         view.challenge_total = atoi(f[2]), view.challenge_target = atoi(f[3]);
