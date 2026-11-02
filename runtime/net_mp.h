@@ -91,6 +91,7 @@ int mp_quest_count(void);
 const char *mp_quest_title(int i);
 const char *mp_quest_category(int i);
 int mp_quest_steps(int i);
+const char *mp_quest_step_text(int i, int k);   // the adventure log's text at step number k (as mp_quest_step), "" none
 // Where the player of that name stands in quest i (QUESTS lines, and this game's own): its step number (2 the first
 // after Ready, steps + 2 Complete), 0 not under way.
 int mp_quest_step(const char *name, int i);

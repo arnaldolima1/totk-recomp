@@ -180,6 +180,7 @@ typedef struct {
     int nsteps;                       // steps[0] NotReady, then the quest's, then Complete
     char *step[QUEST_STEPS];
     uint32_t step_hash[QUEST_STEPS];
+    char *text[QUEST_STEPS][3];       // the adventure log's text at each step (quest-steps.tsv), NULL none
 } Quest;
 static Quest *quests;
 static int quest_count = -1;
@@ -227,8 +228,30 @@ static void load_quests(void) {
         for (int k = 0; k < q->nsteps; k++) q->step_hash[k] = game_flag_hash(q->step[k]);
         loaded++;
     }
+    // the adventure log's texts (quest-steps.tsv: quest, step, English, Portuguese, Russian)
+    snprintf(path, sizeof path, "%s/quest-steps.tsv", rt_config()->profile);
+    uint64_t tn = 0;
+    char *t = (char *)plat_file_read(path, &tn);   // kept as the quests' file is
+    int texts = 0;
+    for (char *line = t, *end; t && line < t + tn; line = end + 1) {
+        if (!(end = memchr(line, '\n', (size_t)(t + tn - line)))) break;
+        *end = 0;
+        char *f[5] = {line};
+        for (int k = 1; k < 5 && f[k - 1]; k++)
+            if ((f[k] = strchr(f[k - 1], '\t'))) *f[k]++ = 0;
+        if (!f[2]) continue;
+        for (int i = 0; i < loaded; i++) {
+            if (strcmp(quests[i].id, f[0])) continue;
+            for (int k = 0; k < quests[i].nsteps; k++)
+                if (!strcmp(quests[i].step[k], f[1])) {
+                    for (int l = 0; l < 3; l++) quests[i].text[k][l] = f[2 + l] && f[2 + l][0] ? f[2 + l] : NULL;
+                    texts++;
+                }
+            break;
+        }
+    }
     quest_count = loaded;
-    rt_log("mp: %d quests from %s", quest_count, path);
+    rt_log("mp: %d quests and %d step texts from %s", quest_count, texts, rt_config()->profile);
     plat_mutex_unlock(&quest_load_lock);
 }
 
@@ -274,6 +297,13 @@ const char *mp_quest_title(int i) {
     const char *lang = menu_lang();
     int col = !strncmp(lang, "pt", 2) ? 1 : !strncmp(lang, "ru", 2) ? 2 : 0;
     return quests[i].title[col][0] ? quests[i].title[col] : quests[i].title[0][0] ? quests[i].title[0] : quests[i].id;
+}
+
+const char *mp_quest_step_text(int i, int k) {
+    if (i < 0 || i >= mp_quest_count() || k < 0 || k >= quests[i].nsteps) return "";
+    const char *lang = menu_lang();
+    int col = !strncmp(lang, "pt", 2) ? 1 : !strncmp(lang, "ru", 2) ? 2 : 0;
+    return quests[i].text[k][col] ? quests[i].text[k][col] : quests[i].text[k][0] ? quests[i].text[k][0] : "";
 }
 
 const char *mp_quest_category(int i) { return i >= 0 && i < mp_quest_count() ? quests[i].category : ""; }

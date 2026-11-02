@@ -7,8 +7,9 @@ English, Brazilian Portuguese and Russian.
 Output: UTF-8 lines "actor<TAB>English<TAB>Portuguese<TAB>Russian", sorted by actor; an empty field where a language has
 no name. With --quests also the game's quests (RSDB/Challenge, the quest table): lines "quest<TAB>category<TAB>steps
 <TAB>English<TAB>Portuguese<TAB>Russian", the steps comma-separated in order; a quest's progress is the Enum flag
-Step_<quest>, whose values are NotReady, those steps and Complete (runtime/net_mp.c quest watch). The installer keeps
-them as profile/item-names.tsv and profile/quests.tsv (installer/steps.py, prepare).
+Step_<quest>, whose values are NotReady, those steps and Complete (runtime/net_mp.c quest watch). Next to it,
+quest-steps.tsv: "quest<TAB>step<TAB>English<TAB>Portuguese<TAB>Russian", the adventure log's text at each step (and
+at Complete). The installer keeps them in profile/ (installer/steps.py, prepare).
 """
 import re
 import struct
@@ -83,17 +84,16 @@ def names(romfs, dicts, language):
     return out
 
 
-def quest_names(romfs, dicts, language):
-    """{quest: title} from one language's quest texts (ChallengeMsg/Info_<quest>.msbt, label Name)."""
+def quest_texts(romfs, dicts, language):
+    """{quest: {label: text}} of one language's quest texts (ChallengeMsg/Info_<quest>.msbt): the title (Name), and the
+    adventure log's text of each step (labelled by the step's name) and of the quest done (Complete)."""
     path = next((p for p in romfs.idx if re.fullmatch(rf'Mals/{language}\.Product\.\d+\.sarc\.zs', p)), None)
     if path is None:
         return {}
     out = {}
     for member, data in sarc_members(unzstd_file(romfs, dicts, path)).items():
         if member.startswith('ChallengeMsg/Info_') and member.endswith('.msbt'):
-            name = msbt_texts(data).get('Name')
-            if name:
-                out[member[len('ChallengeMsg/Info_'):-len('.msbt')]] = name
+            out[member[len('ChallengeMsg/Info_'):-len('.msbt')]] = msbt_texts(data)
     return out
 
 
@@ -130,12 +130,19 @@ def main(argv):
             f.write('\t'.join([a] + [clean(n.get(a, '')) for n in by_lang]) + '\n')
     print(f'{len(actors)} item names ({", ".join(f"{l} {len(n)}" for l, n in zip(LANGUAGES, by_lang))}) -> {argv[2]}')
     if quests_out:
-        titles = [quest_names(romfs, dicts, lang) for lang in LANGUAGES]
+        texts = [quest_texts(romfs, dicts, lang) for lang in LANGUAGES]
         rows = quests(romfs, dicts)
-        with open(quests_out, 'w', encoding='utf-8', newline='\n') as f:
+        steps_out = Path(quests_out).with_name('quest-steps.tsv')
+        with open(quests_out, 'w', encoding='utf-8', newline='\n') as f, \
+                open(steps_out, 'w', encoding='utf-8', newline='\n') as g:
             for quest, category, steps in rows:
-                f.write('\t'.join([quest, category, ','.join(steps)] + [clean(t.get(quest, '')) for t in titles]) + '\n')
-        print(f'{len(rows)} quests -> {quests_out}')
+                f.write('\t'.join([quest, category, ','.join(steps)] +
+                                  [clean(t.get(quest, {}).get('Name', '')) for t in texts]) + '\n')
+                for step in steps + ['Complete']:
+                    line = [clean(t.get(quest, {}).get(step, '')) for t in texts]
+                    if any(line):
+                        g.write('\t'.join([quest, step] + line) + '\n')
+        print(f'{len(rows)} quests -> {quests_out}, their steps\' texts -> {steps_out}')
 
 
 if __name__ == '__main__':

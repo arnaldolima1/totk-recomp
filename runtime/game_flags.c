@@ -135,6 +135,37 @@ static uint32_t number_of(const Table *t, uint32_t hash) {
 
 uint32_t game_flag_hash(const char *name) { return mmh3(name); }
 
+// The value byte written straight into guest memory (the game's pages are the host's, as the reads use them); the
+// watcher's copy too, so the write is no change of the game's own. Only the value: the byte after it, which matches the
+// save as well, is left to the game.
+int game_flag_set(uint32_t hash, int value) {
+    plat_mutex_lock(&lock);
+    uint32_t k;
+    uint8_t was = 0;
+    int ok = F.ok && (k = number_of(&F.b, hash)) != 0;
+    uint64_t at = ok ? F.b.entries + (uint64_t)ENTRY_BYTES * k + VALUE_AT : 0;
+    if (ok && (ok = plat_mem_readable(at, 1) && rd(at, &was, 1))) {
+        *(volatile uint8_t *)(uintptr_t)at = (uint8_t)(value != 0);
+        F.b.was[k] = (uint8_t)(value != 0);
+    }
+    plat_mutex_unlock(&lock);
+    if (ok) rt_log("flags: %08x set to %d (was %d)", hash, value != 0, was);
+    return ok;
+}
+
+// TOTK_FLAG_SET=<hash>=<0|1>[,...] (a test switch): those bool flags written once the table is found after a save loads.
+static void test_sets(void) {
+    const char *e = cfg_get("TOTK_FLAG_SET");
+    for (const char *p = e; p && *p;) {
+        char *end;
+        unsigned long h = strtoul(p, &end, 16);
+        if (*end != '=') break;
+        int v = (int)strtol(end + 1, &end, 10);
+        if (!game_flag_set((uint32_t)h, v)) rt_log("flags: %08lx is no bool flag of this game", h);
+        p = *end == ',' ? end + 1 : NULL;
+    }
+}
+
 int game_enum_get(uint32_t hash, uint32_t *value) {
     plat_mutex_lock(&lock);
     uint32_t k;
@@ -238,9 +269,10 @@ static void watch(void *arg) {
     static uint64_t cap;
     for (;; plat_sleep_ms(POLL_MS)) {
         plat_mutex_lock(&lock);
-        int ok = ready(g_log != NULL);
+        int was_ok = F.ok, ok = ready(g_log != NULL);
         plat_mutex_unlock(&lock);
         if (!ok) continue;
+        if (!was_ok) test_sets();
         int n = 0;
         for (uint32_t k = 1; k < F.b.count; k++) {
             uint8_t b;

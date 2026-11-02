@@ -179,7 +179,9 @@ in `ChallengeMsg/Info_<quest>.msbt`), which the installer turns into `profile/qu
 +28: the hash of the step's name): NotReady, Ready (offered, not taken), its steps, Complete. Once a second the game
 reads them all; a quest leaving NotReady or Ready is begun, a step further moved on, Complete done (`ACT quest`, the
 Log), and its whole list goes in `QUESTS` lines for the Quests page, where each player has a column (`ui/menu.cpp`
-`mp_page_quests`).
+`mp_page_quests`): the quests in three sections (the main story, side quests, the rest), each with a bar per player
+in their colour and the adventure log's text at this game's step, or at the furthest friend's (`profile/quest-steps.tsv`,
+the text the game's log shows at each step).
 
 The ping over the friends' list is the round trip of a `PING` (every 2 s) to its `PONG`.
 

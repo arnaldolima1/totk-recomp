@@ -2703,11 +2703,54 @@ static void mp_page_log(float h, float scale) {
     ImGui::EndChild();
 }
 
-// Where each player stands in the quests (net_mp.c QUESTS lines and this game's own): the quests anyone has under way
-// or done, the main story's first, a column for each player with their step, done, or a dash.
+// Where each player stands in the quests (net_mp.c QUESTS lines and this game's own): a legend of the players with how
+// many quests each has done, then the quests anyone has under way or done in three sections (the main story, side
+// quests, the rest), each a card with its title, a bar per player in their colour (a segment a step, full when done)
+// and the adventure log's text at this game's step, or at the furthest friend's when this game has not begun it.
+static void mp_quest_bar(ImDrawList *dl, ImVec2 p, float w, float h, int k, int steps, ImVec4 col, float scale) {
+    int done = k >= steps + 2 ? steps : k ? k - 2 : 0;   // steps behind them: at step number k - 1, k - 2 are done
+    float r = h * 0.5f;
+    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ui_col(kUiCream, 0.08f), r);
+    if (steps <= 0) return;
+    if (k >= steps + 2) {
+        dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ui_col(col, 0.85f), r);
+        return;
+    }
+    if (steps <= 16) {   // a segment a step: the ones behind them full, the one they are on half
+        float gap = 2 * scale, sw = (w - gap * (float)(steps - 1)) / (float)steps;
+        for (int i = 0; i < steps; i++) {
+            float x = p.x + (sw + gap) * (float)i;
+            float a = i < done ? 0.85f : i == done && k ? 0.35f : 0.0f;
+            if (a > 0) dl->AddRectFilled(ImVec2(x, p.y), ImVec2(x + sw, p.y + h), ui_col(col, a), r);
+        }
+    } else {
+        dl->AddRectFilled(p, ImVec2(p.x + w * (float)done / (float)steps, p.y + h), ui_col(col, 0.85f), r);
+    }
+}
+
 static void mp_page_quests(const MpView &v, float h, float scale) {
     ImGui::BeginChild("##mp_quests", ImVec2(0, h));
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImFont *font = ImGui::GetFont();
+    float fs = ImGui::GetFontSize(), small = fs * 0.82f, w = ImGui::GetContentRegionAvail().x, pad = 12 * scale;
     int n = mp_quest_count();
+    // the legend: each player with the quests they have done
+    for (int p = 0; p < v.nplayers; p++) {
+        int done = 0;
+        for (int i = 0; i < n; i++) done += mp_quest_step(v.players[p].name, i) >= mp_quest_steps(i) + 2;
+        char t[96];
+        snprintf(t, sizeof t, menu_text(UI_MENU_MP_QUESTS_DONE_COUNT), done);
+        if (p) ImGui::SameLine(0, 18 * scale);
+        ImVec2 c = ImGui::GetCursorScreenPos();
+        dl->AddCircleFilled(ImVec2(c.x + fs * 0.35f, c.y + fs * 0.55f), fs * 0.3f, ui_col(mp_name_col(v.players[p].name)));
+        ImGui::Dummy(ImVec2(fs * 0.8f, fs));
+        ImGui::SameLine(0, 4 * scale);
+        ImGui::TextColored(mp_name_col(v.players[p].name), "%s", v.players[p].name);
+        ImGui::SameLine(0, 6 * scale);
+        ImGui::TextColored(kUiMuted, "%s", t);
+    }
+    ImGui::Dummy(ImVec2(1, 6 * scale));
+    // the quests anyone has under way or done, by section
     static std::vector<int> rows;
     rows.clear();
     for (int i = 0; i < n; i++)
@@ -2716,50 +2759,78 @@ static void mp_page_quests(const MpView &v, float h, float scale) {
                 rows.push_back(i);
                 break;
             }
-    std::stable_sort(rows.begin(), rows.end(), [](int a, int b) {
-        bool ma = !strcmp(mp_quest_category(a), "Main"), mb = !strcmp(mp_quest_category(b), "Main");
-        return ma != mb ? ma : strcmp(mp_quest_title(a), mp_quest_title(b)) < 0;
+    if (rows.empty()) ImGui::TextColored(kUiMuted, "%s", menu_text(UI_MENU_MP_QUESTS_EMPTY));
+    auto section = [](int i) { const char *c = mp_quest_category(i); return !strcmp(c, "Main") ? 0 : !strcmp(c, "Sub") ? 1 : 2; };
+    std::stable_sort(rows.begin(), rows.end(), [&](int a, int b) {
+        return section(a) != section(b) ? section(a) < section(b) : strcmp(mp_quest_title(a), mp_quest_title(b)) < 0;
     });
-    if (rows.empty()) {
-        ImGui::TextColored(kUiMuted, "%s", menu_text(UI_MENU_MP_QUESTS_EMPTY));
-        ImGui::EndChild();
-        return;
-    }
-    int cols = 1 + v.nplayers;
-    if (ImGui::BeginTable("##quests", cols, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("##title", ImGuiTableColumnFlags_WidthStretch, 3.0f);
-        for (int p = 0; p < v.nplayers; p++) ImGui::TableSetupColumn(v.players[p].name, ImGuiTableColumnFlags_WidthStretch, 1.0f);
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        for (int p = 0; p < v.nplayers; p++) {
-            ImGui::TableSetColumnIndex(1 + p);
-            ImGui::TextColored(mp_name_col(v.players[p].name), "%s", v.players[p].name);
+    static const UiTextId heads[3] = {UI_MENU_MP_QUESTS_SEC_MAIN, UI_MENU_MP_QUESTS_SEC_SUB, UI_MENU_MP_QUESTS_SEC_OTHER};
+    int shown_section = -1;
+    float name_w = 0, label_w = font->CalcTextSizeA(small, FLT_MAX, 0, menu_text(UI_MENU_MP_QUEST_CELL_DONE)).x;
+    for (int p = 0; p < v.nplayers; p++) name_w = fmaxf(name_w, font->CalcTextSizeA(small, FLT_MAX, 0, v.players[p].name).x);
+    char widest[48];   // the bars all end where the widest label begins
+    snprintf(widest, sizeof widest, menu_text(UI_MENU_MP_QUEST_CELL_STEP), 88, 88);
+    label_w = fmaxf(label_w, font->CalcTextSizeA(small, FLT_MAX, 0, widest).x);
+    for (size_t r = 0; r < rows.size(); r++) {
+        int i = rows[r], sec = section(i);
+        if (sec != shown_section) {   // a section's head with how many quests it shows
+            int count = 0;
+            for (int j : rows) count += section(j) == sec;
+            shown_section = sec;
+            ImGui::Dummy(ImVec2(1, 4 * scale));
+            ImGui::TextColored(kUiGoldHi, "%s", menu_text(heads[sec]));
+            ImGui::SameLine(0, 8 * scale);
+            ImGui::TextColored(kUiMuted, "%d", count);
         }
-        for (int i : rows) {
-            ImGui::TableNextRow();
-            ImGui::TableSetColumnIndex(0);
-            bool main_quest = !strcmp(mp_quest_category(i), "Main");
-            if (main_quest) {
-                ImGui::TextColored(kUiGoldHi, "%s", mp_quest_title(i));
-                ImGui::SameLine();
-                ImGui::TextColored(kUiMuted, "· %s", menu_text(UI_MENU_MP_QUEST_MAIN));
-            } else {
-                ImGui::TextUnformatted(mp_quest_title(i));
-            }
-            int steps = mp_quest_steps(i);
-            for (int p = 0; p < v.nplayers; p++) {
-                ImGui::TableSetColumnIndex(1 + p);
-                int k = mp_quest_step(v.players[p].name, i);
-                if (!k) ImGui::TextColored(kUiMuted, "—");
-                else if (k >= steps + 2) ImGui::TextColored(kUiZonai, "%s", menu_text(UI_MENU_MP_QUEST_CELL_DONE));
-                else {
-                    char cell[48];
-                    snprintf(cell, sizeof cell, menu_text(UI_MENU_MP_QUEST_CELL_STEP), k - 1, steps);
-                    ImGui::TextUnformatted(cell);
-                }
-            }
+        // the card: drawn behind its content once the content's height is known
+        ImGui::PushID(i);
+        dl->ChannelsSplit(2);
+        dl->ChannelsSetCurrent(1);
+        ImVec2 top = ImGui::GetCursorScreenPos();
+        ImGui::SetCursorScreenPos(ImVec2(top.x, top.y + pad * 0.8f));
+        ImGui::Indent(pad);
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + w - pad * 2);
+        ImGui::TextColored(sec == 0 ? kUiGoldHi : kUiCream, "%s", mp_quest_title(i));
+        ImGui::Dummy(ImVec2(1, 2 * scale));
+        int steps = mp_quest_steps(i), mine = mp_quest_step(v.me, i), text_k = mine, text_p = -1;
+        for (int p = 0; p < v.nplayers; p++) {   // a bar per player
+            int k = mp_quest_step(v.players[p].name, i);
+            if (!mine && k > text_k) text_k = k, text_p = p;
+            ImVec2 c = ImGui::GetCursorScreenPos();
+            ImVec4 col = mp_name_col(v.players[p].name);
+            dl->AddText(font, small, c, ui_col(col), v.players[p].name);
+            char label[48];
+            if (!k) snprintf(label, sizeof label, "—");
+            else if (k >= steps + 2) snprintf(label, sizeof label, "%s", menu_text(UI_MENU_MP_QUEST_CELL_DONE));
+            else snprintf(label, sizeof label, menu_text(UI_MENU_MP_QUEST_CELL_STEP), k - 1, steps);
+            float lw = font->CalcTextSizeA(small, FLT_MAX, 0, label).x, bx = c.x + name_w + 10 * scale;
+            float bw = w - pad * 2 - name_w - 10 * scale - label_w - 12 * scale;
+            mp_quest_bar(dl, ImVec2(bx, c.y + small * 0.42f), fmaxf(bw, 20 * scale), small * 0.32f, k, steps, col, scale);
+            dl->AddText(font, small, ImVec2(c.x + w - pad * 2 - lw, c.y),
+                        ui_col(k >= steps + 2 ? kUiZonai : k ? kUiCream : kUiMuted), label);
+            ImGui::Dummy(ImVec2(w - pad * 2, small * 1.25f));
         }
-        ImGui::EndTable();
+        const char *text = text_k ? mp_quest_step_text(i, text_k) : "";
+        if (text[0]) {   // the adventure log's text at this game's step, or the furthest friend's
+            ImGui::Dummy(ImVec2(1, 2 * scale));
+            ImGui::PushStyleColor(ImGuiCol_Text, kUiMuted);
+            ImGui::SetWindowFontScale(0.85f);
+            if (text_p >= 0) ImGui::TextWrapped("%s: %s", v.players[text_p].name, text);
+            else ImGui::TextWrapped("%s", text);
+            ImGui::SetWindowFontScale(1.0f);
+            ImGui::PopStyleColor();
+        }
+        ImGui::PopTextWrapPos();
+        ImGui::Unindent(pad);
+        ImVec2 bottom = ImGui::GetCursorScreenPos();
+        dl->ChannelsSetCurrent(0);
+        ImVec2 br(top.x + w, bottom.y + pad * 0.6f);   // a faint card, a thin bar of colour down its left
+        dl->AddRectFilled(top, br, ui_col(kUiCream, 0.035f), 8 * scale);
+        dl->AddRectFilled(top, ImVec2(top.x + 3 * scale, br.y), ui_col(sec == 0 ? kUiGold : kUiMuted, sec == 0 ? 0.9f : 0.5f), 2 * scale);
+        dl->ChannelsMerge();
+        ImGui::SetCursorScreenPos(ImVec2(top.x, bottom.y + pad * 0.6f + 6 * scale));
+        ImGui::Dummy(ImVec2(w, 1));
+        ImGui::PopID();
     }
     ImGui::EndChild();
 }
