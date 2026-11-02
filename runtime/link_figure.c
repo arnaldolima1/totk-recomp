@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <zstd.h>
 
 #include "host.h"
 #include "link_figure.h"
@@ -17,6 +18,39 @@ static LinkFigure fig;
 static int tried;
 
 enum { KEY_BYTES = 10 };   // u16 frame x 32, 4 halves
+
+// Unit face normals (bind pose) for the shading, and which way the triangles wind: their normals should point out of
+// the body, away from its vertical axis.
+static void face_normals(LinkFigure *f, uint32_t nv, uint32_t nt) {
+    for (uint32_t t = 0; t < nt; t++) {
+        const float *a = f->verts + 3 * f->tris[3 * t], *b = f->verts + 3 * f->tris[3 * t + 1],
+                    *c = f->verts + 3 * f->tris[3 * t + 2];
+        float u[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]}, v[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+        float nx = u[1] * v[2] - u[2] * v[1], ny = u[2] * v[0] - u[0] * v[2], nz = u[0] * v[1] - u[1] * v[0];
+        float l = sqrtf(nx * nx + ny * ny + nz * nz);
+        if (l < 1e-12f) l = 1;
+        f->normals[3 * t] = nx / l, f->normals[3 * t + 1] = ny / l, f->normals[3 * t + 2] = nz / l;
+    }
+    double cx = 0, cz = 0, out_sum = 0;
+    for (uint32_t v = 0; v < nv; v++) cx += f->verts[3 * v], cz += f->verts[3 * v + 2];
+    cx /= nv ? nv : 1, cz /= nv ? nv : 1;
+    for (uint32_t t = 0; t < nt; t++) {
+        const float *a = f->verts + 3 * f->tris[3 * t];
+        out_sum += f->normals[3 * t] * (a[0] - cx) + f->normals[3 * t + 2] * (a[2] - cz);
+    }
+    f->winding = out_sum >= 0 ? 1 : -1;
+}
+
+// A picture the game lays over Link's skin by its alpha (the Zonai arm's, tools/link_figure.py OVER_SKIN): laid over
+// the skin's tone here (the median of Link_RaulSkin_Alb), opaque.
+static void over_skin(uint8_t *px, uint32_t w, uint32_t h) {
+    static const uint8_t skin[3] = {153, 116, 87};
+    for (uint64_t i = 0; i < 4ull * w * h; i += 4) {
+        unsigned a = px[i + 3];
+        for (int c = 0; c < 3; c++) px[i + c] = (uint8_t)((px[i + c] * a + skin[c] * (255 - a) + 127) / 255);
+        px[i + 3] = 255;
+    }
+}
 
 static uint32_t rd32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
 
@@ -41,7 +75,8 @@ static int parse(const uint8_t *d, uint64_t n) {
     for (uint32_t k = 0; k < nastc; k++) {   // ASTC pictures, decoded into their place in the atlas
         if (at + 28 > n) return 0;
         uint32_t x = rd32(d + at), y = rd32(d + at + 4), w = rd32(d + at + 8), h = rd32(d + at + 12);
-        uint32_t bw = rd32(d + at + 16), bh = rd32(d + at + 20), bytes = rd32(d + at + 24);
+        uint32_t bw = rd32(d + at + 16), bh = rd32(d + at + 20), bytes = rd32(d + at + 24), over = bw >> 8 & 1;
+        bw &= 0xff;
         at += 28;
         if (at + bytes > n || !w || !h || x + w > side || y + h > side || bw < 4 || bh < 4 || bw > 12 || bh > 12 ||
             (uint64_t)((w + bw - 1) / bw) * ((h + bh - 1) / bh) * 16 > bytes)
@@ -49,6 +84,7 @@ static int parse(const uint8_t *d, uint64_t n) {
         uint8_t *px = malloc(4ull * w * h);
         if (!px) return 0;
         astc_decode_ldr(d + at, w, h, bw, bh, false, px);
+        if (over) over_skin(px, w, h);
         for (uint32_t r = 0; r < h; r++) memcpy(fig.atlas + 4ull * ((y + r) * side + x), px + 4ull * r * w, 4ull * w);
         free(px);
         at += bytes;
@@ -128,24 +164,7 @@ static int parse(const uint8_t *d, uint64_t n) {
             fig.nanims++;
         }
     }
-    for (uint32_t t = 0; t < nt; t++) {   // unit face normals, for the shading
-        const float *a = fig.verts + 3 * fig.tris[3 * t], *b = fig.verts + 3 * fig.tris[3 * t + 1],
-                    *c = fig.verts + 3 * fig.tris[3 * t + 2];
-        float u[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]}, v[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
-        float nx = u[1] * v[2] - u[2] * v[1], ny = u[2] * v[0] - u[0] * v[2], nz = u[0] * v[1] - u[1] * v[0];
-        float l = sqrtf(nx * nx + ny * ny + nz * nz);
-        if (l < 1e-12f) l = 1;
-        fig.normals[3 * t] = nx / l, fig.normals[3 * t + 1] = ny / l, fig.normals[3 * t + 2] = nz / l;
-    }
-    // which way the triangles wind: their normals should point out of the body (away from its vertical axis)
-    double cx = 0, cz = 0, out_sum = 0;
-    for (uint32_t v = 0; v < nv; v++) cx += fig.verts[3 * v], cz += fig.verts[3 * v + 2];
-    cx /= nv, cz /= nv;
-    for (uint32_t t = 0; t < nt; t++) {
-        const float *a = fig.verts + 3 * fig.tris[3 * t];
-        out_sum += fig.normals[3 * t] * (a[0] - cx) + fig.normals[3 * t + 2] * (a[2] - cz);
-    }
-    fig.winding = out_sum >= 0 ? 1 : -1;
+    face_normals(&fig, nv, nt);
     // the atlas as stored (the G-buffer figure, vk_figure.c, is lit by the game); the overlay's copy is lifted, as the
     // albedo is darker than the lit picture the game shows and the overlay can only darken it
     if (!(fig.albedo = malloc(4ull * side * side))) return 0;
@@ -379,6 +398,277 @@ static void skin_verts(const LinkFigure *f, const float *m0, const float *m1, fl
         }
         out[3 * v] = acc[0], out[3 * v + 1] = acc[1], out[3 * v + 2] = acc[2];
     }
+}
+
+// ---- the armor library (<profile>/link-armor.bin, tools/link_figure.py --armor): Link's own model and every armor
+// model, each skinned to the figure's skeleton with an atlas of its own, which model each worn piece shows, and the
+// game's rule for what shows: Link's model and each piece name groups of materials (G_Upper the chest's skin, G_Belt_A
+// a belt), each piece names groups of its own model's materials (G_Skin its legs' skin, G_Skirt), and each piece worn
+// hides some groups by name (ArmorParam): Link's model's by his groups, its own model's by its groups. A friend's figure
+// is dressed from it (link_figure_dressed): Link's model, then the head, upper and lower pieces they wear, or the bare
+// ones where they wear none (a head piece carries its own hair; Armor_999_Head is the bare head's), less what the
+// pieces worn hide.
+enum { LIB_MODEL_HEAD = 68, DRESS_W = 2048, DRESS_H = 1024, DRESS_CACHE = 8, DRESS_PARTS = 4 };
+typedef struct {
+    char name[48];
+    uint32_t nverts, ntris, side, nastc, zsize, nmats;
+    const uint8_t *mats;   // its material names (u8 length, bytes)
+    const uint8_t *verts, *skin, *tris, *cls, *mtri, *uvs, *zatlas, *astc;   // in the file; mtri: u16 material a triangle
+    uint8_t *atlas;        // side x side RGBA8, decoded at its first use
+} ArmorModel;
+typedef struct {
+    char name[48];
+    int model;
+    const uint8_t *hides, *groups;   // the groups it hides (u8 count, names); its own model's groups
+} ArmorPiece;
+static struct {
+    int tried, nmodels, npieces;
+    uint8_t *file;
+    const uint8_t *body;   // Link's own material groups
+    ArmorPiece *pieces;
+    ArmorModel *models;
+} lib;
+
+// The length of a string (u8 length, bytes) and of a group list (u8 count, then name, u8 count, names), 0 past end.
+static uint64_t str_len(const uint8_t *p, const uint8_t *end) { return p < end && p + 1 + p[0] <= end ? 1ull + p[0] : 0; }
+static uint64_t groups_len(const uint8_t *p, const uint8_t *end) {
+    if (p >= end) return 0;
+    const uint8_t *q = p + 1;
+    for (int g = 0; g < p[0]; g++) {
+        uint64_t n = str_len(q, end);
+        if (!n || q + n >= end) return 0;
+        q += n;
+        int m = *q++;
+        for (int k = 0; k < m; k++) {
+            uint64_t l = str_len(q, end);
+            if (!l) return 0;
+            q += l;
+        }
+    }
+    return (uint64_t)(q - p);
+}
+
+// Whether the group list holds group g with material mat.
+static int group_has(const uint8_t *groups, const uint8_t *g, const uint8_t *mat) {
+    const uint8_t *q = groups + 1;
+    for (int i = 0; groups && i < groups[0]; i++) {
+        int same = q[0] == g[0] && !memcmp(q + 1, g + 1, g[0]);
+        q += 1 + q[0];
+        int m = *q++;
+        for (int k = 0; k < m; k++) {
+            if (same && q[0] == mat[0] && !memcmp(q + 1, mat + 1, mat[0])) return 1;
+            q += 1 + q[0];
+        }
+    }
+    return 0;
+}
+
+static int lib_load(void) {
+    if (lib.tried) return lib.nmodels > 0;
+    lib.tried = 1;
+    char path[1200];
+    snprintf(path, sizeof path, "%s/link-armor.bin", rt_config()->profile);
+    uint64_t n = 0;
+    uint8_t *d = (uint8_t *)plat_file_read(path, &n);
+    if (!d || n < 16 || memcmp(d, "LNKA", 4) || rd32(d + 4) != 2) {
+        rt_log("link armor: %s %s; friends show in the Hylian outfit", path, d ? "is not an armor file this build reads" : "not found");
+        free(d);
+        return 0;
+    }
+    const uint8_t *end = d + n, *p = d + 16;
+    uint32_t nm = rd32(d + 8), na = rd32(d + 12);
+    ArmorModel *m = calloc(nm ? nm : 1, sizeof *m);
+    ArmorPiece *pc = calloc(na ? na : 1, sizeof *pc);
+    uint64_t gl = groups_len(p, end);
+    if (!m || !pc || nm > 4096 || na > 8192 || !gl) return free(d), free(m), free(pc), 0;
+    lib.body = p, p += gl;
+    for (uint32_t i = 0; i < na; i++) {   // the pieces
+        if (p + 53 > end) return free(d), free(m), free(pc), 0;
+        memcpy(pc[i].name, p, 47);
+        int32_t mi;
+        memcpy(&mi, p + 48, 4);
+        pc[i].model = mi;
+        p += 52;
+        pc[i].hides = p;
+        const uint8_t *q = p + 1;
+        for (int k = 0; k < p[0]; k++) {
+            uint64_t l = str_len(q, end);
+            if (!l) return free(d), free(m), free(pc), 0;
+            q += l;
+        }
+        pc[i].groups = q;
+        if (!(gl = groups_len(q, end))) return free(d), free(m), free(pc), 0;
+        p = q + gl;
+    }
+    int ok = 0;
+    for (uint32_t i = 0; i < nm; i++, ok++) {   // the models
+        ArmorModel *a = &m[i];
+        if (p + LIB_MODEL_HEAD + 2 > end) break;
+        memcpy(a->name, p, 47);
+        a->nverts = rd32(p + 48), a->ntris = rd32(p + 52), a->side = rd32(p + 56), a->nastc = rd32(p + 60);
+        a->zsize = rd32(p + 64), a->nmats = (uint32_t)(p[68] | p[69] << 8);
+        p += LIB_MODEL_HEAD + 2;
+        a->mats = p;
+        for (uint32_t k = 0; k < a->nmats; k++) {
+            uint64_t l = str_len(p, end);
+            if (!l) break;
+            p += l;
+        }
+        uint64_t need = 28ull * a->nverts + 39ull * a->ntris + a->zsize;
+        if (a->side < 8 || a->side > 2048 || a->nverts > 1000000 || a->ntris > 1000000 || (uint64_t)(end - p) < need) break;
+        a->verts = p, a->skin = a->verts + 12ull * a->nverts, a->tris = a->skin + 16ull * a->nverts;
+        a->cls = a->tris + 12ull * a->ntris, a->mtri = a->cls + a->ntris, a->uvs = a->mtri + 2ull * a->ntris;
+        a->zatlas = a->uvs + 24ull * a->ntris, a->astc = a->zatlas + a->zsize;
+        p += need;
+        for (uint32_t k = 0; k < a->nastc && p + 28 <= end; k++) p += 28 + rd32(p + 24);   // the ASTC pictures
+        if (p > end) break;
+    }
+    if (ok < (int)nm) {
+        rt_log("link armor: %s is cut short after %d of %u models", path, ok, nm);
+        nm = (uint32_t)ok;
+    }
+    lib.file = d, lib.models = m, lib.nmodels = (int)nm, lib.pieces = pc, lib.npieces = (int)na;
+    rt_log("link armor: %d models for %d pieces from %s", lib.nmodels, lib.npieces, path);
+    return lib.nmodels > 0;
+}
+
+static int lib_model(const char *name) {
+    for (int i = 0; name && *name && i < lib.nmodels; i++)
+        if (!strcmp(lib.models[i].name, name)) return i;
+    return -1;
+}
+
+static const ArmorPiece *lib_piece(const char *actor) {   // a worn piece with a model, NULL none
+    for (int i = 0; actor && *actor && i < lib.npieces; i++)
+        if (!strncmp(lib.pieces[i].name, actor, 47))
+            return lib.pieces[i].model >= 0 && lib.pieces[i].model < lib.nmodels ? &lib.pieces[i] : NULL;
+    return NULL;
+}
+
+// A model's material k (u8 length, bytes).
+static const uint8_t *model_mat(const ArmorModel *a, uint32_t k) {
+    const uint8_t *p = a->mats;
+    for (uint32_t i = 0; i < k && i < a->nmats; i++) p += 1 + p[0];
+    return p;
+}
+
+// Whether the pieces worn hide material mat of a part: of Link's model (own NULL) by his groups, of a piece's model by
+// that piece's groups.
+static int hidden(const ArmorPiece *const worn[3], const ArmorPiece *own, const uint8_t *mat) {
+    for (int w = 0; w < 3; w++) {
+        if (!worn[w]) continue;
+        const uint8_t *h = worn[w]->hides + 1;
+        for (int k = 0; k < worn[w]->hides[0]; k++, h += 1 + h[0])
+            if (group_has(own ? own->groups : lib.body, h, mat)) return 1;
+    }
+    return 0;
+}
+
+static const uint8_t *lib_atlas(ArmorModel *a) {
+    if (a->atlas) return a->atlas;
+    uint64_t bytes = 4ull * a->side * a->side;
+    uint8_t *px = malloc(bytes);
+    if (!px || ZSTD_decompress(px, bytes, a->zatlas, a->zsize) != bytes) {
+        free(px);
+        return NULL;
+    }
+    const uint8_t *q = a->astc;
+    for (uint32_t k = 0; k < a->nastc; k++) {   // ASTC pictures into their place
+        uint32_t x = rd32(q), y = rd32(q + 4), w = rd32(q + 8), h = rd32(q + 12), bw = rd32(q + 16), bh = rd32(q + 20);
+        uint32_t nb = rd32(q + 24), over = bw >> 8 & 1;
+        bw &= 0xff;
+        if (w && h && x + w <= a->side && y + h <= a->side && bw >= 4 && bh >= 4 && bw <= 12 && bh <= 12 &&
+            (uint64_t)((w + bw - 1) / bw) * ((h + bh - 1) / bh) * 16 <= nb) {
+            uint8_t *t = malloc(4ull * w * h);
+            if (t) {
+                astc_decode_ldr(q + 28, w, h, bw, bh, false, t);
+                if (over) over_skin(t, w, h);
+                for (uint32_t r = 0; r < h; r++) memcpy(px + 4ull * ((y + r) * a->side + x), t + 4ull * r * w, 4ull * w);
+                free(t);
+            }
+        }
+        q += 28 + nb;
+    }
+    return a->atlas = px;
+}
+
+const LinkFigure *link_figure_dressed(const char look[3][48]) {
+    const LinkFigure *base = link_figure();
+    if (!base || !base->parent || (!look[0][0] && !look[1][0] && !look[2][0]) || !lib_load()) return base;
+    static struct {
+        char key[3][48];
+        LinkFigure *fig;
+    } cache[DRESS_CACHE];
+    static int ncache, next;
+    for (int i = 0; i < ncache; i++)
+        if (!memcmp(cache[i].key, look, sizeof cache[i].key)) return cache[i].fig;
+    // the pieces worn, a bare one where none (the ponytail, the chest's strap, the underwear), as the game wears them
+    static const char *const bare[3] = {"Armor_999_Head", "Armor_Default_Upper", "Armor_Default_Lower"};
+    const ArmorPiece *worn[3];
+    for (int k = 0; k < 3; k++) {
+        worn[k] = lib_piece(look[k]);
+        if (!worn[k]) worn[k] = lib_piece(bare[k]);
+    }
+    // the parts: Link's model, then the pieces
+    const ArmorPiece *own[DRESS_PARTS] = {NULL, worn[0], worn[1], worn[2]};
+    int part[DRESS_PARTS] = {lib_model("Link_Body"), -1, -1, -1};
+    for (int k = 1; k < DRESS_PARTS; k++) part[k] = own[k] ? own[k]->model : -1;
+    uint32_t nv = 0, nt = 0;
+    for (int k = 0; k < DRESS_PARTS; k++)
+        if (part[k] >= 0) nv += lib.models[part[k]].nverts, nt += lib.models[part[k]].ntris;
+    LinkFigure *f = calloc(1, sizeof *f);
+    if (!f || !nv || !nt) return free(f), base;
+    *f = *base;   // the skeleton and the animations are the base figure's
+    f->verts = malloc(12ull * nv), f->skin = malloc(16ull * nv), f->tris = malloc(12ull * nt), f->cls = malloc(nt);
+    f->uvs = malloc(24ull * nt), f->normals = malloc(12ull * nt), f->albedo = calloc(1, 4ull * DRESS_W * DRESS_H);
+    if (!f->verts || !f->skin || !f->tris || !f->cls || !f->uvs || !f->normals || !f->albedo) {
+        free(f->verts), free(f->skin), free(f->tris), free(f->cls), free(f->uvs), free(f->normals), free(f->albedo), free(f);
+        return base;
+    }
+    // the atlas: Link's model's 1024 on the left, then the head, upper and lower 512 each in the right half's
+    // quadrants (x, y, side in texels)
+    static const uint32_t place[DRESS_PARTS][3] = {{0, 0, 1024}, {1024, 0, 512}, {1536, 0, 512}, {1024, 512, 512}};
+    uint32_t v0 = 0, t0 = 0;
+    for (int k = 0; k < DRESS_PARTS; k++) {
+        if (part[k] < 0) continue;
+        ArmorModel *a = &lib.models[part[k]];
+        memcpy(f->verts + 3ull * v0, a->verts, 12ull * a->nverts);
+        memcpy(f->skin + 8ull * v0, a->skin, 16ull * a->nverts);
+        for (uint32_t i = 0; i < 8 * a->nverts; i += 2)   // a bone beyond the skeleton: the root
+            if (f->skin[8ull * v0 + i] >= f->nbones) f->skin[8ull * v0 + i] = 0;
+        uint32_t side = a->side < place[k][2] ? a->side : place[k][2];   // a larger one is cut to its slot
+        float qx = (float)place[k][0] / DRESS_W, qy = (float)place[k][1] / DRESS_H;
+        float sx = (float)a->side / DRESS_W, sy = (float)a->side / DRESS_H;
+        uint8_t hide[1024] = {0};   // per material: hidden by what is worn
+        for (uint32_t m = 0; m < a->nmats && m < 1024; m++) hide[m] = (uint8_t)hidden(worn, own[k], model_mat(a, m));
+        uint32_t kept = 0;
+        for (uint32_t i = 0; i < a->ntris; i++) {
+            uint32_t mat = (uint32_t)(a->mtri[2 * i] | a->mtri[2 * i + 1] << 8);
+            if (mat < 1024 && hide[mat]) continue;
+            uint32_t o = t0 + kept++;
+            for (int c = 0; c < 3; c++) {   // its corners, their place in its slot
+                float uv[2];
+                memcpy(uv, a->uvs + 24ull * i + 8 * c, 8);
+                f->tris[3ull * o + c] = rd32(a->tris + 12ull * i + 4 * c) + v0;
+                f->uvs[6ull * o + 2 * c] = qx + uv[0] * sx, f->uvs[6ull * o + 2 * c + 1] = qy + uv[1] * sy;
+            }
+            f->cls[o] = a->cls[i];
+        }
+        const uint8_t *px = lib_atlas(a);
+        for (uint32_t r = 0; px && r < side; r++)
+            memcpy(f->albedo + 4ull * ((uint64_t)(place[k][1] + r) * DRESS_W + place[k][0]), px + 4ull * r * a->side, 4ull * side);
+        v0 += a->nverts, t0 += kept;
+    }
+    nt = t0;
+    f->nverts = nv, f->ntris = nt, f->atlas_side = DRESS_W, f->atlas_rows = DRESS_H;
+    f->atlas = f->albedo;   // the overlay draws the base figure
+    face_normals(f, nv, nt);
+    // a slot reused: its old figure stays (the renderer may still hold it this frame), at most DRESS_CACHE kept
+    int slot = ncache < DRESS_CACHE ? ncache++ : next++ % DRESS_CACHE;
+    memcpy(cache[slot].key, look, sizeof cache[slot].key);
+    cache[slot].fig = f;
+    rt_log("link armor: dressed a figure in '%s' '%s' '%s' (%u triangles)", look[0], look[1], look[2], nt);
+    return f;
 }
 
 // Skins every vertex for animation anim at frame: version 3 blends the two baked frames around it, version 4

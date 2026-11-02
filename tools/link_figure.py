@@ -3,7 +3,7 @@ outfit, posed with the arms down, as one textured triangle mesh. Made from the p
 stays in the profile (never in this repository).
 
     python tools/link_figure.py <models dir> <romfs dir> <out.bin> [preview.png]
-    python tools/link_figure.py --mcsharp <mcsharp-cli> --work <dir> <romfs dir> <out.bin>
+    python tools/link_figure.py --mcsharp <mcsharp-cli> --work <dir> <romfs dir> <out.bin> [--armor <armor.bin>]
 
 <models dir> holds the decompressed BFRES of the parts (<name>.bfres or <name>.bfres/<name>.bfres), decompressed from
 the RomFS's Model/<name>.bfres.mc by a MeshCodec decoder, and Player_Animation.anim.bfres; the textures come from the
@@ -16,7 +16,8 @@ Output (little-endian): b'LNKF', u32 version 4, u32 vertex count, u32 triangle c
 picture count; per vertex 3 floats (metres, model space: x right, y up, z forward); per triangle 3 u32 indices; per
 triangle one u8 material class (CLASSES; bit 7: no texture, the runtime colours it by class); per triangle 6 floats,
 its corners' atlas coordinates (0..1); the atlas, side x side RGBA8 rows; then per ASTC picture u32 x, y, width,
-height, block width, block height, byte count and its linear blocks, which the runtime decodes into the atlas there;
+height, block width (bit 8: lay it over the skin's tone by its alpha), block height, byte count and its linear
+blocks, which the runtime decodes into the atlas there;
 then u32 bone count, u32 animation count, per vertex four (u16 bone, u16 weight of 65535); the skeleton: u32 root
 bone (the one carrying the animation's own motion, which the runtime leaves out, 0xffffffff none), per bone i32 parent (-1 none), its bind local
 transform as 9 floats (scale xyz, euler XYZ rotation, translation xyz) and its inverse bind world matrix (row-major 3x4,
@@ -26,8 +27,20 @@ count; per animated bone u16 bone, u16 curve count and 9 floats, its local trans
 u8 channel (0..8, the 9 floats' order), u8 0, u16 key count; per key u16 frame x 32 and 4 halves, the cubic's
 coefficients over the key's segment (t 0..1) with the curve's scale and offset already in. The runtime evaluates them
 (runtime/link_figure.c link_figure_pose). Frames run at 30 a second.
+
+With --armor the tool also writes the armor library the runtime dresses each friend's figure from
+(runtime/link_figure.c link_figure_dressed). Strings are a u8 length and its bytes; a group list is a u8 count, then
+per group its name, a u8 count and those material names. b'LNKA', u32 version 2, u32 model count, u32 piece count;
+the body's material groups (the Player's EquipmentUserParam); per piece (every Armor_*_{Head,Upper,Lower} actor) its
+name (48 bytes), i32 its model (-1 none), u8 count and the names of the groups it hides, then its own model's groups
+(its ArmorParam); then per model its name (48 bytes; the first is Link_Body, Link's own model), u32 vertex count, u32
+triangle count, u32 atlas side, u32 ASTC picture count, u32 the atlas's zstd size, u16 material count and their
+names; per vertex 3 floats, then four (u16 bone, u16 weight of 65535) over the figure's skeleton; per triangle 3 u32
+indices, then one u8 class each, then one u16 material each, then 6 floats each (its corners in the atlas); the atlas
+(side x side RGBA8, zstd); the ASTC pictures as in the figure.
 """
 import math
+import re
 import struct
 import json
 import sys
@@ -45,7 +58,14 @@ PARTS = [
     ('Armor_001.Armor_001_RaulSkin_Upper', None),
     ('Armor_001.Armor_001_Lower', None),
 ]
-EXCLUDE = ('Ring_',)   # the sage rings show one by one in the game
+# Link's right arm is Rauru's: its skin (Mt_Upper_Skin_RaulSkin_*) lays a picture of its own over the skin by a second
+# UV set: Link_RaulSkin_Monyou_Gn5, the arm's dark olive with its darker patches, whose alpha says where it covers the
+# skin (the whole forearm, patches above the elbow). The figure draws those triangles with that picture by that UV set;
+# it is ASTC, so the runtime lays it over the skin's tone as it decodes it (OVER_SKIN).
+ZONAI_ARM = ('Mt_Upper_Skin_RaulSkin', 'Link_RaulSkin_Monyou_Gn5')
+OVER_SKIN = {ZONAI_ARM[1]}   # ASTC pictures flagged (block width bit 8) to be laid over the skin's tone where clear
+# the sage rings, and the arm's patterns that go with each, show one by one in the game as they are earned
+EXCLUDE = ('Ring_', 'Upper_Monyou__Mt_Monyou_Ring_')
 
 # Material classes, in the order runtime/link_figure.c colours them.
 CLASSES = ['skin', 'hair', 'tunic', 'trousers', 'leather', 'eye', 'dark', 'metal', 'rauru']
@@ -130,9 +150,66 @@ def trs(scale, rot, pos):
     return [[r[i][0] * scale[0], r[i][1] * scale[1], r[i][2] * scale[2], pos[i]] for i in range(3)]
 
 
-def build(models):
+class Mesh:
     """Vertices in the bind pose (model space), up to four (bone, weight) per vertex over the joined skeleton, and the
     triangles with their material class, texture and corners' texture coordinates."""
+    def __init__(self):
+        self.verts, self.weights, self.tris, self.classes, self.uvs, self.texs = [], [], [], [], [], []
+        self.mats = []   # per triangle its material's name (the game hides armor and body parts by material)
+
+    def add(self, m, keep, joined):
+        """The shapes of model m (those keep names by prefix, every one for None), its bones mapped to the joined
+        skeleton's by joined."""
+        sk = m['skeleton']
+        own = worlds(sk, None)
+        m2b = sk['matrix_to_bone']
+        for s in m['shapes']:
+            if any(s['name'].startswith(x) for x in EXCLUDE):
+                continue
+            if keep and not any(s['name'].startswith(x) for x in keep):
+                continue
+            vb = s['vertex_buffer']
+            P, I, Wt = vb['attrs']['_p0'], vb['attrs'].get('_i0'), vb['attrs'].get('_w0')
+            if s['skin'] > 4 and I and '_i1' in vb['attrs']:   # over four bones: the next four in _i1 and _w1
+                I = [list(a)[:4] + list(b) for a, b in zip(I, vb['attrs']['_i1'])]
+                if Wt and '_w1' in vb['attrs']:
+                    Wt = [list(a)[:4] + list(b) for a, b in zip(Wt, vb['attrs']['_w1'])]
+            base = len(self.verts)
+            for k, p in enumerate(P):
+                p = p[:3]
+                if s['skin'] == 0:
+                    self.verts.append(apply(own[s['bone']], p))
+                    self.weights.append([(joined[s['bone']], 1.0)])
+                elif s['skin'] == 1:
+                    bone = m2b[int(I[k][0])]
+                    self.verts.append(apply(own[bone], p))
+                    self.weights.append([(joined[bone], 1.0)])
+                else:   # smooth skinning: the position is already in model space
+                    self.verts.append(p)
+                    ws = []
+                    for j in range(min(s['skin'], len(I[k]))):
+                        w = (Wt[k][j] if j < len(Wt[k]) else 0.0) if Wt else (1.0 if j == 0 else 0.0)
+                        if w > 0:
+                            ws.append((joined[m2b[int(I[k][j])]], w))
+                    total = sum(w for _, w in ws) or 1.0
+                    self.weights.append([(b, w / total) for b, w in ws][:4])
+            mat = m['materials'][s['material']]
+            cls = material_class(mat['name'])
+            tex = mat['textures'][0] if mat['textures'] else None
+            U = vb['attrs'].get('_u0')
+            if mat['name'].startswith(ZONAI_ARM[0]) and ZONAI_ARM[1] in mat['textures'] and '_u1' in vb['attrs']:
+                tex, U = ZONAI_ARM[1], vb['attrs']['_u1']   # the Zonai arm's own picture, by its second UV set
+            idx = s['meshes'][0]['indices']
+            for q in range(0, len(idx) - 2, 3):
+                self.tris.append((base + idx[q], base + idx[q + 1], base + idx[q + 2]))
+                self.classes.append(cls)
+                self.mats.append(mat['name'])
+                self.texs.append(tex if U else None)
+                self.uvs.append([tuple(U[idx[q + c]][:2]) for c in range(3)] if U else [(0, 0)] * 3)
+
+
+def build(models):
+    """The joined skeleton and the figure's mesh (PARTS)."""
     skel = Skeleton()
     parts = []
     for name, keep in PARTS:
@@ -141,49 +218,10 @@ def build(models):
                 raise ValueError(f'{name}: skeleton rotation {m["skeleton"]["rotation"]} not handled')
             skel.add(m['skeleton'])
             parts.append((name, keep, m))
-    verts, weights, tris, classes, uvs, texs = [], [], [], [], [], []
+    mesh = Mesh()
     for name, keep, m in parts:
-        sk = m['skeleton']
-        own = worlds(sk, None)
-        m2b = sk['matrix_to_bone']
-        joined = [skel.index[b['name']] for b in sk['bones']]
-        for s in m['shapes']:
-            if any(s['name'].startswith(x) for x in EXCLUDE):
-                continue
-            if keep and not any(s['name'].startswith(x) for x in keep):
-                continue
-            vb = s['vertex_buffer']
-            P, I, Wt = vb['attrs']['_p0'], vb['attrs'].get('_i0'), vb['attrs'].get('_w0')
-            base = len(verts)
-            for k, p in enumerate(P):
-                p = p[:3]
-                if s['skin'] == 0:
-                    verts.append(apply(own[s['bone']], p))
-                    weights.append([(joined[s['bone']], 1.0)])
-                elif s['skin'] == 1:
-                    bone = m2b[int(I[k][0])]
-                    verts.append(apply(own[bone], p))
-                    weights.append([(joined[bone], 1.0)])
-                else:   # smooth skinning: the position is already in model space
-                    verts.append(p)
-                    ws = []
-                    for j in range(s['skin']):
-                        w = Wt[k][j] if Wt else (1.0 if j == 0 else 0.0)
-                        if w > 0:
-                            ws.append((joined[m2b[int(I[k][j])]], w))
-                    total = sum(w for _, w in ws) or 1.0
-                    weights.append([(b, w / total) for b, w in ws][:4])
-            mat = m['materials'][s['material']]
-            cls = material_class(mat['name'])
-            tex = mat['textures'][0] if mat['textures'] else None
-            U = vb['attrs'].get('_u0')
-            idx = s['meshes'][0]['indices']
-            for q in range(0, len(idx) - 2, 3):
-                tris.append((base + idx[q], base + idx[q + 1], base + idx[q + 2]))
-                classes.append(cls)
-                texs.append(tex if U else None)
-                uvs.append([tuple(U[idx[q + c]][:2]) for c in range(3)] if U else [(0, 0)] * 3)
-    return skel, verts, weights, tris, classes, uvs, texs
+        mesh.add(m, keep, [skel.index[b['name']] for b in m['skeleton']['bones']])
+    return skel, mesh.verts, mesh.weights, mesh.tris, mesh.classes, mesh.uvs, mesh.texs
 
 
 # The animations the figure plays by the friend's speed when their game names none (an older game): standing,
@@ -281,7 +319,7 @@ class RomFS:
         return self.rom.read(f['size'])
 
 
-def build_atlas(romfs, names):
+def build_atlas(romfs, names, side=ATLAS, tex_side=256, quiet=False):
     """{name: (x, y, w, h)} in an ATLAS x ATLAS RGBA8 picture, the picture, and the ASTC pictures to decode there. A
     white 8x8 square at (0, 0) serves the untextured triangles. Shelf packing, tallest first; a texture that does not
     fit is left out (its triangles go untextured)."""
@@ -292,7 +330,7 @@ def build_atlas(romfs, names):
             print(f'  texture {n}: not in the RomFS')
             continue
         try:
-            w, h, kind, bw, bh, px = txtg.read_txtg(data, 256)
+            w, h, kind, bw, bh, px = txtg.read_txtg(data, tex_side)
         except ValueError as e:
             print(f'  texture {n}: {e}')
             continue
@@ -300,30 +338,31 @@ def build_atlas(romfs, names):
             print(f'  texture {n}: format {kind} not handled')
             continue
         pics[n] = (w, h, kind, bw, bh, px)
-    atlas = bytearray(ATLAS * ATLAS * 4)
+    atlas = bytearray(side * side * 4)
     for y in range(8):
-        atlas[y * ATLAS * 4:(y * ATLAS + 8) * 4] = bytes([255]) * 32
+        atlas[y * side * 4:(y * side + 8) * 4] = bytes([255]) * 32
     place, astc = {}, []
     x, y, shelf = 8 + PAD, 0, 8
     for n in sorted(pics, key=lambda k: -pics[k][1]):
         w, h, kind, bw, bh, px = pics[n]
-        if x + w > ATLAS:
+        if x + w > side:
             x, y, shelf = 0, y + shelf + PAD, 0
-        if y + h > ATLAS:
-            print(f'  texture {n}: no room in the atlas')
+        if y + h > side:
+            if not quiet:
+                print(f'  texture {n}: no room in the atlas')
             continue
         place[n] = (x, y, w, h)
         if kind == 'astc':
-            astc.append((x, y, w, h, bw, bh, px))
+            astc.append((x, y, w, h, bw | (0x100 if n in OVER_SKIN else 0), bh, px))
         else:
             for r in range(h):
-                atlas[((y + r) * ATLAS + x) * 4:((y + r) * ATLAS + x + w) * 4] = px[r * w * 4:(r + 1) * w * 4]
+                atlas[((y + r) * side + x) * 4:((y + r) * side + x + w) * 4] = px[r * w * 4:(r + 1) * w * 4]
         x += w + PAD
         shelf = max(shelf, h)
     return place, atlas, astc
 
 
-def atlas_uv(rect, tri_uv):
+def atlas_uv(rect, tri_uv, side=ATLAS):
     """A triangle's corners in the atlas: shifted by whole tiles to start in 0..1, then clamped into the texture with a
     half-texel inset."""
     x, y, w, h = rect
@@ -333,7 +372,7 @@ def atlas_uv(rect, tri_uv):
     for u, v in tri_uv:
         u = min(max(u - fu, 0.5 / w), 1 - 0.5 / w)
         v = min(max(v - fv, 0.5 / h), 1 - 0.5 / h)
-        out += [(x + u * w) / ATLAS, (y + v * h) / ATLAS]
+        out += [(x + u * w) / side, (y + v * h) / side]
     return out
 
 
@@ -413,42 +452,198 @@ def sarc_members(data):
     return out
 
 
-def prepare(romfs, mcsharp, work):
-    """The models folder build and main read, made in work from the player's own RomFS: each part's
-    Model/<name>.bfres.mc through McSharp's decoder, and the animations unpacked from their zstd frame."""
-    import subprocess
-    work.mkdir(parents=True, exist_ok=True)
-    for name, _ in PARTS:
-        data = romfs.read(f'Model/{name}.bfres.mc')
-        if data is None:
-            raise FileNotFoundError(f'Model/{name}.bfres.mc is not in the RomFS')
-        (work / f'{name}.bfres.mc').write_bytes(data)
-    r = subprocess.run([str(mcsharp), str(work), str(work)], capture_output=True, text=True,
-                       creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-    if r.returncode:
-        raise RuntimeError(f'mcsharp exit {r.returncode}: {r.stdout[-800:]} {r.stderr[-800:]}')
+def zstd_dicts(romfs):
+    """{id: dictionary} of the RomFS's zstd dictionaries (Pack/ZsDic.pack.zs)."""
     dicts = {}
     for blob in sarc_members(txtg.unzstd(romfs.read('Pack/ZsDic.pack.zs'))).values():
         if blob[:4] == b'\x37\xa4\x30\xec':   # a zstd dictionary: its id follows the magic
             dicts[struct.unpack_from('<I', blob, 4)[0]] = txtg.zstd_dict(blob)
-    frame = romfs.read('Model/Player_Animation.anim.bfres.zs')
+    return dicts
+
+
+def unzstd_file(romfs, dicts, path):
+    frame = romfs.read(path)
     if frame is None:
-        raise FileNotFoundError('Model/Player_Animation.anim.bfres.zs is not in the RomFS')
+        raise FileNotFoundError(f'{path} is not in the RomFS')
     # the frame header names its dictionary: a 1-, 2- or 4-byte id after the descriptor (and window byte)
     fhd = frame[4]
     did_size = (0, 1, 2, 4)[fhd & 3]
     at = 5 + (0 if fhd & 0x20 else 1)
     did = int.from_bytes(frame[at:at + did_size], 'little') if did_size else 0
-    (work / 'Player_Animation.anim.bfres').write_bytes(txtg.unzstd(frame, dicts.get(did)))
+    return txtg.unzstd(frame, dicts.get(did))
+
+
+# The armor library (link-armor.bin): Link's bare body and every armor model a worn piece can show, each with its own
+# small atlas, and which model each piece (the actor the game names, Armor_002_Upper) shows. The body's parts:
+BODY = [('Link.Link_RaulSkin', None), ('Link.Link_RaulSkin_RightHand', None)]
+ARMOR_ATLAS = 512   # each model's atlas side; its textures at most 256 (txtg.read_txtg)
+BODY_ATLAS = 1024   # the body's: the face, the eyes and the arm's patterns at full size
+
+
+def groups_of(doc):
+    """[(group, [material names])] of a HiddenMaterialGroupList."""
+    return [(g.get('GroupName', ''), list(g.get('MaterialNameList', []))) for g in doc.get('HiddenMaterialGroupList', [])
+            if g.get('GroupName')]
+
+
+def body_groups(romfs, dicts):
+    """The material groups of Link's own model (the Player's EquipmentUserParam): G_Upper the chest's skin, G_Belt_A
+    a belt, G_Head the hair and so on, which the armor he wears hides by name."""
+    from achievements import read_byml
+    for k, v in sarc_members(unzstd_file(romfs, dicts, 'Pack/Actor/Player.pack.zs')).items():
+        if '/EquipmentUserParam/' in k:
+            return groups_of(read_byml(v))
+    return []
+
+
+def armor_params(romfs, dicts):
+    """{actor: (hides, groups)} of every armor piece: the groups it hides (HideMaterialGroupNameList) and the groups of
+    its own model's materials (HiddenMaterialGroupList), from its pack's ArmorParam."""
+    from achievements import read_byml
+    out = {}
+    for path in sorted(romfs.idx):
+        m = re.match(r'Pack/Actor/(Armor_[A-Za-z0-9]+_(Head|Upper|Lower))\.pack\.zs$', path)
+        if not m:
+            continue
+        for k, v in sarc_members(unzstd_file(romfs, dicts, path)).items():
+            if '/ArmorParam/' in k:
+                doc = read_byml(v)
+                out[m.group(1)] = (list(doc.get('HideMaterialGroupNameList', [])), groups_of(doc))
+    return out
+
+
+def armor_actors(romfs, dicts):
+    """{actor: model file name} of every armor piece (Pack/Actor/Armor_*_{Head,Upper,Lower}): its pack's ModelInfo
+    (the one of its own name, else one of its part; a dyed piece points at the model it dyes) names the model as
+    ModelProjectName.FmdbName."""
+    from achievements import read_byml
+    out = {}
+    for path in sorted(romfs.idx):
+        m = re.match(r'Pack/Actor/(Armor_[A-Za-z0-9]+_(Head|Upper|Lower))\.pack\.zs$', path)
+        if not m:
+            continue
+        actor, part = m.group(1), m.group(2)
+        infos = {k.split('/')[-1].split('.')[0]: v for k, v in sarc_members(unzstd_file(romfs, dicts, path)).items()
+                 if '/ModelInfo/' in k}
+        doc = infos.get(actor) or next((v for k, v in infos.items() if k.endswith('_' + part)), None)
+        info = read_byml(doc) if doc else {}
+        if info.get('ModelProjectName') and info.get('FmdbName'):
+            out[actor] = f"{info['ModelProjectName']}.{info['FmdbName']}"
+    return out
+
+
+def pstr(t):
+    b = t.encode()[:255]
+    return bytes([len(b)]) + b
+
+
+def pgroups(groups):
+    out = bytearray([len(groups[:255])])
+    for name, mats in groups[:255]:
+        out += pstr(name) + bytes([len(mats[:255])]) + b''.join(pstr(x) for x in mats[:255])
+    return bytes(out)
+
+
+def build_armor(models, romfs, skel, actors, out_path, params=None, body=()):
+    """Writes the armor library: the body (BODY) and each model actors name, skinned to the figure's skeleton by bone
+    name (a bone the figure lacks, a cape's or a tassel's, moves with its nearest ancestor the figure has)."""
+    from compression import zstd
+    entries = [('Link_Body', BODY)] + [(n, [(n, None)]) for n in sorted(set(actors.values()))]
+    blobs, index = [], {}
+    for name, parts in entries:
+        mesh = Mesh()
+        try:
+            for part, keep in parts:
+                for m in load(models, part)['models']:
+                    bones = m['skeleton']['bones']
+                    joined = []
+                    for b in bones:
+                        k = b
+                        while k['name'] not in skel.index and k['parent'] >= 0:
+                            k = bones[k['parent']]
+                        joined.append(skel.index.get(k['name'], 0))
+                    mesh.add(m, keep, joined)
+        except (FileNotFoundError, ValueError) as e:
+            print(f'  armor {name}: {e}')
+            continue
+        names = sorted({x for x in mesh.texs if x})
+        side = BODY_ATLAS if name == 'Link_Body' else ARMOR_ATLAS
+        for tex_side in (256, 128, 64):   # the largest textures that all fit the model's atlas
+            place, atlas, astc = build_atlas(romfs, names, side, tex_side, quiet=tex_side > 64)
+            if len(place) == len(names) or tex_side == 64:
+                break
+        out = bytearray(name.encode()[:47].ljust(48, b'\0'))
+        packed = zstd.compress(bytes(atlas))
+        out += struct.pack('<IIIII', len(mesh.verts), len(mesh.tris), side, len(astc), len(packed))
+        mats = sorted(set(mesh.mats))
+        out += struct.pack('<H', len(mats)) + b''.join(pstr(x) for x in mats)
+        for v in mesh.verts:
+            out += struct.pack('<3f', *v)
+        for ws in mesh.weights:
+            ws = (ws + [(0, 0.0)] * 4)[:4]
+            q = [round(w * 65535) for _, w in ws]
+            q[0] += 65535 - sum(q)
+            for (bn, _), w in zip(ws, q):
+                out += struct.pack('<HH', bn, w)
+        for t in mesh.tris:
+            out += struct.pack('<3I', *t)
+        coords = bytearray()
+        for i in range(len(mesh.tris)):
+            rect = place.get(mesh.texs[i]) if mesh.texs[i] else None
+            out.append(mesh.classes[i] | (0 if rect else 0x80))
+            coords += struct.pack('<6f', *(atlas_uv(rect, mesh.uvs[i], side) if rect else [4 / side] * 6))
+        out += struct.pack(f'<{len(mesh.tris)}H', *(mats.index(x) for x in mesh.mats))
+        out += coords + packed
+        for x, y, w, h, bw, bh, blocks in astc:
+            out += struct.pack('<7I', x, y, w, h, bw, bh, len(blocks)) + blocks
+        index[name] = len(blobs)
+        blobs.append(bytes(out))
+    params = params or {}
+    head = bytearray(b'LNKA') + struct.pack('<III', 2, len(blobs), len(actors)) + pgroups(list(body))
+    for actor in sorted(actors):
+        hides, groups = params.get(actor, ([], []))
+        head += actor.encode()[:47].ljust(48, b'\0') + struct.pack('<i', index.get(actors[actor], -1))
+        head += bytes([len(hides[:255])]) + b''.join(pstr(x) for x in hides[:255]) + pgroups(groups)
+    Path(out_path).write_bytes(bytes(head) + b''.join(blobs))
+    print(f'{len(blobs)} armor models for {len(actors)} pieces -> {out_path} ({(len(head) + sum(map(len, blobs))) >> 20} MiB)')
+
+
+def prepare(romfs, mcsharp, work, armor=False):
+    """The models folder build and main read, made in work from the player's own RomFS: each part's
+    Model/<name>.bfres.mc through McSharp's decoder, and the animations unpacked from their zstd frame."""
+    import subprocess
+    work.mkdir(parents=True, exist_ok=True)
+    dicts = zstd_dicts(romfs)
+    names = [name for name, _ in PARTS]
+    if armor:   # every model a worn piece can show, and the body's parts
+        names += [n for n, _ in BODY] + sorted(set(armor_actors(romfs, dicts).values()))
+    for name in dict.fromkeys(names):
+        data = romfs.read(f'Model/{name}.bfres.mc')
+        if data is None:
+            if name in dict(PARTS):
+                raise FileNotFoundError(f'Model/{name}.bfres.mc is not in the RomFS')
+            print(f'  armor {name}: not in the RomFS')
+            continue
+        (work / f'{name}.bfres.mc').write_bytes(data)
+    r = subprocess.run([str(mcsharp), str(work), str(work)], capture_output=True, text=True,
+                       creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    if r.returncode:
+        raise RuntimeError(f'mcsharp exit {r.returncode}: {r.stdout[-800:]} {r.stderr[-800:]}')
+    (work / 'Player_Animation.anim.bfres').write_bytes(unzstd_file(romfs, dicts, 'Model/Player_Animation.anim.bfres.zs'))
     return work
 
 
 def main(argv):
+    armor_out = None
+    if '--armor' in argv:   # --armor <out.bin>: also the armor library
+        i = argv.index('--armor')
+        armor_out = argv[i + 1]
+        argv = argv[:i] + argv[i + 2:]
     if len(argv) > 1 and argv[1] == '--mcsharp':   # --mcsharp <exe> --work <dir> <romfs dir> <out.bin>
         if len(argv) < 7 or argv[3] != '--work':
             sys.exit(__doc__)
         romfs = RomFS(argv[5])
-        models = prepare(romfs, Path(argv[2]), Path(argv[4]))
+        models = prepare(romfs, Path(argv[2]), Path(argv[4]), armor=armor_out is not None)
         argv = [argv[0], str(models), argv[5], argv[6]]
     skel, verts, weights, tris, classes, uvs, texs = build(Path(argv[1]))
     romfs = RomFS(argv[2])
@@ -466,6 +661,10 @@ def main(argv):
     write(argv[3], verts, weights, tris, classes, uvs, texs, place, atlas, astc, skel, anims)
     print(f'{len(verts)} vertices, {len(tris)} triangles, {len(skel.names)} bones, {len(place)} textures '
           f'({len(astc)} ASTC), {len(anims)} animations -> {argv[3]}')
+    if armor_out:
+        dicts = zstd_dicts(romfs)
+        build_armor(Path(argv[1]), romfs, skel, armor_actors(romfs, dicts), armor_out, armor_params(romfs, dicts),
+                    body_groups(romfs, dicts))
     if len(argv) > 4:
         preview(argv[4], verts, tris, classes)
 

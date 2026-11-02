@@ -1110,8 +1110,9 @@ class Prepare(Step):
 
 def link_figure(ctx):
     """profile/link-figure.bin: the Link the game draws for each friend in a multiplayer room (runtime/link_figure.c),
-    built from this install's RomFS by tools/link_figure.py with McSharp's MeshCodec decoder (bin/mcsharp, MIT). The
-    temporary models (about 40 MB) stay in the temp folder. Optional: without it friends show as outlines, so the setup
+    and profile/link-armor.bin, the armor it dresses each one in, built from this install's RomFS by
+    tools/link_figure.py with McSharp's MeshCodec decoder (bin/mcsharp, MIT). The temporary models (about 150 MB) stay
+    in the temp folder. Optional: without it friends show as outlines, so the setup
     warns and goes on."""
     layout, dest, rep = ctx.layout, ctx.dest, ctx.reporter
     names = ['bin/mcsharp/mcsharp-cli' + EXE, 'build/mcsharp/mcsharp-cli' + EXE]   # a release, a checkout
@@ -1121,7 +1122,8 @@ def link_figure(ctx):
         return
     work = ctx.temp / 'link-figure'
     code, log = run_tool(ctx, 'prepare-figure', layout.tools / 'link_figure.py',
-                         ['--mcsharp', mcsharp, '--work', work, dest / 'romfs', dest / 'profile' / 'link-figure.bin'])
+                         ['--mcsharp', mcsharp, '--work', work, dest / 'romfs', dest / 'profile' / 'link-figure.bin',
+                          '--armor', dest / 'profile' / 'link-armor.bin'])
     shutil.rmtree(work, ignore_errors=True)
     if code:
         rep.warning('warn.link_figure_failed', code=code, log=str(log))

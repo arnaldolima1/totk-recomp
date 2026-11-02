@@ -31,7 +31,7 @@
 #include "figure_vs_spv.h"
 
 enum { MAX_FIGURES = 8 };
-enum { FLAG_UNTEXTURED = 1, FLAG_HAIR = 2, FLAG_SKIN = 4 };   // the colour word's top byte (figure_fs.frag)
+enum { FLAG_UNTEXTURED = 1, FLAG_HAIR = 2, FLAG_SKIN = 4, FLAG_CUTOUT = 8 };   // the colour word's top byte (figure_fs.frag)
 
 // ---- the figures the overlay hands over (any thread)
 static PlatMutex lock = PLAT_MUTEX_INIT;
@@ -174,6 +174,13 @@ static struct {
     VkFormat fmt[4], dfmt, shadow_fmt;
     int shadow_tried;
     VkSampler sampler;
+} G;
+
+// Each figure drawn (the base one, and each friend's dressed one, link_figure_dressed) has its triangles' corners and
+// its atlas on the GPU, made at its first draw and kept: the dressed figures live for the session.
+enum { MAX_RES = 24 };
+typedef struct {
+    const LinkFigure *lf;
     VkImage atlas;
     VmaAllocation atlas_mem;
     VkImageView atlas_view;
@@ -181,7 +188,9 @@ static struct {
     int atlas_ready;
     VkBuffer corners;
     VmaAllocation corners_mem;
-} G;
+} Res;
+static Res res[MAX_RES];
+static int nres;
 
 typedef struct {
     uint32_t vertex, colour;
@@ -286,7 +295,7 @@ static int make_pipeline(VkCtx *c) {
     return r == VK_SUCCESS;
 }
 
-static int init(VkCtx *c, const LinkFigure *lf) {
+static int init(VkCtx *c) {
     G.tried = 1;
     G.push = (PFN_vkCmdPushDescriptorSetKHR)vkGetDeviceProcAddr(c->device, "vkCmdPushDescriptorSetKHR");
     if (!G.push) return fail("no push descriptors"), 0;
@@ -315,21 +324,38 @@ static int init(VkCtx *c, const LinkFigure *lf) {
                               .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
                               .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, .maxLod = 16};
     if (vkCreateSampler(c->device, &si, NULL, &G.sampler) != VK_SUCCESS) return fail("no sampler"), 0;
+    return G.ok = 1;
+}
+
+// A figure's GPU objects, made at its first draw; NULL when they cannot be (the figure is then not drawn).
+static Res *res_for(VkCtx *c, const LinkFigure *lf) {
+    for (int i = 0; i < nres; i++)
+        if (res[i].lf == lf) return &res[i];
+    if (nres == MAX_RES) {
+        static int logged;
+        if (!logged++) rt_log("figure: %d figures made already; further outfits are drawn as the base figure", MAX_RES);
+        return NULL;
+    }
+    Res *r = &res[nres];
+    memset(r, 0, sizeof *r);
     // the atlas: sRGB with a full mip chain (made by blits on the first draw)
-    uint32_t side = lf->atlas_side;
-    G.levels = 1;
-    while ((side >> G.levels) >= 1 && G.levels < 16) G.levels++;
+    uint32_t side = lf->atlas_side, rows = lf->atlas_rows ? lf->atlas_rows : side;
+    r->levels = 1;
+    while ((side >> r->levels) >= 1 && r->levels < 16) r->levels++;
     VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
-                            .format = VK_FORMAT_R8G8B8A8_SRGB, .extent = {side, side, 1}, .mipLevels = G.levels,
+                            .format = VK_FORMAT_R8G8B8A8_SRGB, .extent = {side, rows, 1}, .mipLevels = r->levels,
                             .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
                             .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                                      VK_IMAGE_USAGE_TRANSFER_DST_BIT};
     VmaAllocationCreateInfo ai = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
-    if (vmaCreateImage(c->vma, &ii, &ai, &G.atlas, &G.atlas_mem, NULL) != VK_SUCCESS) return fail("no atlas image"), 0;
-    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = G.atlas,
+    if (vmaCreateImage(c->vma, &ii, &ai, &r->atlas, &r->atlas_mem, NULL) != VK_SUCCESS) return rt_log("figure: no atlas image"), NULL;
+    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = r->atlas,
                                 .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = VK_FORMAT_R8G8B8A8_SRGB,
-                                .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, G.levels, 0, 1}};
-    if (vkCreateImageView(c->device, &vi, NULL, &G.atlas_view) != VK_SUCCESS) return fail("no atlas view"), 0;
+                                .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, r->levels, 0, 1}};
+    if (vkCreateImageView(c->device, &vi, NULL, &r->atlas_view) != VK_SUCCESS) {
+        vmaDestroyImage(c->vma, r->atlas, r->atlas_mem);
+        return rt_log("figure: no atlas view"), NULL;
+    }
     // the triangle corners
     static const uint8_t base[LF_CLASSES][3] = {
         {232, 189, 153},   // skin
@@ -348,13 +374,16 @@ static int init(VkCtx *c, const LinkFigure *lf) {
                                    .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
                                             VMA_ALLOCATION_CREATE_MAPPED_BIT};
     VmaAllocationInfo info;
-    if (vmaCreateBuffer(c->vma, &bi, &bai, &G.corners, &G.corners_mem, &info) != VK_SUCCESS)
-        return fail("no corner buffer"), 0;
+    if (vmaCreateBuffer(c->vma, &bi, &bai, &r->corners, &r->corners_mem, &info) != VK_SUCCESS) {
+        vkDestroyImageView(c->device, r->atlas_view, NULL), vmaDestroyImage(c->vma, r->atlas, r->atlas_mem);
+        return rt_log("figure: no corner buffer"), NULL;
+    }
     Corner *co = info.pMappedData;
     for (uint32_t t = 0; t < lf->ntris; t++) {
         uint8_t cls = lf->cls[t] & 0x7f;
         if (cls >= LF_CLASSES) cls = LF_LEATHER;
         uint32_t flags = cls == LF_SKIN ? FLAG_SKIN : 0, colour = 0;
+        if (cls == LF_DARK) flags |= FLAG_CUTOUT;   // eyelashes: cut out by their alpha
         if (cls == LF_HAIR) flags |= FLAG_HAIR;
         else if (lf->cls[t] & LF_UNTEXTURED)
             flags |= FLAG_UNTEXTURED, colour = base[cls][0] | (uint32_t)base[cls][1] << 8 | (uint32_t)base[cls][2] << 16;
@@ -364,8 +393,10 @@ static int init(VkCtx *c, const LinkFigure *lf) {
                                      {lf->uvs[6 * t + 2 * kk], lf->uvs[6 * t + 2 * kk + 1]}};
         }
     }
-    vmaFlushAllocation(c->vma, G.corners_mem, 0, VK_WHOLE_SIZE);
-    return G.ok = 1;
+    vmaFlushAllocation(c->vma, r->corners_mem, 0, VK_WHOLE_SIZE);
+    r->lf = lf;
+    nres++;
+    return r;
 }
 
 static void image_barrier(VkCommandBuffer cb, VkImage img, uint32_t level, uint32_t n, VkImageLayout from, VkImageLayout to,
@@ -380,39 +411,42 @@ static void image_barrier(VkCommandBuffer cb, VkImage img, uint32_t level, uint3
 }
 
 // The atlas into its image, then each mip level blitted from the one above; left in SHADER_READ_ONLY_OPTIMAL.
-static void upload_atlas(VkExec *ex, const LinkFigure *lf) {
-    uint32_t side = lf->atlas_side;
+static void upload_atlas(VkExec *ex, Res *r) {
+    const LinkFigure *lf = r->lf;
+    uint32_t side = lf->atlas_side, rows = lf->atlas_rows ? lf->atlas_rows : side;
     VkBuffer buf;
     VkDeviceSize off;
-    uint8_t *p = vk_exec_scratch(ex, 4ull * side * side, &buf, &off);
-    memcpy(p, lf->albedo, 4ull * side * side);
+    uint8_t *p = vk_exec_scratch(ex, 4ull * side * rows, &buf, &off);
+    memcpy(p, lf->albedo, 4ull * side * rows);
     VkCommandBuffer cb = ex->cb;
-    image_barrier(cb, G.atlas, 0, G.levels, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    image_barrier(cb, r->atlas, 0, r->levels, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                   VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
     VkBufferImageCopy rc = {.bufferOffset = off, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                            .imageExtent = {side, side, 1}};
-    vkCmdCopyBufferToImage(cb, buf, G.atlas, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &rc);
-    for (uint32_t l = 1; l < G.levels; l++) {
-        image_barrier(cb, G.atlas, l - 1, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                            .imageExtent = {side, rows, 1}};
+    vkCmdCopyBufferToImage(cb, buf, r->atlas, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &rc);
+    for (uint32_t l = 1; l < r->levels; l++) {
+        image_barrier(cb, r->atlas, l - 1, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                       VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                       VK_ACCESS_2_TRANSFER_READ_BIT);
-        int32_t s0 = (int32_t)(side >> (l - 1)), s1 = (int32_t)(side >> l);
-        VkImageBlit bl = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l - 1, 0, 1}, .srcOffsets = {{0, 0, 0}, {s0, s0, 1}},
-                          .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l, 0, 1}, .dstOffsets = {{0, 0, 0}, {s1, s1, 1}}};
-        vkCmdBlitImage(cb, G.atlas, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, G.atlas, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+        int32_t w0 = (int32_t)(side >> (l - 1)), w1 = (int32_t)(side >> l), h0 = (int32_t)(rows >> (l - 1)), h1 = (int32_t)(rows >> l);
+        if (h0 < 1) h0 = 1;
+        if (h1 < 1) h1 = 1;
+        VkImageBlit bl = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l - 1, 0, 1}, .srcOffsets = {{0, 0, 0}, {w0, h0, 1}},
+                          .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l, 0, 1}, .dstOffsets = {{0, 0, 0}, {w1, h1, 1}}};
+        vkCmdBlitImage(cb, r->atlas, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, r->atlas, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
                        &bl, VK_FILTER_LINEAR);
     }
-    if (G.levels > 1)
-        image_barrier(cb, G.atlas, 0, G.levels - 1, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+    if (r->levels > 1)
+        image_barrier(cb, r->atlas, 0, r->levels - 1, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                       VK_ACCESS_2_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                       VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
-    image_barrier(cb, G.atlas, G.levels - 1, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    image_barrier(cb, r->atlas, r->levels - 1, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                   VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                   VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
     ex->recorded++;
-    G.atlas_ready = 1;
+    r->atlas_ready = 1;
 }
 
 static float srgb_to_linear(float c) { return c <= 0.04045f ? c / 12.92f : powf((c + 0.055f) / 1.055f, 2.4f); }
@@ -448,10 +482,13 @@ static void to_view(const LinkFigure *lf, const float *pose, const float feet[3]
 static struct {
     int n;
     float *pose[MAX_FIGURES];
+    uint32_t cap[MAX_FIGURES];     // vertices pose[i] holds room for
+    const LinkFigure *lf[MAX_FIGURES];
+    Res *res[MAX_FIGURES];
     float feet[MAX_FIGURES][3], yaw[MAX_FIGURES], hair[MAX_FIGURES][3];
 } posed;
 
-static int pose_figures(const LinkFigure *lf) {
+static int pose_figures(const LinkFigure *base) {
     GfxFigure fig[MAX_FIGURES];
     plat_mutex_lock(&lock);
     uint64_t now = plat_now_ms();
@@ -462,10 +499,20 @@ static int pose_figures(const LinkFigure *lf) {
     float ahead = fminf(0.1f, (float)(now - set_ms) / 1000.0f);
     plat_mutex_unlock(&lock);
     static float *pose2;
-    if (!pose2 && !(pose2 = malloc(12ull * lf->nverts))) return 0;
+    static uint32_t cap2;
     for (int i = 0; i < n; i++) {
         GfxFigure *g = &fig[i];
-        if (!posed.pose[i] && !(posed.pose[i] = malloc(12ull * lf->nverts))) return 0;
+        const LinkFigure *lf = g->fig ? (const LinkFigure *)g->fig : base;
+        posed.lf[i] = lf;
+        if (posed.cap[i] < lf->nverts) {
+            free(posed.pose[i]);
+            posed.cap[i] = (posed.pose[i] = malloc(12ull * lf->nverts)) ? lf->nverts : 0;
+        }
+        if (cap2 < lf->nverts) {
+            free(pose2);
+            cap2 = (pose2 = malloc(12ull * lf->nverts)) ? lf->nverts : 0;
+        }
+        if (!posed.pose[i] || !pose2) return 0;
         float frame = g->frame + g->fps * ahead, prev = g->prev_frame + g->fps * ahead;
         float blend = fminf(1.0f, g->blend + 4.0f * ahead);
         link_figure_pose(lf, g->anim, frame, posed.pose[i]);
@@ -501,10 +548,16 @@ static void view_state(VkCommandBuffer cb, const View *v) {
 }
 
 // Each posed figure's vertices in view space of v, into scratch memory.
-static void figures_in_view(VkExec *ex, const LinkFigure *lf, const View *v, VkBuffer *vbuf, VkDeviceSize *voff) {
+static void figures_in_view(VkExec *ex, const View *v, VkBuffer *vbuf, VkDeviceSize *voff) {
     static float *acc;
-    if (!acc && !(acc = malloc(12ull * lf->nverts))) return;
+    static uint32_t cap;
     for (int i = 0; i < posed.n; i++) {
+        const LinkFigure *lf = posed.lf[i];
+        if (cap < lf->nverts) {
+            free(acc);
+            cap = (acc = malloc(12ull * lf->nverts)) ? lf->nverts : 0;
+        }
+        if (!acc) return;
         float *o = (float *)vk_exec_scratch(ex, 32ull * lf->nverts, &vbuf[i], &voff[i]);
         to_view(lf, posed.pose[i], posed.feet[i], posed.yaw[i], v->cam, o, acc);
     }
@@ -521,18 +574,29 @@ void vk_figure_draw(VkExec *ex) {
     if (!logged && n) logged = 1, rt_log("figure: drawing %d figure(s) into the G-buffer", n);
     if (!n) return;
     VkCtx *c = vk_ctx();
-    if (!G.tried && !init(c, lf)) return;
+    if (!G.tried && !init(c)) return;
     if (!G.ok) return;
     if (arm.color[0].format != G.fmt[0] || arm.color[1].format != G.fmt[1] || arm.color[3].format != G.fmt[3] ||
         arm.v.depth.format != G.dfmt)
         return;   // not the G-buffer this pipeline was made for
-    uint64_t per = 32ull * lf->nverts;
+    for (int i = 0; i < n; i++) {   // each figure's GPU objects; one that cannot have them drawn as the base figure
+        posed.res[i] = res_for(c, posed.lf[i]);
+        if (!posed.res[i] && posed.lf[i] != lf) {
+            posed.res[i] = res_for(c, lf);
+            if (posed.res[i] && posed.cap[i] >= lf->nverts) {
+                posed.lf[i] = lf;
+                link_figure_pose(lf, LF_WAIT, 0, posed.pose[i]);
+            } else posed.res[i] = NULL;
+        }
+        if (!posed.res[i]) return;
+    }
     VkBuffer vbuf[MAX_FIGURES];
     VkDeviceSize voff[MAX_FIGURES];
-    figures_in_view(ex, lf, &arm.v, vbuf, voff);
+    figures_in_view(ex, &arm.v, vbuf, voff);
 
     vk_exec_barrier(ex);   // the G-buffer pass's writes; its targets back in the GENERAL layout
-    if (!G.atlas_ready) upload_atlas(ex, lf);
+    for (int i = 0; i < n; i++)
+        if (!posed.res[i]->atlas_ready) upload_atlas(ex, posed.res[i]);
     VkRenderingAttachmentInfo ca[4];
     for (int i = 0; i < 4; i++) {
         ca[i] = (VkRenderingAttachmentInfo){.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
@@ -584,10 +648,11 @@ void vk_figure_draw(VkExec *ex) {
     memcpy(&push[26], &stride, 4);
     memcpy(&push[27], &tile_base, 4);
     VkDeviceSize zero = 0;
-    vkCmdBindVertexBuffers(cb, 0, 1, &G.corners, &zero);
-    VkDescriptorImageInfo ii = {G.sampler, G.atlas_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     for (int i = 0; i < n; i++) {
-        VkDescriptorBufferInfo bi = {vbuf[i], voff[i], per};
+        Res *r = posed.res[i];
+        vkCmdBindVertexBuffers(cb, 0, 1, &r->corners, &zero);
+        VkDescriptorImageInfo ii = {G.sampler, r->atlas_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorBufferInfo bi = {vbuf[i], voff[i], 32ull * posed.lf[i]->nverts};
         VkWriteDescriptorSet wr[3] = {
             {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstBinding = 0, .descriptorCount = 1,
              .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &bi},
@@ -598,7 +663,7 @@ void vk_figure_draw(VkExec *ex) {
         rec_push(G.push, cb, VK_PIPELINE_BIND_POINT_GRAPHICS, G.layout, 0, 3, wr);
         push[20] = posed.hair[i][0], push[21] = posed.hair[i][1], push[22] = posed.hair[i][2], push[23] = 1;
         vkCmdPushConstants(cb, G.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof push, push);
-        vkCmdDraw(cb, 3 * lf->ntris, 1, 0, 0);
+        vkCmdDraw(cb, 3 * posed.lf[i]->ntris, 1, 0, 0);
     }
     vkCmdEndRendering(cb);
     ex->recorded += 8;
@@ -610,8 +675,7 @@ void vk_figure_draw(VkExec *ex) {
 // ground and on themselves) like the game's own characters.
 static void draw_shadow(VkExec *ex) {
     shadow.on = 0;
-    const LinkFigure *lf = link_figure();
-    if (!lf || !G.ok || !posed.n) return;
+    if (!link_figure() || !G.ok || !posed.n) return;
     VkCtx *c = vk_ctx();
     if (!G.shadow_tried) {
         G.shadow_tried = 1, G.shadow_fmt = shadow.v.depth.format;
@@ -620,7 +684,9 @@ static void draw_shadow(VkExec *ex) {
     if (!G.shadow_pipe || shadow.v.depth.format != G.shadow_fmt) return;
     VkBuffer vbuf[MAX_FIGURES];
     VkDeviceSize voff[MAX_FIGURES];
-    figures_in_view(ex, lf, &shadow.v, vbuf, voff);
+    for (int i = 0; i < posed.n; i++)
+        if (!posed.res[i] || !posed.res[i]->atlas_ready) return;   // the G-buffer draw made them first
+    figures_in_view(ex, &shadow.v, vbuf, voff);
     vk_exec_barrier(ex);
     VkRenderingAttachmentInfo da = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
                                     .imageView = vk_exec_attach_view(ex, &shadow.v.depth),
@@ -637,14 +703,15 @@ static void draw_shadow(VkExec *ex) {
     float push[28];
     view_push(&shadow.v, push);
     VkDeviceSize zero = 0;
-    vkCmdBindVertexBuffers(cb, 0, 1, &G.corners, &zero);
-    VkDescriptorImageInfo ii = {G.sampler, G.atlas_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkBuffer sb;
     VkDeviceSize so;
     memset(vk_exec_scratch(ex, 256, &sb, &so), 0, 256);
     VkDescriptorBufferInfo tb = {sb, so, 256};
     for (int i = 0; i < posed.n; i++) {
-        VkDescriptorBufferInfo bi = {vbuf[i], voff[i], 32ull * lf->nverts};
+        Res *r = posed.res[i];
+        vkCmdBindVertexBuffers(cb, 0, 1, &r->corners, &zero);
+        VkDescriptorImageInfo ii = {G.sampler, r->atlas_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorBufferInfo bi = {vbuf[i], voff[i], 32ull * posed.lf[i]->nverts};
         VkWriteDescriptorSet wr[3] = {
             {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstBinding = 0, .descriptorCount = 1,
              .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &bi},
@@ -654,7 +721,7 @@ static void draw_shadow(VkExec *ex) {
              .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &tb}};
         rec_push(G.push, cb, VK_PIPELINE_BIND_POINT_GRAPHICS, G.layout, 0, 3, wr);
         vkCmdPushConstants(cb, G.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof push, push);
-        vkCmdDraw(cb, 3 * lf->ntris, 1, 0, 0);
+        vkCmdDraw(cb, 3 * posed.lf[i]->ntris, 1, 0, 0);
     }
     vkCmdEndRendering(cb);
     ex->recorded += 8;

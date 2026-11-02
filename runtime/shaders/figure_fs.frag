@@ -47,7 +47,8 @@ void main() {
         albedo = srgb_to_linear(unpackUnorm4x8(v_colour).rgb);
     } else {
         vec4 t = texture(atlas, v_uv);
-        if (t.a < 0.5) discard;   // cut-out parts (eyelashes, strands)
+        // cut-out parts (eyelashes): only those, as armor keeps other data in its textures' alpha (a dye's mask)
+        if ((flags & 8u) != 0u && t.a < 0.5) discard;
         albedo = t.rgb;
     }
     if (pc.tiles.x > 0.0) {

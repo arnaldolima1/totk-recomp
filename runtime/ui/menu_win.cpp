@@ -72,6 +72,11 @@ extern "C" int menu_window_msg(HWND h, UINT m, WPARAM w, LPARAM l, LRESULT *res)
             *res = 0;
             return 1;
         }
+        if (w == VK_F12) {   // a screenshot (menu.cpp menu_screenshot)
+            if (!(l & (1 << 30))) menu_screenshot();
+            *res = 0;
+            return 1;
+        }
         if (w == VK_F10) {   // also keeps F10 from opening the window menu
             if (!(l & (1 << 30))) menu_perf_cycle();
             *res = 0;

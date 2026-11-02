@@ -151,6 +151,7 @@ void rt_sha256(const void *p, size_t n, uint8_t out[32]) { sha256(p, n, out); }
 // ---- configuration
 static RtConfig cfg;
 const RtConfig *rt_config(void) { return &cfg; }
+const char *rt_profile_dir(void) { return cfg.profile; }
 
 // ---- runtime services the generated code calls (cpu.h)
 volatile int g_fnprof = 0;

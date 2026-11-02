@@ -116,6 +116,12 @@ static void add_line(int kind, const char *from, const char *text, const char *a
     }
 }
 
+void mp_local_notice(const char *text) {
+    plat_mutex_lock(&lock);
+    add_line(MP_LINE_EVENT, "", text, "", "", 1);
+    plat_mutex_unlock(&lock);
+}
+
 // The prologue is over: Link has woken on the Great Sky Island in the newest save. Rooms are for the open game, so
 // the client waits until then (MP_LOCKED). Without achievements loaded no save is read: the gate stays open.
 static int island_reached(void) {

@@ -32,6 +32,7 @@ typedef struct {
     uint8_t *atlas;    // atlas_side x atlas_side RGBA8, lifted for the overlay
     uint8_t *albedo;   // the same as stored (sRGB)
     uint32_t atlas_side;
+    uint32_t atlas_rows;   // the albedo's rows when not square (a dressed figure, 2048 x 1024), 0 square
     uint32_t nbones;
     uint16_t *skin;    // per vertex four (bone, weight of 65535)
     int nanims;
@@ -48,6 +49,10 @@ const LinkFigure *link_figure(void);   // NULL when <profile>/link-figure.bin is
 // holds its last frame); the bind pose for a bad anim.
 void link_figure_pose(const LinkFigure *f, int anim, float frame, float *out);
 int link_figure_find(const LinkFigure *f, const char *name);   // the animation of that name, -1 none
+// The figure dressed in a friend's worn pieces (head, upper, lower actor names, Armor_001_Upper; "" none) from
+// <profile>/link-armor.bin: the base figure's skeleton and animations with the pieces' meshes and an atlas of their
+// own (2048 x 1024); the base figure when none are named or there is no library. Kept for the session (up to 8 at a time).
+const LinkFigure *link_figure_dressed(const char look[3][48]);
 // Turns posed vertices (model space, about the feet) by the row-major 3x3 m into the world's axes.
 void link_figure_rotate(const LinkFigure *f, float *verts, const float m[9]);
 // The figure's rotation: the friend's (a unit quaternion x, y, z, w; net_mp.h MpPlayer rot), then turn radians about

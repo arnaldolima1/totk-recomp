@@ -293,6 +293,7 @@ typedef struct {
     float blend;                     // 0..1: how far into anim (it rises by 4 a second)
     float feet[3], vel[3], yaw;      // world metres, metres a second, radians (ui/menu.cpp draw_link_mesh)
     float rot[9];                    // the figure's rotation, row-major 3x3 (link_figure_orient); yaw then 0
+    const void *fig;                 // the LinkFigure to draw (link_figure_dressed), NULL the base one
     float hair[3];                   // sRGB 0..1
 } GfxFigure;
 int gfx_figures_wanted(void);
@@ -350,6 +351,7 @@ typedef struct { const char *exefs, *romfs, *profile; int boot; double seconds; 
                                                            // frames: --frames N (0 = no limit); shot: --shot
                                                            // PATH; gpu: TOTK_GPU
 const RtConfig *rt_config(void);
+const char *rt_profile_dir(void);   // rt_config()->profile, for C++ that cannot include this header
 void rt_boot_event(const char *what, Cpu *c, const char *detail);   // checkpoint log; "nvn" ends --boot
 void rt_boot(void);                                        // boot.c
 // Modes of totk.exe. main.c has run mem_init and parsed the paths; each mode calls ldr_load itself if it needs the

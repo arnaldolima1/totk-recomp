@@ -82,6 +82,7 @@ int mp_send_chat(const char *text);    // queued for the thread; 0 when not conn
 void mp_reconnect(void);               // after the settings changed: drop the connection and try again now
 int mp_mark(void);                     // marks where the player stands, for everyone in the room; 0 when not possible
 int mp_slot_of(const char *name);      // that player's slot in the room, -1 when unknown
+void mp_local_notice(const char *text);   // a notice of this game's own, shown with the room's (a screenshot taken)
 // The voice clips that friend's Link started (comma-separated, PV000_02), each once, when the friend's shown place
 // (mp_view, POS_DELAY_MS behind) reaches the moment it started; the length, 0 none.
 int mp_take_sfx(const char *name, char *out, size_t cap);

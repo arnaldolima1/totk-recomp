@@ -57,6 +57,7 @@ extern "C" {
 #include "ui_text.h"
 // host.h and vk.h pull in cpu.h, which is C only: the functions the menu needs from them, as declared there.
 void rt_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+const char *rt_profile_dir(void);
 void vk_queue_lock(void);
 void vk_queue_unlock(void);
 uint32_t vk_pipeline_building(void);
@@ -82,6 +83,7 @@ typedef struct {
     float blend;                     // 0..1: how far into anim (it rises by 4 a second)
     float feet[3], vel[3], yaw;      // world metres, metres a second, radians (ui/menu.cpp draw_link_mesh)
     float rot[9];                    // the figure's rotation, row-major 3x3 (link_figure_orient); yaw then 0
+    const void *fig;                 // the LinkFigure to draw (link_figure_dressed), NULL the base one
     float hair[3];                   // sRGB 0..1
 } GfxFigure;
 int gfx_figures_wanted(void);
@@ -2281,6 +2283,7 @@ static void world_tags(const MenuTarget *t, const MpView &v, float scale, bool (
                 memcpy(g.vel, fs_->vel, sizeof g.vel);
                 g.yaw = 0;
                 link_figure_orient(p.rot, fs_->turn, g.rot);
+                g.fig = link_figure_dressed(p.look);   // what the friend wears (net_mp.c LOOK lines)
                 g.hair[0] = col.x * 0.9f + 0.08f, g.hair[1] = col.y * 0.9f + 0.08f, g.hair[2] = col.z * 0.9f + 0.08f;
                 ngfig++;
                 drawn = true;
@@ -3183,6 +3186,10 @@ static char g_perf_text[96];
 
 static int perf_mode_of(const char *s) { return !strcmp(s, "full") ? 2 : !strcmp(s, "fps") ? 1 : 0; }
 
+static std::atomic<int> g_shot_pending;
+
+extern "C" void menu_screenshot(void) { g_shot_pending.store(1); }
+
 extern "C" void menu_perf_cycle(void) {
     static const char *const modes[] = {"off", "fps", "full"};
     cfg_set("TOTK_PERF_OVERLAY", modes[(perf_mode_of(cfg_value("TOTK_PERF_OVERLAY")) + 1) % 3]);
@@ -3530,6 +3537,25 @@ static void note_draw(const MenuTarget *t, float scale) {
 
 extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const char **shot) {
     *shot = NULL;
+    if (g_shot_pending.exchange(0)) {   // F12: this frame into <profile>/screenshots (gfx_present.c saves it)
+        static char path[1400];
+        char dir[1200], stamp[32];
+        snprintf(dir, sizeof dir, "%s/screenshots", rt_profile_dir());
+        plat_file_mkdir_p(dir);
+        time_t now = time(NULL);
+        struct tm tm;
+#ifdef _WIN32
+        localtime_s(&tm, &now);
+#else
+        localtime_r(&now, &tm);
+#endif
+        strftime(stamp, sizeof stamp, "%Y%m%d_%H%M%S", &tm);
+        snprintf(path, sizeof path, "%s/TotK_%s.png", dir, stamp);
+        *shot = path;
+        char note[96];
+        snprintf(note, sizeof note, "F12: TotK_%s.png", stamp);
+        mp_local_notice(note);
+    }
     cheats_frame(frame);   // the data cheats and the buttons of the cheats that need them held
     if (!g_test.parsed) test_parse();
     if (g_test.next_set < g_test.n_sets && frame >= g_test.sets[g_test.next_set].frame) test_apply_sets(frame);
