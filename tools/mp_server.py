@@ -45,12 +45,13 @@ TRACKS = [
 TIERS = ('Bronze', 'Prata', 'Ouro', 'Lendário')
 
 
-def clean(s):
-    return str(s).replace('\t', ' ').replace('\r', ' ').replace('\n', ' ')[:500]
+def clean(s, limit=500):
+    return str(s).replace('\t', ' ').replace('\r', ' ').replace('\n', ' ')[:limit]
 
 
-def line(*fields):
-    return ('\t'.join(clean(f) for f in fields) + '\n').encode('utf-8')
+def line(*fields, limit=500):
+    """A protocol line; each field at most limit characters (a POS line's body pose is longer than chat may be)."""
+    return ('\t'.join(clean(f, limit) for f in fields) + '\n').encode('utf-8')
 
 
 class Player:
@@ -236,14 +237,17 @@ async def handle(room, reader, writer):
                         and f[6].isascii() else ''   # Name or Name:frame
                     sfx = f[8][:70] if len(f) > 8 and f[8].replace('_', '').replace(',', '').isalnum() and f[8].isascii() else ''
                     quat = ','.join(f'{float(v):.4f}' for v in f[7].split(',')) if len(f) > 7 and f[7].count(',') == 3 else ''
+                    # their Link's real body pose (runtime/link_figure.c link_body_encode: base64url, a fixed length)
+                    body = f[9] if len(f) > 9 and len(f[9]) <= 1024 and f[9].isascii() and \
+                        f[9].replace('-', '').replace('_', '').isalnum() else ''
                     extra = [f'{float(f[4]):.3f}' if len(f) > 4 and f[4] else '',
                              str(int(f[5])) if len(f) > 5 and f[5] else '', anim,
-                             quat, sfx]
+                             quat, sfx, body]
                     while extra and not extra[-1]:   # an older game's line stays as short as it came
                         extra.pop()
                 except ValueError:
                     continue
-                await room.broadcast(line('POS', p.name, *p.pos, *extra) if any(extra) else
+                await room.broadcast(line('POS', p.name, *p.pos, *extra, limit=1024) if any(extra) else
                                      line('POS', p.name, *p.pos), skip=p)
             elif kind == 'LOOK' and len(f) >= 4 and p.name:   # the armor a player wears, to everyone else
                 p.look = tuple(v if v.startswith('Armor_') and v.replace('_', '').isalnum() else '' for v in

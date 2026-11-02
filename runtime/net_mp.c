@@ -62,6 +62,8 @@ typedef struct {
     float frame;            // the frame of anim the sender's game showed (NAN when not sent)
     char sfx[MP_SFX_MAX];   // the voice clips Link started then, comma-separated ("" none)
     int sfx_taken;          // mp_take_sfx gave them out
+    int has_body;           // the sender's real body pose came (link_body_decode)
+    LinkBody body;
 } PosSample;
 // t: the sender's clock (ms); yaw NAN when not sent; anim the animation Link plays, "" when not sent
 static struct {
@@ -151,11 +153,11 @@ static int send_all(Sock s, const char *data, size_t n) {
 
 // Sends the fields as one line.
 static int send_line(Sock s, int nfields, const char *const *fields) {
-    char buf[1024];
+    char buf[2048];
     size_t n = 0;
     for (int i = 0; i < nfields && n + 2 < sizeof buf; i++) {
         if (i) buf[n++] = '\t';
-        char f[512];
+        char f[1024];
         field(f, sizeof f, fields[i]);
         n += (size_t)snprintf(buf + n, sizeof buf - n, "%s", f);
     }
@@ -167,9 +169,10 @@ static int send_line(Sock s, int nfields, const char *const *fields) {
 // POS x y z yaw t anim quat sfx: centimetres, the way Link faces (radians, "" when unread), this game's clock in
 // milliseconds, the animation Link plays and its frame (game_player_anim: "Name:frame", "" when unread), his whole
 // rotation (game_player_quat:
-// "x,y,z,w", "" when unread) and the voice clips he started since the last line (game_player_voices, comma-separated).
+// "x,y,z,w", "" when unread), the voice clips he started since the last line (game_player_voices, comma-separated) and
+// his real body pose (game_player_body as link_body_encode packs it, "" when unread).
 static int send_pos(Sock s, const float p[3], float yaw, const float q[4], int64_t t, const char *anim, float frame,
-                    const char *sfx) {
+                    const char *sfx, const char *body) {
     char x[24], y[24], z[24], w[24], tt[24], qs[64], an[MP_ANIM_MAX + 16];
     if (anim[0] && isfinite(frame)) snprintf(an, sizeof an, "%s:%.2f", anim, frame);
     else snprintf(an, sizeof an, "%s", anim);
@@ -179,8 +182,8 @@ static int send_pos(Sock s, const float p[3], float yaw, const float q[4], int64
     snprintf(tt, sizeof tt, "%lld", (long long)t);
     if (q[3] <= 1) snprintf(qs, sizeof qs, "%.4f,%.4f,%.4f,%.4f", q[0], q[1], q[2], q[3]);
     else qs[0] = 0;
-    const char *pos[] = {"POS", x, y, z, w, tt, an, qs, sfx};
-    return send_line(s, 9, pos);
+    const char *pos[] = {"POS", x, y, z, w, tt, an, qs, sfx, body};
+    return send_line(s, body[0] ? 10 : 9, pos);
 }
 
 // host[:port] into a connected socket, or SOCK_BAD with *why set.
@@ -283,6 +286,12 @@ static void on_line(char *line, Sock s) {
             (ql = sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3])) > 0.5f && ql < 1.5f)
             for (int k = 0; k < 4; k++) smp.q[k] = q[k] / ql;
         if (n >= 10) field(smp.sfx, sizeof smp.sfx, f[9]);
+        smp.has_body = n >= 11 && link_body_decode(f[10], &smp.body);
+        static int body_logged;
+        if (smp.has_body && !body_logged++) rt_log("mp: %s's game sends their Link's body pose", f[1]);
+        static int bad_logged;
+        if (n >= 11 && !smp.has_body && f[10][0] && !bad_logged++)
+            rt_log("mp: %s's body pose (%zu characters) is not one this game reads", f[1], strlen(f[10]));
         if (!isfinite(smp.pos[0]) || !isfinite(smp.pos[1]) || !isfinite(smp.pos[2])) return;
         plat_mutex_lock(&lock);
         int slot = -1, oldest = 0;
@@ -628,8 +637,11 @@ static void session(const char *server) {
                 // after standing still, the place of the tick before goes first with its own time: the friend's game
                 // then sees the stop last until the step began, not a slow slide over the whole pause
                 if (sent_at && now - sent_at > 2 * POS_EVERY_MS && prev.t > (int64_t)sent_at)
-                    alive = send_pos(s, prev.pos, prev.yaw, prev.q, prev.t, prev.anim, prev.frame, "");
-                if (alive) alive = send_pos(s, p, yaw, q, (int64_t)now, anim, frame, sfx);
+                    alive = send_pos(s, prev.pos, prev.yaw, prev.q, prev.t, prev.anim, prev.frame, "", "");
+                static float pal[89 * 12];   // the body's palette up to the last entry sent (LF_BODY_ENTRY)
+                char body[(LF_BODY_BYTES + 2) / 3 * 4 + 1];
+                link_body_encode(pal, game_player_body(pal, 89), body, sizeof body);
+                if (alive) alive = send_pos(s, p, yaw, q, (int64_t)now, anim, frame, sfx, body);
                 snprintf(sent_anim, sizeof sent_anim, "%s", anim);
                 if (q[3] <= 1) memcpy(sent_q, q, sizeof q);
                 memcpy(sent_pos, p, sizeof p);
@@ -759,7 +771,8 @@ static void sample_quat(const PosSample *s, float q[4]) {
 // frames: the frame of the animation shown at t from the two samples around it, as (from, to, u): from + (to - from)
 // u, with to below from when a loop started over between them (the reader, knowing its length, adds it); NAN from
 // when not sent.
-static void place_on(int k, int64_t t, float pos[3], float *yaw, int *held, const char **anim, float rot[4], float frames[3]) {
+static void place_on(int k, int64_t t, float pos[3], float *yaw, int *held, const char **anim, float rot[4], float frames[3],
+                     LinkBody *body, int *has_body) {
     int n = friend_pos[k].n, head = friend_pos[k].head;
     const PosSample *ring = friend_pos[k].ring;
 #define SAMPLE(i) (&ring[(head + POS_RING - n + (i)) % POS_RING])   // 0 the oldest kept, n - 1 the newest
@@ -796,6 +809,13 @@ static void place_on(int k, int64_t t, float pos[3], float *yaw, int *held, cons
         l = sqrtf(l);
         for (int c = 0; c < 4; c++) rot[c] = l > 1e-6f ? rot[c] / l : (c == 3);
     }
+    if (body) {   // the real pose between the two, or the one there is
+        const PosSample *at = u >= 1 ? b : a;
+        *has_body = 1;
+        if (a->has_body && b->has_body) link_body_lerp(&a->body, &b->body, fminf(u, 1.0f), body);
+        else if (at->has_body) *body = at->body;
+        else *has_body = 0;
+    }
     for (int c = 0; c < 3; c++) pos[c] = a->pos[c] + (b->pos[c] - a->pos[c]) * u;
     if (!yaw) return;
     if (isfinite(a->yaw) && isfinite(b->yaw))
@@ -808,14 +828,14 @@ static void place_on(int k, int64_t t, float pos[3], float *yaw, int *held, cons
 // the way it went over the last POS_VEL_MS, not over one step: a step is 50 ms and its length jitters with the
 // sender's timing, which would make the figure's gait flicker. 0 once held.
 static void place_at(int k, uint64_t now, float pos[3], float vel[3], float *yaw, char anim[MP_ANIM_MAX], float rot[4],
-                     float frames[3]) {
+                     float frames[3], LinkBody *body, int *has_body) {
     int64_t t = (int64_t)now - friend_pos[k].offset - POS_DELAY_MS;
     int held = 0;
     float before[3];
     const char *playing = "";
-    place_on(k, t, pos, yaw, &held, &playing, rot, frames);
+    place_on(k, t, pos, yaw, &held, &playing, rot, frames, body, has_body);
     snprintf(anim, MP_ANIM_MAX, "%s", playing);
-    place_on(k, t - POS_VEL_MS, before, NULL, NULL, NULL, NULL, NULL);
+    place_on(k, t - POS_VEL_MS, before, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
     for (int c = 0; c < 3; c++) vel[c] = held ? 0 : (pos[c] - before[c]) * 1000.0f / POS_VEL_MS;
 }
 
@@ -848,13 +868,13 @@ void mp_view(MpView *out) {
     *out = view;
     for (int i = 0; i < out->nplayers; i++) {   // the friends' positions, while fresh
         MpPlayer *p = &out->players[i];
-        p->has_pos = 0, p->yaw = NAN, p->anim[0] = 0, p->rot[0] = p->rot[1] = p->rot[2] = 0, p->rot[3] = 1;
+        p->has_pos = 0, p->yaw = NAN, p->anim[0] = 0, p->rot[0] = p->rot[1] = p->rot[2] = 0, p->rot[3] = 1, p->has_body = 0;
         p->frames[0] = p->frames[1] = NAN, p->frames[2] = 0;
         memset(p->vel, 0, sizeof p->vel);
         for (int k = 0; k < MP_MAX_PLAYERS; k++)
             if (friend_pos[k].name[0] && !strcmp(friend_pos[k].name, p->name) && now - friend_pos[k].at_ms < POS_STALE_MS &&
                 friend_pos[k].n > 0)
-                p->has_pos = 1, place_at(k, now, p->pos, p->vel, &p->yaw, p->anim, p->rot, p->frames);
+                p->has_pos = 1, place_at(k, now, p->pos, p->vel, &p->yaw, p->anim, p->rot, p->frames, &p->body, &p->has_body);
         if (!strcmp(p->name, me) && view.me_has_pos) memcpy(p->pos, view.me_pos, sizeof p->pos), p->has_pos = 1;
         memset(p->look, 0, sizeof p->look);
         for (int k = 0; k < MP_MAX_PLAYERS; k++)

@@ -1,5 +1,6 @@
 // Link's figure for friends in a multiplayer room (link_figure.c, tools/link_figure.py).
 #pragma once
+#include <stddef.h>
 #include <stdint.h>
 #ifdef __cplusplus
 extern "C" {
@@ -43,7 +44,30 @@ typedef struct {
     float *bind;       // per bone 9 floats: scale xyz, euler XYZ, translation xyz
     float *inv_bind;   // per bone its inverse bind world, row-major 3x4
     char *bone_names;  // per bone 32 bytes
+    // Link_RaulSkin's skinning palette (the game's, game_player_body) as the figure's bones: per entry its bone
+    // (0xffff none) and 1 when rigid (the pose itself, not the pose times the inverse bind); npalm 0 in an older file
+    uint32_t npalm;
+    uint16_t *palm_bone;
+    uint8_t *palm_rigid;
 } LinkFigure;
+// A friend's real body pose (net_mp.c POS lines): the rotations of the palette entries LF_BODY_ENTRY lists, each
+// entry's skinning matrix in the friend's actor space (x right, y up, z forward about their feet), and the
+// translations of the two whose bones head the body's chains (Spine_1 and Waist), in metres.
+enum { LF_BODY_N = 58, LF_BODY_BYTES = LF_BODY_N * 8 + 12 };
+typedef struct {
+    float q[LF_BODY_N][4];   // unit quaternions x, y, z, w
+    float t[2][3];           // entries 0 and 65
+} LinkBody;
+extern const uint8_t LF_BODY_ENTRY[LF_BODY_N];
+// The palette entries (count x 12 floats, row-major 3x4, actor space) as the POS line's text: LF_BODY_BYTES packed
+// (int16 quaternions, millimetres) in base64url; "" when there are too few entries.
+void link_body_encode(const float *pal, int count, char *out, size_t cap);
+int link_body_decode(const char *text, LinkBody *out);   // 1 when it was a whole pose
+void link_body_lerp(const LinkBody *a, const LinkBody *b, float t, LinkBody *out);
+// As link_figure_pose, with the bones the body pose has (and their children) in their real place: those without
+// (the Zonai forearm, the hair) take animation anim's local transforms under them. The plain pose when the figure
+// has no palette table.
+void link_figure_pose_body(const LinkFigure *f, int anim, float frame, const LinkBody *body, float *out);
 const LinkFigure *link_figure(void);   // NULL when <profile>/link-figure.bin is missing or unreadable
 // The vertices (3 floats each, model space) of animation anim at a fractional frame (a looping one wraps, another
 // holds its last frame); the bind pose for a bad anim.

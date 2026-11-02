@@ -369,6 +369,47 @@ int game_player_anim(char *out, size_t cap, float *frame) {
     return 0;
 }
 
+// Link's body as the game draws it, 1.4.3 only (measured with anim_probe.c, TOTK_ANIM_PROBE=bonedump and models):
+// the model unit [actor+0x238] holds his body's model (Link_RaulSkin) at +0x3e0, whose [+0x458]+0x8 is that model's
+// skinning palette for this frame: per matrix_to_bone entry a row-major 3x4, the bone's pose times its inverse bind
+// (smooth entries) or the pose itself (rigid ones, after the smooth). It is the final pose: the animation's layers
+// blended (the shield held up while walking, the bow drawn), the rag doll of a knock-down, the feet set on the ground.
+// The palette is in world axes about a render origin on a 10 m grid (each axis a multiple of 10 m near Link); the
+// origin is the cell whose corner puts the body's first entry nearest his place. *out gets each entry in his actor
+// space (his place the origin, his right, up and forward the axes), for a friend's figure (link_figure_pose_body).
+int game_player_body(float *out, int max) {
+    uint64_t actor = RT_V143 ? player_actor() : 0, unit = actor ? read_ptr(actor + 0x238) : 0;
+    uint64_t mdl = unit ? read_ptr(unit + 0x3e0) : 0, res = mdl ? read_ptr(mdl + 0x458) : 0, pal = res ? read_ptr(res + 0x8) : 0;
+    float p[3], r[9];
+    static int why_logged;   // once: why the first read failed (a different game layout shows here)
+#define BODY_FAIL(why) return (!why_logged++ ? rt_log("body: %s", why) : (void)0), 0
+    if (!pal) BODY_FAIL("no palette at actor->0x238->0x3e0->0x458->0x8");
+    if (max <= 0 || max > 128 || !read_guest(actor + 0x2b4, p, 12) || !read_guest(actor + 0x2c0, r, 36) ||
+        !read_guest(pal, out, 48ull * (size_t)max))
+        BODY_FAIL("palette unreadable");
+    for (int i = 0; i < 12 * max; i++)
+        if (!isfinite(out[i]) || fabsf(out[i]) > 1e5f) BODY_FAIL("palette holds no transforms");
+    float best = 1e9f, local[3] = {0};
+    for (int d = 0; d < 27; d++) {   // the render origin: the 10 m cell corner by Link, or one next to it
+        float o[3] = {floorf(p[0] / 10) * 10 + (d % 3 - 1) * 10, floorf(p[1] / 10) * 10 + (d / 3 % 3 - 1) * 10,
+                      floorf(p[2] / 10) * 10 + (d / 9 - 1) * 10};
+        float dx = out[3] + o[0] - p[0], dy = out[7] + o[1] - p[1], dz = out[11] + o[2] - p[2], e = dx * dx + dy * dy + dz * dz;
+        if (e < best) best = e, local[0] = p[0] - o[0], local[1] = p[1] - o[1], local[2] = p[2] - o[2];
+    }
+    if (best > 25) BODY_FAIL("palette more than 5 m from Link");   // not his
+#undef BODY_FAIL
+    if (!why_logged) why_logged = 1, rt_log("body: Link's palette read (%d entries)", max);
+    for (int k = 0; k < max; k++) {   // R^T (S - [0 | place]): rotation and translation into his actor space
+        float *m = out + 12 * k, n[12];
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) n[4 * i + j] = r[i] * m[j] + r[3 + i] * m[4 + j] + r[6 + i] * m[8 + j];
+            n[4 * i + 3] = r[i] * (m[3] - local[0]) + r[3 + i] * (m[7] - local[1]) + r[6 + i] * (m[11] - local[2]);
+        }
+        memcpy(m, n, sizeof n);
+    }
+    return max;
+}
+
 static void speed_report(uint64_t now, double step, int interval) {
     if (!win_t0) {
         win_t0 = now;

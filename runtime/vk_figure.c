@@ -515,8 +515,10 @@ static int pose_figures(const LinkFigure *base) {
         if (!posed.pose[i] || !pose2) return 0;
         float frame = g->frame + g->fps * ahead, prev = g->prev_frame + g->fps * ahead;
         float blend = fminf(1.0f, g->blend + 4.0f * ahead);
-        link_figure_pose(lf, g->anim, frame, posed.pose[i]);
-        if (blend < 1) {   // still blending out of the previous animation
+        _Static_assert(sizeof g->body == sizeof(LinkBody), "GfxFigure body is a LinkBody");
+        if (g->has_body) link_figure_pose_body(lf, g->anim, frame, (const LinkBody *)g->body, posed.pose[i]);
+        else link_figure_pose(lf, g->anim, frame, posed.pose[i]);
+        if (blend < 1 && !g->has_body) {   // still blending out of the previous animation
             float *p = posed.pose[i];
             link_figure_pose(lf, g->prev_anim, prev, pose2);
             for (uint64_t q = 0; q < 3ull * lf->nverts; q++) p[q] = pose2[q] + (p[q] - pose2[q]) * blend;

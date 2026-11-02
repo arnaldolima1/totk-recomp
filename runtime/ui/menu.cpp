@@ -85,6 +85,8 @@ typedef struct {
     float rot[9];                    // the figure's rotation, row-major 3x3 (link_figure_orient); yaw then 0
     const void *fig;                 // the LinkFigure to draw (link_figure_dressed), NULL the base one
     float hair[3];                   // sRGB 0..1
+    int has_body;                    // body: the friend's real pose, a LinkBody (link_figure.h) as floats; the
+    float body[238];                 // animation then moves only the bones it lacks
 } GfxFigure;
 int gfx_figures_wanted(void);
 void gfx_figures_set(const GfxFigure *f, int n);
@@ -2282,20 +2284,24 @@ static void world_tags(const MenuTarget *t, const MpView &v, float scale, bool (
                 memcpy(g.feet, p.pos, sizeof g.feet);
                 memcpy(g.vel, fs_->vel, sizeof g.vel);
                 g.yaw = 0;
-                link_figure_orient(p.rot, fs_->turn, g.rot);
+                // with the real pose the body's own turn is in it: the animation's turn (figure_animate) stays out
+                link_figure_orient(p.rot, p.has_body ? 0 : fs_->turn, g.rot);
                 g.fig = link_figure_dressed(p.look);   // what the friend wears (net_mp.c LOOK lines)
+                g.has_body = p.has_body;
+                if (p.has_body) memcpy(g.body, &p.body, sizeof g.body);
                 g.hair[0] = col.x * 0.9f + 0.08f, g.hair[1] = col.y * 0.9f + 0.08f, g.hair[2] = col.z * 0.9f + 0.08f;
                 ngfig++;
                 drawn = true;
             } else {
                 pose.resize(3ull * lf->nverts), pose2.resize(3ull * lf->nverts);
-                link_figure_pose(lf, fs_->anim, fs_->frame, pose.data());
-                if (fs_->blend < 1) {   // blend out of the previous animation
+                if (p.has_body) link_figure_pose_body(lf, fs_->anim, fs_->frame, &p.body, pose.data());
+                else link_figure_pose(lf, fs_->anim, fs_->frame, pose.data());
+                if (fs_->blend < 1 && !p.has_body) {   // blend out of the previous animation
                     link_figure_pose(lf, fs_->prev_anim, fs_->prev_frame, pose2.data());
                     for (size_t q = 0; q < pose.size(); q++) pose[q] = pose2[q] + (pose[q] - pose2[q]) * fs_->blend;
                 }
                 float rot[9];
-                link_figure_orient(p.rot, fs_->turn, rot);
+                link_figure_orient(p.rot, p.has_body ? 0 : fs_->turn, rot);
                 link_figure_rotate(lf, pose.data(), rot);
                 drawn = draw_link_mesh(dl, lf, pose.data(), p.pos, 0, col, 1.0f, W, H);
             }
@@ -3535,8 +3541,27 @@ static void note_draw(const MenuTarget *t, float scale) {
     dl->PopClipRect();
 }
 
+// TOTK_TEST_SHOTS=<ms>[,<ms>...]: a screenshot (as F12 takes) when the world clock (frame_step_world_us) passes each
+// time, for automated runs with TOTK_INPUT_SCRIPT.
+static void test_shots(void) {
+    static int next = -1;
+    static long long at[32];
+    static int n;
+    if (next < 0) {
+        next = 0;
+        const char *e = cfg_get("TOTK_TEST_SHOTS");
+        for (const char *p = e; p && *p && n < 32;) {
+            at[n++] = atoll(p);
+            p = strchr(p, ',');
+            if (p) p++;
+        }
+    }
+    if (next < n && frame_step_world_us() >= at[next] * 1000) next++, g_shot_pending.store(1);
+}
+
 extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const char **shot) {
     *shot = NULL;
+    test_shots();
     if (g_shot_pending.exchange(0)) {   // F12: this frame into <profile>/screenshots (gfx_present.c saves it)
         static char path[1400];
         char dir[1200], stamp[32];

@@ -26,7 +26,10 @@ flags (bit 0 loops), f32 ground speed (m/s, ANIMS only, else 0), u32 animated bo
 count; per animated bone u16 bone, u16 curve count and 9 floats, its local transform where no curve moves it; per curve
 u8 channel (0..8, the 9 floats' order), u8 0, u16 key count; per key u16 frame x 32 and 4 halves, the cubic's
 coefficients over the key's segment (t 0..1) with the curve's scale and offset already in. The runtime evaluates them
-(runtime/link_figure.c link_figure_pose). Frames run at 30 a second.
+(runtime/link_figure.c link_figure_pose). Frames run at 30 a second. Last, b'PALM', u32 entry count and per entry u16
+bone (0xffff none) and u8 rigid, u8 0: the figure's bone each entry of Link_RaulSkin's skinning palette moves, in its
+matrix_to_bone order (the game's palette a friend's game reads, runtime/frame_rate.c game_player_body); a smooth
+entry is the bone's pose times its inverse bind, a rigid one the pose itself.
 
 With --armor the tool also writes the armor library the runtime dresses each friend's figure from
 (runtime/link_figure.c link_figure_dressed). Strings are a u8 length and its bytes; a group list is a u8 count, then
@@ -376,7 +379,7 @@ def atlas_uv(rect, tri_uv, side=ATLAS):
     return out
 
 
-def write(path, verts, weights, tris, classes, uvs, texs, place, atlas, astc, skel, anims):
+def write(path, verts, weights, tris, classes, uvs, texs, place, atlas, astc, skel, anims, palette=()):
     out = bytearray(b'LNKF')
     out += struct.pack('<IIIII', 4, len(verts), len(tris), ATLAS, len(astc))
     for v in verts:
@@ -409,7 +412,16 @@ def write(path, verts, weights, tris, classes, uvs, texs, place, atlas, astc, sk
     for name, frames, loop, speed, (nb, nc, nk, blob) in anims:
         out += name.encode()[:47].ljust(48, b'\0') + struct.pack('<IIfIII', frames, 1 if loop else 0, speed, nb, nc, nk)
         out += blob
+    out += b'PALM' + struct.pack('<I', len(palette))
+    for bone, rigid in palette:
+        out += struct.pack('<HBB', 0xffff if bone is None else bone, 1 if rigid else 0, 0)
     Path(path).write_bytes(out)
+
+
+def body_palette(models, skel):
+    """Link_RaulSkin's skinning palette as the figure's bones: per matrix_to_bone entry (figure bone, rigid)."""
+    sk = load(models, PARTS[0][0])['models'][0]['skeleton']
+    return [(skel.index.get(sk['bones'][b]['name']), k >= sk['smooth_count']) for k, b in enumerate(sk['matrix_to_bone'])]
 
 
 def preview(path, verts, tris, classes):
@@ -658,7 +670,7 @@ def main(argv):
             anims.append((n, frames, found[n]['loop'], speed if n in ANIMS else 0.0, packed))
             if n in ANIMS:
                 print(f'  animation {n}: {frames} frames, {speed:.2f} m/s')
-    write(argv[3], verts, weights, tris, classes, uvs, texs, place, atlas, astc, skel, anims)
+    write(argv[3], verts, weights, tris, classes, uvs, texs, place, atlas, astc, skel, anims, body_palette(Path(argv[1]), skel))
     print(f'{len(verts)} vertices, {len(tris)} triangles, {len(skel.names)} bones, {len(place)} textures '
           f'({len(astc)} ASTC), {len(anims)} animations -> {argv[3]}')
     if armor_out:

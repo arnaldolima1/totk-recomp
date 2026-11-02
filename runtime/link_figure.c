@@ -163,6 +163,18 @@ static int parse(const uint8_t *d, uint64_t n) {
             at += bytes;
             fig.nanims++;
         }
+        if (at + 8 <= n && !memcmp(d + at, "PALM", 4)) {   // the game's body palette as the figure's bones
+            uint32_t np = rd32(d + at + 4);
+            at += 8;
+            if (np <= 1024 && at + 4ull * np <= n && (fig.palm_bone = malloc(2ull * np + 2)) && (fig.palm_rigid = malloc(np + 1ull))) {
+                for (uint32_t k = 0; k < np; k++) {
+                    uint16_t b = (uint16_t)(d[at + 4 * k] | d[at + 4 * k + 1] << 8);
+                    fig.palm_bone[k] = b < nb ? b : 0xffff;
+                    fig.palm_rigid[k] = d[at + 4 * k + 2] & 1;
+                }
+                fig.npalm = np;
+            }
+        }
     }
     face_normals(&fig, nv, nt);
     // the atlas as stored (the G-buffer figure, vk_figure.c, is lit by the game); the overlay's copy is lifted, as the
@@ -192,7 +204,8 @@ const LinkFigure *link_figure(void) {
             rt_log("link figure: %s %s; friends are drawn flat", path, d ? "is not a figure this build reads" : "not found");
             free(fig.verts), free(fig.tris), free(fig.cls), free(fig.normals), free(fig.uvs), free(fig.atlas), free(fig.albedo), free(fig.skin);
             for (int a = 0; fig.anims && a < fig.nanims; a++) free(fig.anims[a].mats), free((void *)fig.anims[a].keys);
-            free(fig.anims), free(fig.parent), free(fig.bind), free(fig.inv_bind), free(fig.bone_names);
+            free(fig.anims), free(fig.parent), free(fig.bind), free(fig.inv_bind), free(fig.bone_names), free(fig.palm_bone),
+                free(fig.palm_rigid);
             memset(&fig, 0, sizeof fig);
         }
         free(d);
@@ -669,6 +682,166 @@ const LinkFigure *link_figure_dressed(const char look[3][48]) {
     cache[slot].fig = f;
     rt_log("link armor: dressed a figure in '%s' '%s' '%s' (%u triangles)", look[0], look[1], look[2], nt);
     return f;
+}
+
+// ---- a friend's real body pose (net_mp.c POS lines, frame_rate.c game_player_body)
+// The palette entries sent: Link_RaulSkin's (tools/link_figure.py body_palette) spine, arms, hands and head (0..33)
+// and waist, belts and legs (65..88); the face's entries between are left out (the figure's face keeps its animation).
+const uint8_t LF_BODY_ENTRY[LF_BODY_N] = {
+    0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
+    29, 30, 31, 32, 33, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88};
+enum { BODY_T0 = 0, BODY_T1 = 34 };   // the slots whose translations go too: entries 0 (Spine_1) and 65 (Waist)
+
+static void quat_of(const float *m, float q[4]) {   // a 3x4's rotation (its axes made unit) as a unit quaternion
+    float r[9];
+    for (int j = 0; j < 3; j++) {
+        float l = sqrtf(m[j] * m[j] + m[4 + j] * m[4 + j] + m[8 + j] * m[8 + j]);
+        if (l < 1e-6f) l = 1;
+        for (int i = 0; i < 3; i++) r[3 * i + j] = m[4 * i + j] / l;
+    }
+    float tr = r[0] + r[4] + r[8];
+    if (tr > 0) {
+        float s = sqrtf(tr + 1) * 2;
+        q[3] = s / 4, q[0] = (r[7] - r[5]) / s, q[1] = (r[2] - r[6]) / s, q[2] = (r[3] - r[1]) / s;
+    } else if (r[0] > r[4] && r[0] > r[8]) {
+        float s = sqrtf(1 + r[0] - r[4] - r[8]) * 2;
+        q[3] = (r[7] - r[5]) / s, q[0] = s / 4, q[1] = (r[1] + r[3]) / s, q[2] = (r[2] + r[6]) / s;
+    } else if (r[4] > r[8]) {
+        float s = sqrtf(1 + r[4] - r[0] - r[8]) * 2;
+        q[3] = (r[2] - r[6]) / s, q[0] = (r[1] + r[3]) / s, q[1] = s / 4, q[2] = (r[5] + r[7]) / s;
+    } else {
+        float s = sqrtf(1 + r[8] - r[0] - r[4]) * 2;
+        q[3] = (r[3] - r[1]) / s, q[0] = (r[2] + r[6]) / s, q[1] = (r[5] + r[7]) / s, q[2] = s / 4;
+    }
+    float l = sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+    for (int i = 0; i < 4; i++) q[i] /= l > 0 ? l : 1;
+    if (q[3] < 0)
+        for (int i = 0; i < 4; i++) q[i] = -q[i];
+}
+
+static void mat_of(const float q[4], float *m) {   // a unit quaternion as a row-major 3x4's rotation (translation 0)
+    float x = q[0], y = q[1], z = q[2], w = q[3];
+    float r[12] = {1 - 2 * (y * y + z * z), 2 * (x * y - z * w),     2 * (x * z + y * w),     0,
+                   2 * (x * y + z * w),     1 - 2 * (x * x + z * z), 2 * (y * z - x * w),     0,
+                   2 * (x * z - y * w),     2 * (y * z + x * w),     1 - 2 * (x * x + y * y), 0};
+    memcpy(m, r, sizeof r);
+}
+
+static const char B64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+static int16_t q16(float v, float scale) {
+    float s = v * scale;
+    return (int16_t)(s > 32767 ? 32767 : s < -32767 ? -32767 : lrintf(s));
+}
+
+void link_body_encode(const float *pal, int count, char *out, size_t cap) {
+    out[0] = 0;
+    if (count <= LF_BODY_ENTRY[LF_BODY_N - 1] || cap < (LF_BODY_BYTES + 2) / 3 * 4 + 1) return;
+    uint8_t raw[(LF_BODY_BYTES + 2) / 3 * 3] = {0};
+    int16_t v[LF_BODY_BYTES / 2];
+    for (int i = 0; i < LF_BODY_N; i++) {
+        float q[4];
+        quat_of(pal + 12 * LF_BODY_ENTRY[i], q);
+        for (int k = 0; k < 4; k++) v[4 * i + k] = q16(q[k], 32767);
+    }
+    const int ts[2] = {LF_BODY_ENTRY[BODY_T0], LF_BODY_ENTRY[BODY_T1]};
+    for (int j = 0; j < 2; j++)
+        for (int k = 0; k < 3; k++) v[4 * LF_BODY_N + 3 * j + k] = q16(pal[12 * ts[j] + 4 * k + 3], 1000);
+    memcpy(raw, v, sizeof v);
+    size_t o = 0;
+    for (size_t i = 0; i < sizeof raw; i += 3) {
+        uint32_t w = (uint32_t)raw[i] << 16 | (uint32_t)raw[i + 1] << 8 | raw[i + 2];
+        for (int k = 0; k < 4; k++) out[o++] = B64[w >> (18 - 6 * k) & 63];
+    }
+    out[o] = 0;
+}
+
+int link_body_decode(const char *text, LinkBody *out) {
+    uint8_t raw[(LF_BODY_BYTES + 2) / 3 * 3];
+    size_t len = strlen(text), o = 0;
+    if (len != sizeof raw / 3 * 4) return 0;
+    for (size_t i = 0; i < len; i += 4) {
+        uint32_t w = 0;
+        for (int k = 0; k < 4; k++) {
+            const char *c = text[i + k] ? strchr(B64, text[i + k]) : NULL;
+            if (!c) return 0;
+            w = w << 6 | (uint32_t)(c - B64);
+        }
+        raw[o++] = (uint8_t)(w >> 16), raw[o++] = (uint8_t)(w >> 8), raw[o++] = (uint8_t)w;
+    }
+    int16_t v[LF_BODY_BYTES / 2];
+    memcpy(v, raw, sizeof v);
+    for (int i = 0; i < LF_BODY_N; i++) {
+        float l = 0;
+        for (int k = 0; k < 4; k++) out->q[i][k] = v[4 * i + k] / 32767.0f, l += out->q[i][k] * out->q[i][k];
+        if (l < 0.5f || l > 1.5f) return 0;
+        for (int k = 0; k < 4; k++) out->q[i][k] /= sqrtf(l);
+    }
+    for (int j = 0; j < 2; j++)
+        for (int k = 0; k < 3; k++) out->t[j][k] = v[4 * LF_BODY_N + 3 * j + k] / 1000.0f;
+    return 1;
+}
+
+void link_body_lerp(const LinkBody *a, const LinkBody *b, float t, LinkBody *out) {
+    for (int i = 0; i < LF_BODY_N; i++) {   // normalised lerp, the short way round
+        float d = a->q[i][0] * b->q[i][0] + a->q[i][1] * b->q[i][1] + a->q[i][2] * b->q[i][2] + a->q[i][3] * b->q[i][3];
+        float sb = d < 0 ? -t : t, l = 0;
+        for (int k = 0; k < 4; k++) out->q[i][k] = a->q[i][k] * (1 - t) + b->q[i][k] * sb, l += out->q[i][k] * out->q[i][k];
+        l = sqrtf(l);
+        for (int k = 0; k < 4; k++) out->q[i][k] /= l > 1e-6f ? l : 1;
+    }
+    for (int j = 0; j < 2; j++)
+        for (int k = 0; k < 3; k++) out->t[j][k] = a->t[j][k] + (b->t[j][k] - a->t[j][k]) * t;
+}
+
+void link_figure_pose_body(const LinkFigure *f, int anim, float frame, const LinkBody *body, float *out) {
+    if (!f->npalm || !f->parent || anim < 0 || anim >= f->nanims || f->anims[anim].mats) {
+        link_figure_pose(f, anim, frame, out);
+        return;
+    }
+    uint32_t nb = f->nbones;
+    float *loc = malloc(36ull * nb), *world = malloc(48ull * nb), *bindw = malloc(48ull * nb), *mats = malloc(48ull * nb);
+    int *slot = malloc(sizeof *slot * nb);
+    if (!loc || !world || !bindw || !mats || !slot) {
+        free(loc), free(world), free(bindw), free(mats), free(slot);
+        link_figure_pose(f, anim, frame, out);
+        return;
+    }
+    const LinkAnim *a = &f->anims[anim];
+    pose_worlds(f, a, anim_frame(a, frame), loc, world);
+    for (uint32_t b = 0; b < nb; b++) {   // the bind world (the figure's own rest), and which slot moves each bone
+        float m[12];
+        trs(f->bind + 9 * b, m);
+        if (f->parent[b] >= 0) mul34(bindw + 12 * f->parent[b], m, bindw + 12 * b);
+        else memcpy(bindw + 12 * b, m, 48);
+        slot[b] = -1;
+    }
+    for (int i = LF_BODY_N - 1; i >= 0; i--)   // the first entry for a bone wins
+        if (LF_BODY_ENTRY[i] < f->npalm && f->palm_bone[LF_BODY_ENTRY[i]] < nb && !f->palm_rigid[LF_BODY_ENTRY[i]])
+            slot[f->palm_bone[LF_BODY_ENTRY[i]]] = i;
+    for (uint32_t b = 0; b < nb; b++) {
+        float m[12];
+        int s = slot[b], p = f->parent[b];
+        trs(loc + 9 * b, m);
+        if (s < 0) {   // the animation's, under its parent as posed here
+            if (p >= 0) mul34(world + 12 * p, m, world + 12 * b);
+            continue;
+        }
+        float r[12], w[12];
+        mat_of(body->q[s], r);
+        mul34(r, bindw + 12 * b, w);   // the bone's rotation in the friend's actor space
+        if (s == BODY_T0 || s == BODY_T1) {   // its place as sent: the entry's translation moves the bind place
+            for (int i = 0; i < 3; i++) w[4 * i + 3] += body->t[s == BODY_T1][i];
+        } else if (p >= 0) {   // its place hangs from its parent by the animation's offset
+            for (int i = 0; i < 3; i++)
+                w[4 * i + 3] = world[12 * p + 4 * i] * m[3] + world[12 * p + 4 * i + 1] * m[7] + world[12 * p + 4 * i + 2] * m[11] +
+                               world[12 * p + 4 * i + 3];
+        }
+        memcpy(world + 12 * b, w, 48);
+    }
+    for (uint32_t b = 0; b < nb; b++) mul34(world + 12 * b, f->inv_bind + 12 * b, mats + 12 * b);
+    skin_verts(f, mats, mats, 0, out);
+    free(loc), free(world), free(bindw), free(mats), free(slot);
 }
 
 // Skins every vertex for animation anim at frame: version 3 blends the two baked frames around it, version 4

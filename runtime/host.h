@@ -295,6 +295,8 @@ typedef struct {
     float rot[9];                    // the figure's rotation, row-major 3x3 (link_figure_orient); yaw then 0
     const void *fig;                 // the LinkFigure to draw (link_figure_dressed), NULL the base one
     float hair[3];                   // sRGB 0..1
+    int has_body;                    // body: the friend's real pose, a LinkBody (link_figure.h) as floats; the
+    float body[238];                 // animation then moves only the bones it lacks
 } GfxFigure;
 int gfx_figures_wanted(void);
 void gfx_figures_set(const GfxFigure *f, int n);
@@ -305,6 +307,8 @@ int game_player_pose(float xyz[3], float *yaw);            // the same with the 
                                                            // NAN when unreadable)
 uint64_t game_player_actor(void);                          // the Player actor's guest address, 0 when none (anim_probe.c)
 int game_player_anim(char *out, size_t cap, float *frame);   // the animation Link plays and its frame (1.4.3), 1 when read
+int game_player_body(float *out, int max);                 // Link's skinning palette in his actor space (1.4.3),
+                                                           // max x 12 floats; the entries read, 0 none
 int game_resident_actors(char out[][48], int max);         // names of the resident actors (anim_probe.c)
 int game_player_armor(char out[3][48]);                   // what Link wears now: head, upper, lower (1.4.3)
 int game_player_quat(float q[4]);                         // Link's whole rotation, a unit quaternion (x, y, z, w)

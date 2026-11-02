@@ -60,7 +60,7 @@ space. Nothing is encrypted or authenticated beyond the room's password: rooms a
 | game | `CHAT` | text |
 | game | `ACH` | achievement id, name, rarity |
 | game | `VOICE` | an Opus frame, base64 (20 ms of 48 kHz mono) |
-| game | `POS` | x, y, z: the player's position in metres (centimetres given), yaw: the way Link faces (radians from +z towards +x, empty when unread), t: the game's clock in ms, anim: the animation Link plays (1.4.3, empty when unread); while moving, turning or changing animation, else each second (one each 50 ms at most) |
+| game | `POS` | x, y, z: the player's position in metres (centimetres given), yaw: the way Link faces (radians from +z towards +x, empty when unread), t: the game's clock in ms, anim: the animation Link plays (1.4.3, empty when unread), quat, sfx, body: his real body pose (1.4.3, base64url, empty when unread); while moving, turning or changing animation, else each second (one each 50 ms at most) |
 | game | `MARK` | x, y, z: a marker where the player stands |
 | game | `PING` | (every 2 s: the round trip to its `PONG` is the ping shown over the friends' list; the room drops a game silent for 120 s) |
 | room | `WELCOME` | protocol, room name |
@@ -70,7 +70,7 @@ space. Nothing is encrypted or authenticated beyond the room's password: rooms a
 | room | `CHAT` | player, text |
 | room | `ACH` | player, achievement id, name, rarity |
 | room | `VOICE` | player, the frame as received (to everyone but its sender) |
-| room | `POS` | player, x, y, z, yaw, t, anim (to everyone else; the last place alone to a player who joins) |
+| room | `POS` | player, x, y, z, yaw, t, anim, quat, sfx, body (to everyone else; the last place alone to a player who joins) |
 | room | `MARK` | player, x, y, z (to everyone, its player too; markers under 15 minutes old to a player who joins) |
 | room | `EVENT` | kind (`join`, `leave`, `challenge`), text |
 | room | `CHALLENGES` | count, then per track: figure, the room's total, tiers reached, four targets |
@@ -126,9 +126,21 @@ research probe `runtime/anim_probe.c`, `TOTK_ANIM_PROBE`):
   shows rather than counting its own;
 - the voice clips he starts (`game_player_voices`): his sound link handles, four a block in blocks reached from
   +0x608, point at the asset calls of the game's `SLink2` file, whose key names are the clips of `Player_Voice`
-  (`PV000_02`).
+  (`PV000_02`);
+- his body as the game draws it (`game_player_body`): the model unit `[actor+0x238]` holds the body's model
+  (`Link_RaulSkin`) at +0x3e0, whose `[+0x458]+0x8` is that model's skinning palette for the frame, per
+  `matrix_to_bone` entry a row-major 3x4 (the bone's pose times its inverse bind; the rigid entries after the smooth
+  ones are the pose itself). It is the final pose: the layers blended (the shield held up, the bow drawn), the rag doll,
+  the feet set on the ground. The palette is in world axes about a render origin on a 10 m grid near Link; the game
+  takes it into Link's actor space and sends the rotations of 58 entries (spine, arms, hands, head, waist, belts, legs;
+  not the face) as int16 quaternions with the translations of `Spine_1` and `Waist` (`link_figure.c`
+  `link_body_encode`, 636 characters).
 
-A game sends a line every 50 ms while it knows the frame. The figure (`ui/menu.cpp` `figure_animate`) plays that
+A game sends a line every 50 ms while it knows the frame. With a body pose the figure takes those bones from it
+(`link_figure_pose_body`): tools/link_figure.py writes which figure bone each palette entry moves (`PALM` in
+link-figure.bin), the rotations go on the figure's own bind, and the bones the body's palette lacks (the Zonai forearm,
+whose model has a palette of its own, and the hair) keep the animation's local transforms under them. Without one (an
+older game, another version) the figure plays the animation as below. The figure (`ui/menu.cpp` `figure_animate`) plays that
 animation; it keeps the speed-picked gait for the game's turning leans (`*_Curve*`) and ignores its pose and face
 layers (`A_Pose_*`, `Face_*`, `Voice_*`), which the game blends over another animation and which lead the slot now and
 then. Link's root bone carries the animation's own motion, which the game applies to the actor: the figure holds the
