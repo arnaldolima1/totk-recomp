@@ -1071,6 +1071,7 @@ class Prepare(Step):
             rep.warning('warn.achievements_failed', code=code, log=str(log))
         link_figure(ctx)
         link_sounds(ctx)
+        item_names(ctx)
         editor_shortcuts(ctx)
 
         shader_list = layout.shader_list
@@ -1138,6 +1139,17 @@ def link_sounds(ctx):
                          [dest / 'romfs', dest / 'profile' / 'link-sounds.bin'])
     if code:
         rep.warning('warn.link_sounds_failed', code=code, log=str(log))
+
+
+def item_names(ctx):
+    """profile/item-names.tsv: the names the game gives its items in English, Portuguese and Russian, read from this
+    install's RomFS by tools/item_names.py, for the multiplayer room's log (runtime/net_mp.c item_display). Optional:
+    without it the log names items by their actor, so the setup warns and goes on."""
+    layout, dest, rep = ctx.layout, ctx.dest, ctx.reporter
+    code, log = run_tool(ctx, 'prepare-names', layout.tools / 'item_names.py',
+                         [dest / 'romfs', dest / 'profile' / 'item-names.tsv'])
+    if code:
+        rep.warning('warn.item_names_failed', code=code, log=str(log))
 
 
 def editor_shortcuts(ctx):

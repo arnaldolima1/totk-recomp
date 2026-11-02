@@ -267,3 +267,4 @@ const char *ui_text_lang(const char *switch_code);
 // unset, the system UI language when the catalog has menu text for it (English, Russian, Brazilian Portuguese,
 // Simplified Chinese), else English. Follows a live change of the setting.
 const char *menu_text(UiTextId id);
+const char *menu_lang(void);   // that menu language's catalog code ("en", "ru", "pt-BR", "zh-Hans")

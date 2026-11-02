@@ -157,7 +157,9 @@ figures going up between two `STATUS` lines (a shrine, a lightroot, a tower, Kor
 come from the evaluated save, so these follow the game's saves) and what their Link's animation in `POS` lines shows
 (`Nml_Die*` and `Swim_Die`: died; `WarpHeightIn`: fast travel; `Nml_Get*`, Link holding up what a chest gave: opened a
 chest), and the items a player's game says they got for the first time (`ACT item`; a power when the actor is one of
-`POWERS`: Ultrahand, Recall, Autobuild, the camera). A newer game words the kinds it knows in the menu's
+`POWERS`: Ultrahand, Recall, Autobuild, the camera). Items show by the name the game gives them in the menu's language (English, Brazilian
+Portuguese or Russian; `profile/item-names.tsv`, which the installer reads from the game's texts with
+`tools/item_names.py`). A newer game words the kinds it knows in the menu's
 language (`net_mp.c` `event_text`) and lists them, with friends' unlocks, on the Multiplayer tab's Log page
 (`ui/menu.cpp` `mp_page_log`); the past events a newcomer gets show there without notices.
 

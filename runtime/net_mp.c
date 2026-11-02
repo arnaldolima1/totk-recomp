@@ -123,7 +123,54 @@ static void add_line(int kind, const char *from, const char *text, const char *a
     add_line_at(kind, from, text, ach_id, rarity, toast, now_unix());
 }
 
-// An EVENT line's text in this game's language for the kinds it knows (tools/mp_server.py Room.event: kind, the room's
+// The names the game gives its items (<profile>/item-names.tsv, tools/item_names.py: actor, English, Portuguese,
+// Russian), loaded at the first item event; the actor's own name, its underscores as spaces, when there is none.
+typedef struct { char *actor, *name[3]; } ItemName;
+static ItemName *item_names;
+static int item_count = -1;
+
+static int cmp_item(const void *a, const void *b) { return strcmp(((const ItemName *)a)->actor, ((const ItemName *)b)->actor); }
+
+static void item_display(const char *actor, char *out, size_t cap) {
+    if (item_count < 0) {
+        item_count = 0;
+        char path[1200];
+        snprintf(path, sizeof path, "%s/item-names.tsv", rt_config()->profile);
+        uint64_t n = 0;
+        char *d = (char *)plat_file_read(path, &n);   // kept: the names point into it
+        int lines = 0;
+        for (uint64_t i = 0; d && i < n; i++) lines += d[i] == '\n';
+        if (d && lines && (item_names = calloc((size_t)lines, sizeof *item_names))) {
+            for (char *line = d, *end; line < d + n && item_count < lines; line = end + 1) {
+                end = memchr(line, '\n', (size_t)(d + n - line));
+                if (!end) break;
+                *end = 0;
+                ItemName *it = &item_names[item_count];
+                char *f[4] = {line, NULL, NULL, NULL};
+                for (int k = 1; k < 4 && f[k - 1]; k++)
+                    if ((f[k] = strchr(f[k - 1], '\t'))) *f[k]++ = 0;
+                if (!f[1]) continue;
+                it->actor = f[0], it->name[0] = f[1], it->name[1] = f[2] ? f[2] : "", it->name[2] = f[3] ? f[3] : "";
+                item_count++;
+            }
+            qsort(item_names, (size_t)item_count, sizeof *item_names, cmp_item);
+        }
+        rt_log("mp: %d item names from %s", item_count, path);
+    }
+    ItemName key = {(char *)actor, {NULL, NULL, NULL}};
+    const ItemName *it = item_count > 0 ? bsearch(&key, item_names, (size_t)item_count, sizeof key, cmp_item) : NULL;
+    const char *lang = menu_lang();
+    int col = !strncmp(lang, "pt", 2) ? 1 : !strncmp(lang, "ru", 2) ? 2 : 0;
+    if (it && it->name[col][0]) snprintf(out, cap, "%s", it->name[col]);
+    else if (it && it->name[0][0]) snprintf(out, cap, "%s", it->name[0]);
+    else {
+        size_t k = 0;
+        for (; actor[k] && k + 1 < cap; k++) out[k] = actor[k] == '_' ? ' ' : actor[k];
+        out[k] = 0;
+    }
+}
+
+// An EVENT line's text in the menu's language for the kinds it knows (tools/mp_server.py Room.event: kind, the room's
 // text, the player, the step, the total), else the room's own text.
 static void event_text(const char *kind, const char *who, const char *arg, int total, const char *room_text, char *out,
                        size_t cap) {
@@ -151,11 +198,9 @@ static void event_text(const char *kind, const char *who, const char *arg, int t
             snprintf(out, cap, menu_text(UI_MENU_MP_EV_POWER), who, menu_text(powers[i].name));
             return;
         }
-    if (!strcmp(kind, "item") && arg[0]) {   // the actor's name, its underscores as spaces
-        char item[64];
-        size_t k = 0;
-        for (; arg[k] && k + 1 < sizeof item; k++) item[k] = arg[k] == '_' ? ' ' : arg[k];
-        item[k] = 0;
+    if (!strcmp(kind, "item") && arg[0]) {   // the item's name as the game gives it
+        char item[96];
+        item_display(arg, item, sizeof item);
         snprintf(out, cap, menu_text(UI_MENU_MP_EV_ITEM), who, item);
         return;
     }

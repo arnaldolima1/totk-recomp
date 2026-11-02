@@ -110,7 +110,7 @@ LLVM_SKIP_SUFFIXES = {'.idl', '.tlb'}
 
 # tools/ files the installer steps run (and what they import), copied from the repo.
 TOOLS_FILES = ['achievements.py', 'achievements_editor.py', 'bfres.py', 'build_game.py', 'build_shaders.py',
-               'button_icons.py', 'check_content.py', 'extract.py', 'hostmem.py', 'link_figure.py', 'link_sounds.py',
+               'button_icons.py', 'check_content.py', 'extract.py', 'hostmem.py', 'item_names.py', 'link_figure.py', 'link_sounds.py',
                'make_romfs_patches.py',
                'mp_server.py', 'objcache.py', 'pack_shader_cache.py', 'prepare_shaders.py', 'ps_prompts.py', 'romfs_index.py',
                'shader_census.py', 'shader_list.py', 'txtg.py', 'ultrawide_layout.py', 'cheats.py', 'exefs_patches.py']
