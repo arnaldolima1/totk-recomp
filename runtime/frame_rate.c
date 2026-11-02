@@ -410,6 +410,34 @@ int game_player_body(float *out, int max) {
     return max;
 }
 
+// Link's life, 1.4.3 only (found with anim_probe.c, TOTK_ANIM_PROBE=life, an enemy made to hit him): a 32-bit count of
+// quarter hearts at [actor+0x600]+0x248, +0x298 (the same word several paths lead to). The GameData flag
+// PlayerStatus.Life only mirrors it: the game copies the life there as it changes, never back, so writing the flag
+// leaves the hearts as they are. The word is taken only while it agrees with the mirror (a sign the path still holds).
+static uint64_t life_word(void) {
+    uint64_t actor = RT_V143 ? player_actor() : 0, o = actor ? read_ptr(actor + 0x600) : 0, l = o ? read_ptr(o + 0x248) : 0;
+    int32_t q, mirror;
+    if (!l || !read_guest(l + 0x298, &q, 4) || !game_int_get(game_flag_hash("PlayerStatus.Life"), &mirror) || q != mirror)
+        return 0;
+    return l + 0x298;
+}
+
+int game_player_life(int *quarters, int *max_quarters) {
+    uint64_t a = life_word();
+    int32_t q = 0, m = 0;
+    if (!a || !read_guest(a, &q, 4)) return 0;
+    *quarters = q;
+    if (max_quarters) *max_quarters = game_int_get(game_flag_hash("PlayerStatus.MaxLife"), &m) ? m : 0;
+    return 1;
+}
+
+int game_player_life_set(int quarters) {
+    uint64_t a = life_word();
+    if (!a || !plat_mem_readable(a, 4) || quarters < 0) return 0;
+    *(volatile int32_t *)(uintptr_t)a = quarters;   // the game's pages are the host's
+    return 1;
+}
+
 static void speed_report(uint64_t now, double step, int interval) {
     if (!win_t0) {
         win_t0 = now;

@@ -319,8 +319,14 @@ int game_flags_since(uint64_t *cursor, GameFlagChange *out, int max);
 const char *game_flag_item(uint32_t hash);
 uint32_t game_flag_hash(const char *name);                  // a flag's or an enum value's name hashed as the game does
 int game_enum_get(uint32_t hash, uint32_t *value);
-int game_flag_set(uint32_t hash, int value);               // a bool flag written (TOTK_FLAG_SET tests it), 1 when done         // an enum flag's value (the hash of its name), 1 when read
+int game_flag_set(uint32_t hash, int value);
+int game_int_get(uint32_t hash, int32_t *value);           // an int flag (PlayerStatus.Life: quarter hearts), 1 when read
+int game_int_set(uint32_t hash, int32_t value);            // written (TOTK_INT_SET tests it), 1 when done               // a bool flag written (TOTK_FLAG_SET tests it), 1 when done         // an enum flag's value (the hash of its name), 1 when read
 void game_flags_start(void);
+// Link's life in quarter hearts (1.4.3; max from PlayerStatus.MaxLife), 1 when read; and written (1 when done).
+int game_player_life(int *quarters, int *max_quarters);
+int game_player_life_set(int quarters);
+void actor_spawn_tick(Cpu *c);                             // actor_spawn.c: TOTK_SPAWN's actors, from the present
 int game_resident_actors(char out[][48], int max);         // names of the resident actors (anim_probe.c)
 int game_player_armor(char out[3][48]);                   // what Link wears now: head, upper, lower (1.4.3)
 int game_player_quat(float q[4]);                         // Link's whole rotation, a unit quaternion (x, y, z, w)

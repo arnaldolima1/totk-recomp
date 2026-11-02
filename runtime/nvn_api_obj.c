@@ -697,6 +697,7 @@ NVN_API(nvnWindowAcquireTexture) {
 NVN_API(nvnQueuePresentTexture) {
     win_t *o = arg_p(c, 1);
     int idx = (int)arg_x(c, 2);
+    actor_spawn_tick(c);   // actor_spawn.c: actors a test asks the game for (TOTK_SPAWN), between frames
     movie_tick(c);   // ov_movie.c: hand over decoded movie frames that are due; needs the core, so before the wait
     NVN_BLOCKING();
     if (o->magic != NVN_WIN_MAGIC || idx < 0 || idx >= o->ntex || idx >= 4 || !o->tex[idx])

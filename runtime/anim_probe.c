@@ -886,11 +886,107 @@ static void model_probe(void *arg) {
     rt_log("models: %d objects, %d palettes", n, nseen);
 }
 
+// TOTK_ANIM_PROBE=life: where Link's own life is (the GameData flag PlayerStatus.Life only mirrors it: writing the flag
+// leaves the hearts as they are). The walk from the actor keeps every 4-byte word of the objects it reaches (their first
+// NODE_BYTES) that holds the life as the flag shows it (quarter hearts, as an int or a float, or hearts as a float);
+// each time the flag changes, the words that did not change to the new value the same way drop out, and the ones left
+// are logged with the path to them.
+enum { LIFE_MAX = 200000 };
+typedef struct { int node; uint16_t off; uint8_t kind; } LifeCand;   // kind 0 int quarters, 1 float quarters, 2 float hearts
+static LifeCand *g_life;
+static int g_nlife;
+
+static int life_matches(uint64_t a, int kind, int32_t q) {
+    uint32_t w;
+    if (!plat_mem_read(a, &w, 4)) return 0;
+    float f;
+    memcpy(&f, &w, 4);
+    return kind == 0 ? (int32_t)w == q : kind == 1 ? f == (float)q : f == (float)q / 4.0f;
+}
+
+static void life_path(int node, uint16_t off, char *out, size_t cap) {
+    int chain[MAX_DEPTH + 1], m = 0;
+    for (int k = node; k > 0 && m < MAX_DEPTH; k = g_nodes[k].parent) chain[m++] = k;
+    size_t n = (size_t)snprintf(out, cap, "actor");
+    for (int i = m - 1; i >= 0 && n < cap; i--) n += (size_t)snprintf(out + n, cap - n, "->%#x", g_nodes[chain[i]].off);
+    snprintf(out + n, cap - n, " +%#x", off);
+}
+
+static void life_probe(void *arg) {
+    (void)arg;
+    while (frame_step_world_us() < 15000000) plat_sleep_ms(1000);
+    g_nodes = malloc(sizeof *g_nodes * MAX_NODES), g_seen = malloc(sizeof *g_seen * SEEN_SLOTS);
+    g_life = malloc(sizeof *g_life * LIFE_MAX);
+    if (!g_nodes || !g_seen || !g_life) return;
+    uint32_t flag = game_flag_hash("PlayerStatus.Life");
+    int32_t q = 0;
+    while (!game_int_get(flag, &q)) plat_sleep_ms(500);
+    uint64_t actor = game_player_actor();
+    mem_heap_range(&g_heap, &g_heap_size);
+    g_alias = mem_layout()->alias.base, g_alias_size = mem_layout()->alias.size;
+    // the walk, as walk() does, keeping the words that match
+    memset(g_seen, 0, sizeof *g_seen * SEEN_SLOTS);
+    int n = 0;
+    g_nodes[n++] = (Node){actor, -1, 0, 0};
+    seen_add(actor);
+    static uint64_t buf[ROOT_BYTES / 8];
+    for (int i = 0; i < n; i++) {
+        Node nd = g_nodes[i];
+        int words = (nd.depth ? NODE_BYTES : ROOT_BYTES) / 8;
+        if (!plat_mem_read(nd.addr, buf, (size_t)words * 8)) continue;
+        for (int w = 0; w < 2 * words && g_nlife < LIFE_MAX; w++)
+            for (int kind = 0; kind < 3; kind++)
+                if (life_matches(nd.addr + 4ull * w, kind, q)) g_life[g_nlife++] = (LifeCand){i, (uint16_t)(4 * w), (uint8_t)kind};
+        for (int w = 0; w < words; w++) {
+            uint64_t v = buf[w];
+            if (!in_heap(v) || (v & 7) || nd.depth + 1 >= MAX_DEPTH || n >= MAX_NODES || !seen_add(v)) continue;
+            g_nodes[n++] = (Node){v, i, (uint16_t)(w * 8), (uint8_t)(nd.depth + 1)};
+        }
+    }
+    rt_log("life probe: life %d quarters; %d objects walked, %d words hold it", q, n, g_nlife);
+    for (int round = 0; round < 12 && g_nlife > 0;) {
+        if (round >= 3 && g_nlife <= 12) {   // few left: which one is the life itself? Write each, watch the flag follow
+            for (int c = 0; c < g_nlife; c++) {
+                int32_t before = 0, after = 0, v = 0;
+                game_int_get(flag, &before);
+                v = before == 3 ? 6 : 3;
+                uint64_t a = g_nodes[g_life[c].node].addr + g_life[c].off;
+                if (g_life[c].kind || !plat_mem_readable(a, 4)) continue;
+                *(volatile int32_t *)(uintptr_t)a = v;
+                plat_sleep_ms(800);
+                game_int_get(flag, &after);
+                char path[200];
+                life_path(g_life[c].node, g_life[c].off, path, sizeof path);
+                rt_log("life probe: wrote %d at %s: the flag went %d -> %d%s", v, path, before, after,
+                       after == v ? "  <- the life" : "");
+            }
+            break;
+        }
+        plat_sleep_ms(100);
+        int32_t now;
+        if (!game_int_get(flag, &now) || now == q) continue;
+        int keep = 0;
+        for (int c = 0; c < g_nlife; c++)
+            if (life_matches(g_nodes[g_life[c].node].addr + g_life[c].off, g_life[c].kind, now)) g_life[keep++] = g_life[c];
+        g_nlife = keep, q = now, round++;
+        rt_log("life probe: life now %d: %d words followed it", q, g_nlife);
+        for (int c = 0; c < g_nlife && c < 12; c++) {
+            char path[200];
+            life_path(g_life[c].node, g_life[c].off, path, sizeof path);
+            rt_log("life probe:   %s (%s)", path, g_life[c].kind == 0 ? "int quarters" : g_life[c].kind == 1 ? "float quarters" : "float hearts");
+        }
+    }
+}
+
 void anim_probe_start(void) {
     static volatile int32_t started;
     if (plat_cas32(&started, 1, 0) != 0) return;
     const char *e = cfg_get("TOTK_ANIM_PROBE");
     if (!e || !*e || !strcmp(e, "0")) return;
+    if (!strcmp(e, "life")) {
+        if (!plat_thread_spawn(life_probe, NULL, "life probe", 0)) rt_log("life probe: no thread");
+        return;
+    }
     if (!strcmp(e, "models")) {
         if (!plat_thread_spawn(model_probe, NULL, "model probe", 0)) rt_log("model probe: no thread");
         return;

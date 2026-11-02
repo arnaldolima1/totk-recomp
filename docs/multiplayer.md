@@ -183,6 +183,13 @@ Log), and its whole list goes in `QUESTS` lines for the Quests page, where each 
 in their colour and the adventure log's text at this game's step, or at the furthest friend's (`profile/quest-steps.tsv`,
 the text the game's log shows at each step).
 
+Combat groundwork (1.4.3, `runtime/frame_rate.c`): Link's life is a count of quarter hearts at `[actor+0x600]+0x248`,
+`+0x298`, found by making an enemy hit him (`runtime/actor_spawn.c`, `TOTK_SPAWN=<actor>@<seconds>`, which asks the
+game's `ActorMgr::requestCreateActorAsync` for an actor in front of him) while `anim_probe.c` (`TOTK_ANIM_PROBE=life`)
+kept the words that followed the GameData flag `PlayerStatus.Life`. That flag only mirrors the life: the game writes it
+as the life changes and never reads it back. `game_player_life_set` writes the life itself, and the hearts follow
+(`TOTK_LIFE_SET` tests it).
+
 The ping over the friends' list is the round trip of a `PING` (every 2 s) to its `PONG`.
 
 Friends show on the game's own minimap and in the world (`runtime/ui/menu.cpp` `radar_draw`, setting `mp_radar`).

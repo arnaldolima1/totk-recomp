@@ -32,7 +32,7 @@
 #include "platform/platform.h"
 
 static const uint64_t kFlagsGlobal = 0x7003ad66b0ull, kBoolVtable = 0x70039403d0ull;
-enum { ENUM_TABLE = 6, ENUM_BYTES = 56, ENUM_VALUE_AT = 28, ENTRY_BYTES = 24, VALUE_AT = 22, MAX_FLAGS = 200000, RING = 4096, BURST = 24, POLL_MS = 250, TABLE_STRIDE = 0x60,
+enum { INT_TABLE = 2, INT_BYTES = 40, INT_VALUE_AT = 28, ENUM_TABLE = 6, ENUM_BYTES = 56, ENUM_VALUE_AT = 28, ENTRY_BYTES = 24, VALUE_AT = 22, MAX_FLAGS = 200000, RING = 4096, BURST = 24, POLL_MS = 250, TABLE_STRIDE = 0x60,
        MAX_TABLES = 24 };
 
 typedef struct {   // one table of the manager
@@ -47,6 +47,7 @@ static struct {
     int ok;
     Table b;                  // the bool table
     Table e;                  // the enum table (a quest's step: Step_<quest>), count 0 when it was not found
+    Table n;                  // the int table (PlayerStatus.Life...), count 0 when it was not found
     Table other[MAX_TABLES];  // the others, for the log
     int nother;
     GameFlagChange ring[RING];
@@ -102,6 +103,8 @@ static int table_at(uint64_t rec, Table *t, int whole) {
     return 1;
 }
 
+static uint32_t number_of(const Table *t, uint32_t hash);
+
 // The bool table (and, for the log, the others), found and checked once a save runs; 0 until then or on another version.
 static int ready(int with_others) {
     if (F.ok) return 1;
@@ -112,6 +115,10 @@ static int ready(int with_others) {
     if (!table_at(p + 8 + ENUM_TABLE * TABLE_STRIDE, &F.e, 1) || F.e.stride != ENUM_BYTES) {
         rt_log("flags: no enum table where 1.4.3 has it; quests are not followed");
         memset(&F.e, 0, sizeof F.e);
+    }
+    if (!table_at(p + 8 + INT_TABLE * TABLE_STRIDE, &F.n, 1) || F.n.stride != INT_BYTES) {
+        rt_log("flags: no int table where 1.4.3 has it");
+        memset(&F.n, 0, sizeof F.n);
     }
     for (int k = -8; with_others && k <= 16 && F.nother < MAX_TABLES; k++)
         if (k && table_at(p + 8 + (int64_t)k * TABLE_STRIDE, &F.other[F.nother], 1)) {
@@ -153,8 +160,46 @@ int game_flag_set(uint32_t hash, int value) {
     return ok;
 }
 
+// An int flag (the int table: 40-byte entries, the default at +24, the value at +28 and a copy at +32;
+// PlayerStatus.Life in quarter hearts follows Link's hearts live).
+int game_int_get(uint32_t hash, int32_t *value) {
+    plat_mutex_lock(&lock);
+    uint32_t k;
+    int ok = F.ok && F.n.count && (k = number_of(&F.n, hash)) && rd(F.n.entries + (uint64_t)INT_BYTES * k + INT_VALUE_AT, value, 4);
+    plat_mutex_unlock(&lock);
+    return ok;
+}
+
+int game_int_set(uint32_t hash, int32_t value) {
+    plat_mutex_lock(&lock);
+    uint32_t k;
+    int32_t was = 0;
+    int ok = F.ok && F.n.count && (k = number_of(&F.n, hash)) != 0;
+    uint64_t at = ok ? F.n.entries + (uint64_t)INT_BYTES * k + INT_VALUE_AT : 0;
+    if (ok && (ok = plat_mem_readable(at, 8) && rd(at, &was, 4))) {
+        *(volatile int32_t *)(uintptr_t)at = value;
+        *(volatile int32_t *)(uintptr_t)(at + 4) = value;   // its copy too
+    }
+    plat_mutex_unlock(&lock);
+    if (ok) rt_log("flags: int %08x set to %d (was %d)", hash, value, was);
+    return ok;
+}
+
 // TOTK_FLAG_SET=<hash>=<0|1>[,...] (a test switch): those bool flags written once the table is found after a save loads.
 static void test_sets(void) {
+    const char *ie = cfg_get("TOTK_INT_SET");   // TOTK_INT_SET=<name or hash>=<value>: an int flag, the same way
+    if (ie && *ie) {
+        char name[96];
+        const char *eq = strchr(ie, '=');
+        if (eq && eq - ie < (int)sizeof name) {
+            memcpy(name, ie, (size_t)(eq - ie)), name[eq - ie] = 0;
+            char *end;
+            unsigned long h = strtoul(name, &end, 16);
+            if (!game_int_set(*end ? mmh3(name) : (uint32_t)h, (int32_t)atoi(eq + 1))) rt_log("flags: %s is no int flag", name);
+        }
+    }
+    const char *le = cfg_get("TOTK_LIFE_SET");   // TOTK_LIFE_SET=<quarters>: Link's own life, the same way
+    if (le && *le) rt_log("flags: Link's life set to %d: %s", atoi(le), game_player_life_set(atoi(le)) ? "done" : "not found");
     const char *e = cfg_get("TOTK_FLAG_SET");
     for (const char *p = e; p && *p;) {
         char *end;
