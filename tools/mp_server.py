@@ -89,6 +89,7 @@ class Player:
         self.anim = ''             # the animation of the last POS line, without its frame
         self.anim_at = {}          # event kind: when its animation last counted
         self.acts = []             # when the last ACT lines came (a few a second at most)
+        self.quests = ''           # the last QUESTS line's list: quest:step numbers of the quests under way or done
 
 
 class Room:
@@ -247,6 +248,9 @@ async def handle(room, reader, writer):
                 for q in room.players:   # and what everyone wears, for their figures
                     if q is not p and q.name and q.look:
                         await room.send(p, line('LOOK', q.name, *q.look))
+                for q in room.players:   # and where everyone stands in the quests
+                    if q is not p and q.name and q.quests:
+                        await room.send(p, line('QUESTS', q.name, q.quests, limit=3000))
                 for who, (mark, at) in room.marks.items():
                     if time.time() - at < 15 * 60:
                         await room.send(p, line('MARK', who, *mark))
@@ -301,6 +305,11 @@ async def handle(room, reader, writer):
                     p.anim = base
                 await room.broadcast(line('POS', p.name, *p.pos, *extra, limit=1024) if any(extra) else
                                      line('POS', p.name, *p.pos), skip=p)
+            elif kind == 'QUESTS' and len(f) >= 2 and p.name:   # where a player stands in the quests, to everyone else
+                # quest:step pairs of numbers (the game's quest list, tools/item_names.py --quests), comma-separated
+                if len(f[1]) <= 3000 and all(c in '0123456789:,' for c in f[1]):
+                    p.quests = f[1]
+                    await room.broadcast(line('QUESTS', p.name, p.quests, limit=3000), skip=p)
             elif kind == 'LOOK' and len(f) >= 4 and p.name:   # the armor a player wears, to everyone else
                 p.look = tuple(v if v.startswith('Armor_') and v.replace('_', '').isalnum() else '' for v in
                                (clean(x)[:47] for x in f[1:4]))
@@ -329,6 +338,15 @@ async def handle(room, reader, writer):
                     text = f'{p.name} ganhou o poder {POWERS[f[2]]}.' if f[2] in POWERS else \
                         f'{p.name} pegou {f[2]} pela primeira vez.'
                     await room.event('item', text, p.name, f[2])
+                # quest <quest> <step> <the step it left>: a quest's step changed (its Step_<quest> enum): from
+                # NotReady or Ready (offered) it began, at Complete it is done
+                elif f[1] == 'quest' and len(f) >= 5 and len(p.acts) < 10 and all(
+                        len(x) <= 64 and x.isascii() and x.replace('_', '').isalnum() for x in f[2:5]):
+                    p.acts.append(now)
+                    text = (f'{p.name} concluiu a missão {f[2]}.' if f[3] == 'Complete' else
+                            f'{p.name} começou a missão {f[2]}.' if f[4] in ('NotReady', 'Ready') else
+                            f'{p.name} avançou na missão {f[2]} ({f[3]}).')
+                    await room.event('quest', text, p.name, f'{f[2]}:{f[3]}:{f[4]}')
             elif kind == 'PING':
                 await room.send(p, line('PONG'))
     except (asyncio.TimeoutError, ConnectionError, OSError):

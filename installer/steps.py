@@ -1142,12 +1142,14 @@ def link_sounds(ctx):
 
 
 def item_names(ctx):
-    """profile/item-names.tsv: the names the game gives its items in English, Portuguese and Russian, read from this
-    install's RomFS by tools/item_names.py, for the multiplayer room's log (runtime/net_mp.c item_display). Optional:
-    without it the log names items by their actor, so the setup warns and goes on."""
+    """profile/item-names.tsv and profile/quests.tsv: the names the game gives its items, and its quests with their steps
+    and titles, in English, Portuguese and Russian, read from this install's RomFS by tools/item_names.py, for the
+    multiplayer room's log (runtime/net_mp.c item_display, quest watch). Optional: without them the log names items by
+    their actor and follows no quests, so the setup warns and goes on."""
     layout, dest, rep = ctx.layout, ctx.dest, ctx.reporter
     code, log = run_tool(ctx, 'prepare-names', layout.tools / 'item_names.py',
-                         [dest / 'romfs', dest / 'profile' / 'item-names.tsv'])
+                         [dest / 'romfs', dest / 'profile' / 'item-names.tsv', '--quests',
+                          dest / 'profile' / 'quests.tsv'])
     if code:
         rep.warning('warn.item_names_failed', code=code, log=str(log))
 

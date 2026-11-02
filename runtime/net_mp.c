@@ -170,6 +170,122 @@ static void item_display(const char *actor, char *out, size_t cap) {
     }
 }
 
+// The game's quests (<profile>/quests.tsv, tools/item_names.py --quests: quest, category, steps, English, Portuguese,
+// Russian titles), loaded at first use. A quest's progress is the enum flag Step_<quest>: NotReady, its steps in
+// order, Complete, each value the hash of its name (game_flag_hash).
+enum { QUEST_STEPS = 24 };
+typedef struct {
+    char *id, *title[3], *category;
+    uint32_t flag;                    // hash of Step_<quest>
+    int nsteps;                       // steps[0] NotReady, then the quest's, then Complete
+    char *step[QUEST_STEPS];
+    uint32_t step_hash[QUEST_STEPS];
+} Quest;
+static Quest *quests;
+static int quest_count = -1;
+
+static PlatMutex quest_load_lock = PLAT_MUTEX_INIT;   // the menu's thread and the room's both load the list
+
+static void load_quests(void) {
+    plat_mutex_lock(&quest_load_lock);
+    if (quest_count >= 0) {
+        plat_mutex_unlock(&quest_load_lock);
+        return;
+    }
+    int loaded = 0;
+    char path[1200];
+    snprintf(path, sizeof path, "%s/quests.tsv", rt_config()->profile);
+    uint64_t n = 0;
+    char *d = (char *)plat_file_read(path, &n);   // kept: the quests point into it
+    int lines = 0;
+    for (uint64_t i = 0; d && i < n; i++) lines += d[i] == '\n';
+    if (!d || !lines || !(quests = calloc((size_t)lines, sizeof *quests))) {
+        quest_count = 0;
+        plat_mutex_unlock(&quest_load_lock);
+        return;
+    }
+    static char not_ready[] = "NotReady", complete[] = "Complete";
+    for (char *line = d, *end; line < d + n && loaded < lines; line = end + 1) {
+        if (!(end = memchr(line, '\n', (size_t)(d + n - line)))) break;
+        *end = 0;
+        char *f[6] = {line};
+        for (int k = 1; k < 6 && f[k - 1]; k++)
+            if ((f[k] = strchr(f[k - 1], '\t'))) *f[k]++ = 0;
+        if (!f[2]) continue;
+        Quest *q = &quests[loaded];
+        q->id = f[0], q->category = f[1] ? f[1] : "";
+        for (int k = 0; k < 3; k++) q->title[k] = f[3 + k] ? f[3 + k] : "";
+        q->step[q->nsteps++] = not_ready;
+        for (char *st = f[2], *comma; st && *st && q->nsteps < QUEST_STEPS - 1; st = comma ? comma + 1 : NULL) {
+            if ((comma = strchr(st, ','))) *comma = 0;
+            q->step[q->nsteps++] = st;
+        }
+        q->step[q->nsteps++] = complete;
+        char name[96];
+        snprintf(name, sizeof name, "Step_%s", q->id);
+        q->flag = game_flag_hash(name);
+        for (int k = 0; k < q->nsteps; k++) q->step_hash[k] = game_flag_hash(q->step[k]);
+        loaded++;
+    }
+    quest_count = loaded;
+    rt_log("mp: %d quests from %s", quest_count, path);
+    plat_mutex_unlock(&quest_load_lock);
+}
+
+// Each player's quest steps by quest number (QUESTS lines; this game's own under its name), 0 not under way.
+enum { MAX_QUESTS = 512 };
+static struct { char name[MP_NAME_MAX]; uint8_t step[MAX_QUESTS]; } quest_state[MP_MAX_PLAYERS + 1];
+
+static void set_quests(const char *name, const char *list) {   // "q:k,q:k" under the lock
+    int slot = -1, free_slot = -1;
+    for (int i = 0; i <= MP_MAX_PLAYERS; i++) {
+        if (!strcmp(quest_state[i].name, name)) slot = i;
+        if (!quest_state[i].name[0] && free_slot < 0) free_slot = i;
+    }
+    if (slot < 0) slot = free_slot >= 0 ? free_slot : MP_MAX_PLAYERS;
+    field(quest_state[slot].name, sizeof quest_state[0].name, name);
+    memset(quest_state[slot].step, 0, sizeof quest_state[0].step);
+    for (const char *p = list; p && *p;) {
+        char *end;
+        long q = strtol(p, &end, 10);
+        if (*end != ':') break;
+        long k = strtol(end + 1, &end, 10);
+        if (q >= 0 && q < MAX_QUESTS && k >= 0 && k < 256) quest_state[slot].step[q] = (uint8_t)k;
+        p = *end == ',' ? end + 1 : NULL;
+    }
+}
+
+int mp_quest_step(const char *name, int i) {
+    plat_mutex_lock(&lock);
+    int k = 0;
+    for (int s = 0; s <= MP_MAX_PLAYERS && i >= 0 && i < MAX_QUESTS; s++)
+        if (quest_state[s].name[0] && !strcmp(quest_state[s].name, name)) k = quest_state[s].step[i];
+    plat_mutex_unlock(&lock);
+    return k;
+}
+
+int mp_quest_count(void) {
+    load_quests();
+    return quest_count < MAX_QUESTS ? quest_count : MAX_QUESTS;
+}
+
+const char *mp_quest_title(int i) {
+    if (i < 0 || i >= mp_quest_count()) return "";
+    const char *lang = menu_lang();
+    int col = !strncmp(lang, "pt", 2) ? 1 : !strncmp(lang, "ru", 2) ? 2 : 0;
+    return quests[i].title[col][0] ? quests[i].title[col] : quests[i].title[0][0] ? quests[i].title[0] : quests[i].id;
+}
+
+const char *mp_quest_category(int i) { return i >= 0 && i < mp_quest_count() ? quests[i].category : ""; }
+int mp_quest_steps(int i) { return i >= 0 && i < mp_quest_count() ? quests[i].nsteps - 3 : 0; }
+
+static const Quest *quest_by_id(const char *id) {
+    load_quests();
+    for (int i = 0; i < quest_count; i++)
+        if (!strcmp(quests[i].id, id)) return &quests[i];
+    return NULL;
+}
+
 // An EVENT line's text in the menu's language for the kinds it knows (tools/mp_server.py Room.event: kind, the room's
 // text, the player, the step, the total), else the room's own text.
 static void event_text(const char *kind, const char *who, const char *arg, int total, const char *room_text, char *out,
@@ -198,6 +314,25 @@ static void event_text(const char *kind, const char *who, const char *arg, int t
             snprintf(out, cap, menu_text(UI_MENU_MP_EV_POWER), who, menu_text(powers[i].name));
             return;
         }
+    if (!strcmp(kind, "quest") && arg[0]) {   // quest:step - begun, a step further, or done
+        char id[96];
+        snprintf(id, sizeof id, "%s", arg);
+        char *step = strchr(id, ':'), *from = NULL;   // quest:step:the step it left
+        if (step) *step++ = 0;
+        if (step && (from = strchr(step, ':'))) *from++ = 0;
+        const Quest *q = quest_by_id(id);
+        const char *lang = menu_lang();
+        int col = !strncmp(lang, "pt", 2) ? 1 : !strncmp(lang, "ru", 2) ? 2 : 0;
+        const char *title = q && q->title[col][0] ? q->title[col] : q && q->title[0][0] ? q->title[0] : id;
+        int at = -1;
+        for (int k = 0; q && step && k < q->nsteps; k++)
+            if (!strcmp(q->step[k], step)) at = k;
+        int fresh = !from || !strcmp(from, "NotReady") || !strcmp(from, "Ready");   // not under way before
+        if (q && at == q->nsteps - 1) snprintf(out, cap, menu_text(UI_MENU_MP_EV_QUEST_DONE), who, title);
+        else if (q && at >= 1 && fresh) snprintf(out, cap, menu_text(UI_MENU_MP_EV_QUEST_START), who, title);
+        else if (q && at > 1) snprintf(out, cap, menu_text(UI_MENU_MP_EV_QUEST_STEP), who, title, at - 1, q->nsteps - 3);
+        return;
+    }
     if (!strcmp(kind, "item") && arg[0]) {   // the item's name as the game gives it
         char item[96];
         item_display(arg, item, sizeof item);
@@ -524,6 +659,8 @@ static void on_line(char *line, Sock s) {
         for (int i = 0; old && i < log_count; i++)   // the room's past events again (after a reconnection): once
             again |= log_lines[i].kind == MP_LINE_EVENT && log_lines[i].when == when && !strcmp(log_lines[i].text, text);
         if (!again) add_line_at(MP_LINE_EVENT, who, text, "", "", !old, when);
+    } else if (!strcmp(f[0], "QUESTS") && n >= 3) {   // QUESTS player q:k,...: where a friend stands in the quests
+        set_quests(f[1], f[2]);   // (these lines are handled under the lock)
     } else if (!strcmp(f[0], "CHALLENGE") && n >= 5) {
         view.challenges_done = !strcmp(f[1], "done");
         view.challenge_total = atoi(f[2]), view.challenge_target = atoi(f[3]);
@@ -650,6 +787,64 @@ static void session(const char *server) {
             if (!item) continue;
             const char *act[] = {"ACT", "item", item};
             alive = send_line(s, 3, act), sent++;
+        }
+        // the quests' steps (their Step_<quest> enums), each second: a change is a quest begun, a step further or
+        // a quest done; the first reading, and a reload's burst of changes, are where the save stands, not news
+        static uint64_t quest_at;
+        static uint32_t *quest_was;
+        static int quest_known;
+        if (alive && plat_now_ms() - quest_at >= 1000) {
+            quest_at = plat_now_ms();
+            load_quests();
+            if (quest_count > 0 && !quest_was) quest_was = calloc((size_t)quest_count, 4);
+            uint32_t now_v[512];
+            int read = 0, changed = 0;
+            for (int i = 0; quest_was && i < quest_count && i < 512; i++) {
+                now_v[i] = quest_was[i];
+                if (game_enum_get(quests[i].flag, &now_v[i])) read++;
+                changed += now_v[i] != quest_was[i];
+            }
+            if (read && quest_known && changed <= 8)
+                for (int i = 0; i < quest_count && i < 512 && alive; i++) {
+                    if (now_v[i] == quest_was[i]) continue;
+                    int from = 0, to = -1;   // the step it left and the one it reached
+                    for (int k = 0; k < quests[i].nsteps; k++) {
+                        if (quests[i].step_hash[k] == quest_was[i]) from = k;
+                        if (quests[i].step_hash[k] == now_v[i]) to = k;
+                    }
+                    if (to < 2) continue;   // back to NotReady, or offered (Ready): not news
+                    const char *act[] = {"ACT", "quest", quests[i].id, quests[i].step[to], quests[i].step[from]};
+                    alive = send_line(s, 5, act);
+                }
+            if (read && !quest_known) {   // once: where the save stands
+                char begun[600] = "";
+                size_t m = 0;
+                for (int i = 0; i < quest_count && i < 512 && m + 80 < sizeof begun; i++)
+                    for (int k = 2; k < quests[i].nsteps; k++)   // past Ready (offered, not taken)
+                        if (quests[i].step_hash[k] == now_v[i])
+                            m += (size_t)snprintf(begun + m, sizeof begun - m, " %s:%s", quests[i].id, quests[i].step[k]);
+                rt_log("mp: %d of %d quests read; under way or done:%s", read, quest_count, begun);
+            }
+            if (read) memcpy(quest_was, now_v, 4ull * (quest_count < 512 ? quest_count : 512)), quest_known = 1;
+            // where this game stands, for the room's quest page: q:k of the quests past Ready
+            static char sent_list[3000];
+            static uint64_t list_at;
+            char list[3000];
+            size_t m = 0;
+            list[0] = 0;
+            for (int i = 0; read && i < quest_count && i < 512 && m + 12 < sizeof list; i++)
+                for (int k = 2; k < quests[i].nsteps; k++)
+                    if (quests[i].step_hash[k] == now_v[i]) m += (size_t)snprintf(list + m, sizeof list - m, "%s%d:%d", m ? "," : "", i, k);
+            if (read && strcmp(list, sent_list) && plat_now_ms() - list_at >= 2000) {
+                const char *ql[] = {"QUESTS", list};
+                alive = send_line(s, 2, ql);
+                snprintf(sent_list, sizeof sent_list, "%s", list), list_at = plat_now_ms();
+                char me_name[MP_NAME_MAX];
+                plat_mutex_lock(&lock);
+                snprintf(me_name, sizeof me_name, "%s", view.me);
+                set_quests(me_name, list);
+                plat_mutex_unlock(&lock);
+            }
         }
         // the armor Link wears: read live from the game each second (game_player_armor), sent when it changes; where
         // that cannot be read (another game version), what the last save read says

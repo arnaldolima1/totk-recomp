@@ -1509,7 +1509,7 @@ static void mp_field(const char *key, int step, UiTextId label, UiTextId hint, c
     ImGui::PopID();
 }
 
-enum { MP_SUB_PLAYERS, MP_SUB_CHALLENGES, MP_SUB_ACH, MP_SUB_CHAT, MP_SUB_LOG, MP_SUB_ROOM, MP_SUBS };
+enum { MP_SUB_PLAYERS, MP_SUB_CHALLENGES, MP_SUB_ACH, MP_SUB_QUESTS, MP_SUB_CHAT, MP_SUB_LOG, MP_SUB_ROOM, MP_SUBS };
 static int g_mp_sub;
 static int64_t g_mp_chat_seen;   // the newest chat line's time when the chat page was last shown (the unread badge)
 static int g_mp_chat_frame = -10;   // the ImGui frame the chat page was last laid out in (the notices hide under it)
@@ -1755,7 +1755,8 @@ static void mp_banner(const MpView &v, float scale) {
 // The sub-page buttons; the chat's shows how many lines came since it was last open.
 static void mp_subtabs(float scale, int unread) {
     static const UiTextId names[MP_SUBS] = {UI_MENU_MP_SUB_PLAYERS, UI_MENU_MP_SUB_CHALLENGES, UI_MENU_MP_SUB_ACH,
-                                            UI_MENU_MP_SUB_CHAT, UI_MENU_MP_SUB_LOG, UI_MENU_MP_SUB_ROOM};
+                                            UI_MENU_MP_SUB_QUESTS, UI_MENU_MP_SUB_CHAT, UI_MENU_MP_SUB_LOG,
+                                            UI_MENU_MP_SUB_ROOM};
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 14 * scale);
     for (int i = 0; i < MP_SUBS; i++) {
         if (i) ImGui::SameLine(0, 8 * scale);
@@ -2702,6 +2703,67 @@ static void mp_page_log(float h, float scale) {
     ImGui::EndChild();
 }
 
+// Where each player stands in the quests (net_mp.c QUESTS lines and this game's own): the quests anyone has under way
+// or done, the main story's first, a column for each player with their step, done, or a dash.
+static void mp_page_quests(const MpView &v, float h, float scale) {
+    ImGui::BeginChild("##mp_quests", ImVec2(0, h));
+    int n = mp_quest_count();
+    static std::vector<int> rows;
+    rows.clear();
+    for (int i = 0; i < n; i++)
+        for (int p = 0; p < v.nplayers; p++)
+            if (mp_quest_step(v.players[p].name, i)) {
+                rows.push_back(i);
+                break;
+            }
+    std::stable_sort(rows.begin(), rows.end(), [](int a, int b) {
+        bool ma = !strcmp(mp_quest_category(a), "Main"), mb = !strcmp(mp_quest_category(b), "Main");
+        return ma != mb ? ma : strcmp(mp_quest_title(a), mp_quest_title(b)) < 0;
+    });
+    if (rows.empty()) {
+        ImGui::TextColored(kUiMuted, "%s", menu_text(UI_MENU_MP_QUESTS_EMPTY));
+        ImGui::EndChild();
+        return;
+    }
+    int cols = 1 + v.nplayers;
+    if (ImGui::BeginTable("##quests", cols, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("##title", ImGuiTableColumnFlags_WidthStretch, 3.0f);
+        for (int p = 0; p < v.nplayers; p++) ImGui::TableSetupColumn(v.players[p].name, ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        for (int p = 0; p < v.nplayers; p++) {
+            ImGui::TableSetColumnIndex(1 + p);
+            ImGui::TextColored(mp_name_col(v.players[p].name), "%s", v.players[p].name);
+        }
+        for (int i : rows) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            bool main_quest = !strcmp(mp_quest_category(i), "Main");
+            if (main_quest) {
+                ImGui::TextColored(kUiGoldHi, "%s", mp_quest_title(i));
+                ImGui::SameLine();
+                ImGui::TextColored(kUiMuted, "· %s", menu_text(UI_MENU_MP_QUEST_MAIN));
+            } else {
+                ImGui::TextUnformatted(mp_quest_title(i));
+            }
+            int steps = mp_quest_steps(i);
+            for (int p = 0; p < v.nplayers; p++) {
+                ImGui::TableSetColumnIndex(1 + p);
+                int k = mp_quest_step(v.players[p].name, i);
+                if (!k) ImGui::TextColored(kUiMuted, "—");
+                else if (k >= steps + 2) ImGui::TextColored(kUiZonai, "%s", menu_text(UI_MENU_MP_QUEST_CELL_DONE));
+                else {
+                    char cell[48];
+                    snprintf(cell, sizeof cell, menu_text(UI_MENU_MP_QUEST_CELL_STEP), k - 1, steps);
+                    ImGui::TextUnformatted(cell);
+                }
+            }
+        }
+        ImGui::EndTable();
+    }
+    ImGui::EndChild();
+}
+
 static void tab_multiplayer(float scale) {
     MpView v;
     mp_view(&v);
@@ -2732,6 +2794,7 @@ static void tab_multiplayer(float scale) {
     }
     case MP_SUB_CHAT: mp_page_chat(v, h, scale); break;
     case MP_SUB_LOG: mp_page_log(h, scale); break;
+    case MP_SUB_QUESTS: mp_page_quests(v, h, scale); break;
     default:
         ImGui::BeginChild("##mp_room", ImVec2(0, h), ImGuiChildFlags_NavFlattened);
         mp_connection(v, scale);

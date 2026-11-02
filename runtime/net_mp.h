@@ -85,6 +85,15 @@ int mp_send_chat(const char *text);    // queued for the thread; 0 when not conn
 void mp_reconnect(void);               // after the settings changed: drop the connection and try again now
 int mp_mark(void);                     // marks where the player stands, for everyone in the room; 0 when not possible
 int mp_slot_of(const char *name);      // that player's slot in the room, -1 when unknown
+// The game's quests (<profile>/quests.tsv): how many, quest i's title in the menu's language, its category ("Main",
+// "Sub", ...) and its steps after Ready (the number a player's step k counts as k - 1; Complete is steps + 1).
+int mp_quest_count(void);
+const char *mp_quest_title(int i);
+const char *mp_quest_category(int i);
+int mp_quest_steps(int i);
+// Where the player of that name stands in quest i (QUESTS lines, and this game's own): its step number (2 the first
+// after Ready, steps + 2 Complete), 0 not under way.
+int mp_quest_step(const char *name, int i);
 void mp_local_notice(const char *text);   // a notice of this game's own, shown with the room's (a screenshot taken)
 // The voice clips that friend's Link started (comma-separated, PV000_02), each once, when the friend's shown place
 // (mp_view, POS_DELAY_MS behind) reaches the moment it started; the length, 0 none.

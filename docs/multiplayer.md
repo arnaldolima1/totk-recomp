@@ -62,7 +62,8 @@ space. Nothing is encrypted or authenticated beyond the room's password: rooms a
 | game | `VOICE` | an Opus frame, base64 (20 ms of 48 kHz mono) |
 | game | `POS` | x, y, z: the player's position in metres (centimetres given), yaw: the way Link faces (radians from +z towards +x, empty when unread), t: the game's clock in ms, anim: the animation Link plays (1.4.3, empty when unread), quat, sfx, body: his real body pose (1.4.3, base64url, empty when unread); while moving, turning or changing animation, else each second (one each 50 ms at most) |
 | game | `MARK` | x, y, z: a marker where the player stands |
-| game | `ACT` | `item`, actor: an item Link got for the first time (1.4.3, its `IsGet.<actor>` flag; a few a second at most) |
+| game | `ACT` | `item`, actor: an item Link got for the first time (1.4.3, its `IsGet.<actor>` flag); `quest`, quest, step, the step it left: a quest's step changed (1.4.3, its `Step_<quest>` enum); a few a second at most |
+| game | `QUESTS` | quest:step pairs of numbers, comma-separated: the quests under way or done (their place in `profile/quests.tsv`, the step's place among NotReady, the quest's steps, Complete); when it changes, every 2 s at most |
 | game | `PING` | (every 2 s: the round trip to its `PONG` is the ping shown over the friends' list; the room drops a game silent for 120 s) |
 | room | `WELCOME` | protocol, room name |
 | room | `ERROR` | code (`version`, `password`, `name`, `full`), text |
@@ -73,7 +74,8 @@ space. Nothing is encrypted or authenticated beyond the room's password: rooms a
 | room | `VOICE` | player, the frame as received (to everyone but its sender) |
 | room | `POS` | player, x, y, z, yaw, t, anim, quat, sfx, body (to everyone else; the last place alone to a player who joins) |
 | room | `MARK` | player, x, y, z (to everyone, its player too; markers under 15 minutes old to a player who joins) |
-| room | `EVENT` | kind (`join`, `leave`, `challenge`, `shrines`, `lightroots`, `towers`, `koroks`, `hearts`, `death`, `warp`, `chest`, `item`; an `item` event's step is the actor), text (Portuguese), player, step, total, unix time, and `old` on the last 60 events a player gets when they join |
+| room | `QUESTS` | player, their list (to everyone else; everyone's to a player who joins) |
+| room | `EVENT` | kind (`join`, `leave`, `challenge`, `shrines`, `lightroots`, `towers`, `koroks`, `hearts`, `death`, `warp`, `chest`, `item`, `quest`; an `item` event's step is the actor, a `quest` event's quest:step:the step it left), text (Portuguese), player, step, total, unix time, and `old` on the last 60 events a player gets when they join |
 | room | `CHALLENGES` | count, then per track: figure, the room's total, tiers reached, four targets |
 | room | `CHALLENGE` | figure (or `done`), the room's total, target, text (the closest tier, for older games) |
 | room | `PONG` | |
@@ -169,6 +171,15 @@ value at byte 22) and its hash map (hash % capacity, linear probing). Flag names
 of names such as `IsGet.<actor>`, set the first time Link gets that actor's item; the game hashes every actor of its
 RomFS so (`game_flag_item`). A watcher thread keeps the changes for the room's thread, a reload's burst of hundreds as
 one mark. `TOTK_FLAG_LOG=1` logs every change, the other value tables' too, to `<profile>/flag-log.tsv`.
+
+Players follow the story together without sharing it: each keeps their own save, and the room shows where each
+stands. The game's quests are listed in its RomFS (`RSDB/Challenge`, the quest table, with each quest's steps; titles
+in `ChallengeMsg/Info_<quest>.msbt`), which the installer turns into `profile/quests.tsv` (`tools/item_names.py
+--quests`). A quest's progress is the enum flag `Step_<quest>` (the manager's enum table, 56-byte entries, the value at
++28: the hash of the step's name): NotReady, Ready (offered, not taken), its steps, Complete. Once a second the game
+reads them all; a quest leaving NotReady or Ready is begun, a step further moved on, Complete done (`ACT quest`, the
+Log), and its whole list goes in `QUESTS` lines for the Quests page, where each player has a column (`ui/menu.cpp`
+`mp_page_quests`).
 
 The ping over the friends' list is the round trip of a `PING` (every 2 s) to its `PONG`.
 

@@ -32,7 +32,7 @@
 #include "platform/platform.h"
 
 static const uint64_t kFlagsGlobal = 0x7003ad66b0ull, kBoolVtable = 0x70039403d0ull;
-enum { ENTRY_BYTES = 24, VALUE_AT = 22, MAX_FLAGS = 200000, RING = 4096, BURST = 24, POLL_MS = 250, TABLE_STRIDE = 0x60,
+enum { ENUM_TABLE = 6, ENUM_BYTES = 56, ENUM_VALUE_AT = 28, ENTRY_BYTES = 24, VALUE_AT = 22, MAX_FLAGS = 200000, RING = 4096, BURST = 24, POLL_MS = 250, TABLE_STRIDE = 0x60,
        MAX_TABLES = 24 };
 
 typedef struct {   // one table of the manager
@@ -46,6 +46,7 @@ typedef struct {   // one table of the manager
 static struct {
     int ok;
     Table b;                  // the bool table
+    Table e;                  // the enum table (a quest's step: Step_<quest>), count 0 when it was not found
     Table other[MAX_TABLES];  // the others, for the log
     int nother;
     GameFlagChange ring[RING];
@@ -107,6 +108,11 @@ static int ready(int with_others) {
     if (!RT_V143) return 0;
     uint64_t p = 0, vt = 0;
     if (!rd(kFlagsGlobal, &p, 8) || !p || !rd(p + 8, &vt, 8) || vt != kBoolVtable || !table_at(p + 8, &F.b, 0)) return 0;
+    // the enums six tables on: 56-byte entries whose value (the hash of its name) is the word at +28
+    if (!table_at(p + 8 + ENUM_TABLE * TABLE_STRIDE, &F.e, 1) || F.e.stride != ENUM_BYTES) {
+        rt_log("flags: no enum table where 1.4.3 has it; quests are not followed");
+        memset(&F.e, 0, sizeof F.e);
+    }
     for (int k = -8; with_others && k <= 16 && F.nother < MAX_TABLES; k++)
         if (k && table_at(p + 8 + (int64_t)k * TABLE_STRIDE, &F.other[F.nother], 1)) {
             rt_log("flags: table %+d: %u entries of %u bytes", k, F.other[F.nother].count, F.other[F.nother].stride);
@@ -117,14 +123,24 @@ static int ready(int with_others) {
     return F.ok = 1;
 }
 
-// A flag's entry number in the bool table, 0 when the map has none.
-static uint32_t number_of(uint32_t hash) {
-    for (uint32_t i = 0, s = hash % F.b.cap; i < F.b.cap; i++, s = s + 1 == F.b.cap ? 0 : s + 1) {
+// A flag's entry number in table t, 0 when its map has none.
+static uint32_t number_of(const Table *t, uint32_t hash) {
+    for (uint32_t i = 0, s = t->cap ? hash % t->cap : 0; i < t->cap; i++, s = s + 1 == t->cap ? 0 : s + 1) {
         uint32_t pair[2];
-        if (!rd(F.b.map + 8ull * s, pair, 8) || !pair[1]) return 0;
-        if (pair[0] == hash) return pair[1] < F.b.count ? pair[1] : 0;
+        if (!rd(t->map + 8ull * s, pair, 8) || !pair[1]) return 0;
+        if (pair[0] == hash) return pair[1] < t->count ? pair[1] : 0;
     }
     return 0;
+}
+
+uint32_t game_flag_hash(const char *name) { return mmh3(name); }
+
+int game_enum_get(uint32_t hash, uint32_t *value) {
+    plat_mutex_lock(&lock);
+    uint32_t k;
+    int ok = F.ok && F.e.count && (k = number_of(&F.e, hash)) && rd(F.e.entries + (uint64_t)ENUM_BYTES * k + ENUM_VALUE_AT, value, 4);
+    plat_mutex_unlock(&lock);
+    return ok;
 }
 
 int game_flag_get(uint32_t hash) {
@@ -132,7 +148,7 @@ int game_flag_get(uint32_t hash) {
     int v = -1;
     uint32_t k;
     uint8_t b;
-    if (F.ok && (k = number_of(hash)) && rd(F.b.entries + (uint64_t)ENTRY_BYTES * k + VALUE_AT, &b, 1)) v = b != 0;
+    if (F.ok && (k = number_of(&F.b, hash)) && rd(F.b.entries + (uint64_t)ENTRY_BYTES * k + VALUE_AT, &b, 1)) v = b != 0;
     plat_mutex_unlock(&lock);
     return v;
 }

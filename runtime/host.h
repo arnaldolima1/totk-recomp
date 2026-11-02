@@ -317,6 +317,8 @@ typedef struct { uint32_t hash, entry; uint8_t old, now; } GameFlagChange;
 int game_flag_get(uint32_t hash);
 int game_flags_since(uint64_t *cursor, GameFlagChange *out, int max);
 const char *game_flag_item(uint32_t hash);
+uint32_t game_flag_hash(const char *name);                  // a flag's or an enum value's name hashed as the game does
+int game_enum_get(uint32_t hash, uint32_t *value);         // an enum flag's value (the hash of its name), 1 when read
 void game_flags_start(void);
 int game_resident_actors(char out[][48], int max);         // names of the resident actors (anim_probe.c)
 int game_player_armor(char out[3][48]);                   // what Link wears now: head, upper, lower (1.4.3)
