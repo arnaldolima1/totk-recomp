@@ -57,7 +57,11 @@ PROGRESS = {
 ANIM_EVENTS = [
     (('Nml_Die', 'Swim_Die'), 'death', '{p} morreu.', 10),
     (('WarpHeightIn',), 'warp', '{p} viajou para outro lugar.', 10),
+    (('Nml_Get',), 'chest', '{p} abriu um baú.', 3),   # Nml_Get and Nml_Get_Air: Link holds up what a chest gave
 ]
+# the powers, by the actor whose "IsGet.<actor>" flag the game sets when Link gets one (ACT item lines)
+POWERS = {'Obj_UltraHand': 'Ultramão', 'Obj_ReverseRecorder': 'Retrocesso', 'Obj_AutoBuilder': 'Autoconstrução',
+          'Obj_Camera': 'Câmera'}
 LOG_KEEP = 60   # events a newcomer gets
 
 
@@ -84,6 +88,7 @@ class Player:
         self.stats_known = False   # a STATUS came: later ones that raise a figure are events
         self.anim = ''             # the animation of the last POS line, without its frame
         self.anim_at = {}          # event kind: when its animation last counted
+        self.acts = []             # when the last ACT lines came (a few a second at most)
 
 
 class Room:
@@ -314,6 +319,16 @@ async def handle(room, reader, writer):
                 await room.broadcast(line('CHAT', p.name, clean(f[1])[:300]))
             elif kind == 'ACH' and len(f) >= 4:   # ACH id name rarity, relayed with the player's name in front
                 await room.broadcast(line('ACH', p.name, clean(f[1])[:40], clean(f[2])[:80], clean(f[3])[:16]), skip=p)
+            elif kind == 'ACT' and len(f) >= 3 and p.name:   # something the player's game saw them do
+                # item <actor>: an item got for the first time (its "IsGet.<actor>" flag); a few a second at most
+                now = time.time()
+                p.acts = [t for t in p.acts if now - t < 5]
+                if f[1] == 'item' and len(f[2]) <= 60 and f[2].isascii() and f[2].replace('_', '').isalnum() and \
+                        len(p.acts) < 10:
+                    p.acts.append(now)
+                    text = f'{p.name} ganhou o poder {POWERS[f[2]]}.' if f[2] in POWERS else \
+                        f'{p.name} pegou {f[2]} pela primeira vez.'
+                    await room.event('item', text, p.name, f[2])
             elif kind == 'PING':
                 await room.send(p, line('PONG'))
     except (asyncio.TimeoutError, ConnectionError, OSError):

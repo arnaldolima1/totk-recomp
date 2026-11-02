@@ -309,6 +309,15 @@ uint64_t game_player_actor(void);                          // the Player actor's
 int game_player_anim(char *out, size_t cap, float *frame);   // the animation Link plays and its frame (1.4.3), 1 when read
 int game_player_body(float *out, int max);                 // Link's skinning palette in his actor space (1.4.3),
                                                            // max x 12 floats; the entries read, 0 none
+// The game's bool flags while it runs (game_flags.c, 1.4.3): a flag by its hash (-1 unknown, else 0 or 1); the changes
+// after *cursor (hash, entry number, old and new value byte; all zero: a reload, a burst of changes left out), the
+// cursor moved on; the actor whose "IsGet.<actor>" flag a hash is (an item got for the first time), NULL none. The
+// watcher starts with game_flags_start; TOTK_FLAG_LOG also logs every change to <profile>/flag-log.tsv.
+typedef struct { uint32_t hash, entry; uint8_t old, now; } GameFlagChange;
+int game_flag_get(uint32_t hash);
+int game_flags_since(uint64_t *cursor, GameFlagChange *out, int max);
+const char *game_flag_item(uint32_t hash);
+void game_flags_start(void);
 int game_resident_actors(char out[][48], int max);         // names of the resident actors (anim_probe.c)
 int game_player_armor(char out[3][48]);                   // what Link wears now: head, upper, lower (1.4.3)
 int game_player_quat(float q[4]);                         // Link's whole rotation, a unit quaternion (x, y, z, w)

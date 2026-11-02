@@ -1,0 +1,287 @@
+// The game's flags while it runs (GameData: an item got for the first time, a chest opened, a shrine done), 1.4.3
+// only, as found with the research probe gmd.c (TOTK_GMD_PROBE). A global of the main module at kFlagsGlobal points 8
+// bytes before the flag manager's bool table; the manager's other tables (other value types: counters and the like)
+// follow and precede it every 0x60 bytes in the same layout: a vtable word, the entry count, the entries, the hash map
+// and the map's capacity in the high half of the fifth word. Bool entries are 24 bytes, byte 22 the value (byte 23
+// matches the save too). The map is an open-addressed array of (u32 hash, u32 entry number) pairs, a hash's first
+// slot hash % capacity and the next ones after it; number 0 an empty slot. The bool table is checked by its vtable
+// before anything is read.
+//
+// A flag's name is hashed with MurmurHash3 (x86, 32 bits, seed 0): "IsGet.<actor>" is set the first time Link gets that
+// actor's item, the actor names being those of the RomFS's Pack/Actor files (game_flag_item).
+//
+// A thread watches the bool values four times a second and keeps the changes in a ring that each reader follows with
+// its own cursor (game_flags_since). A reload (a death, a save loaded) changes hundreds at once: such a burst is kept as
+// one reload mark instead.
+//
+// TOTK_FLAG_LOG=1 (a research switch, off by default) also writes every change to <profile>/flag-log.tsv: the clock and
+// world time, hash, entry, old and new value, Link's place and animation and the flag's name when known; and every
+// change of the other tables' entries (table, entry, hash, the 4-byte word that changed), so the flags and counters of
+// an action (a chest, a kill, a shrine) can be told apart by playing it. Read only.
+#include <math.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#include "cfg.h"
+#include "fs.h"
+#include "host.h"
+#include "platform/platform.h"
+
+static const uint64_t kFlagsGlobal = 0x7003ad66b0ull, kBoolVtable = 0x70039403d0ull;
+enum { ENTRY_BYTES = 24, VALUE_AT = 22, MAX_FLAGS = 200000, RING = 4096, BURST = 24, POLL_MS = 250, TABLE_STRIDE = 0x60,
+       MAX_TABLES = 24 };
+
+typedef struct {   // one table of the manager
+    uint64_t entries, map;
+    uint32_t count, cap, stride;
+    uint32_t *hash_of;   // per entry its hash (0 none), from the map
+    uint8_t *was;        // the entries as last seen (bool table: the value bytes; others: whole entries, for the log)
+    uint8_t *runs;       // others: polls in a row each entry changed (a ticking one goes quiet in the log)
+} Table;
+
+static struct {
+    int ok;
+    Table b;                  // the bool table
+    Table other[MAX_TABLES];  // the others, for the log
+    int nother;
+    GameFlagChange ring[RING];
+    uint64_t head;            // changes put in the ring so far
+} F;
+static PlatMutex lock = PLAT_MUTEX_INIT;
+
+static int rd(uint64_t a, void *out, size_t n) { return a && plat_mem_read(a, out, n); }
+
+static uint32_t mmh3(const char *s) {   // MurmurHash3 x86 32, seed 0
+    uint32_t h = 0, n = (uint32_t)strlen(s), k;
+    const uint8_t *p = (const uint8_t *)s;
+    for (uint32_t i = 0; i + 4 <= n; i += 4) {
+        memcpy(&k, p + i, 4);
+        k *= 0xcc9e2d51u, k = k << 15 | k >> 17, k *= 0x1b873593u;
+        h ^= k, h = h << 13 | h >> 19, h = h * 5 + 0xe6546b64u;
+    }
+    k = 0;
+    for (uint32_t i = n & ~3u, s8 = 0; i < n; i++, s8 += 8) k |= (uint32_t)p[i] << s8;
+    if (n & 3) k *= 0xcc9e2d51u, k = k << 15 | k >> 17, k *= 0x1b873593u, h ^= k;
+    h ^= n, h ^= h >> 16, h *= 0x85ebca6bu, h ^= h >> 13, h *= 0xc2b2ae35u, h ^= h >> 16;
+    return h;
+}
+
+// A table at rec: its entries, map and the map's (hash, number) pairs read into hash_of; 0 when rec is not one.
+static int table_at(uint64_t rec, Table *t, int whole) {
+    uint64_t w[5];
+    if (!rd(rec, w, sizeof w) || (w[0] >> 32) != 0x70) return 0;
+    uint32_t count = (uint32_t)w[1], cap = (uint32_t)(w[4] >> 32);
+    if (!count || count > MAX_FLAGS || cap < count || cap > 4 * MAX_FLAGS || !w[2] || !w[3]) return 0;
+    uint32_t stride = ENTRY_BYTES;
+    if (whole) {   // the entries' size: each starts with the same vtable word
+        uint64_t v0, v;
+        if (!rd(w[2], &v0, 8)) return 0;
+        for (stride = 8; stride <= 256 && !(rd(w[2] + stride, &v, 8) && v == v0); stride += 8) {}
+        if (stride > 256) return 0;
+    }
+    uint32_t *slots = malloc(8ull * cap);
+    t->hash_of = calloc(count, 4);
+    t->was = malloc((uint64_t)count * (whole ? stride : 1));
+    t->runs = whole ? calloc(count, 1) : NULL;
+    if (!slots || !t->hash_of || !t->was || !rd(w[3], slots, 8ull * cap)) {
+        free(slots), free(t->hash_of), free(t->was);
+        return 0;
+    }
+    for (uint32_t i = 0; i < cap; i++)
+        if (slots[2 * i + 1] && slots[2 * i + 1] < count) t->hash_of[slots[2 * i + 1]] = slots[2 * i];
+    free(slots);
+    t->entries = w[2], t->map = w[3], t->count = count, t->cap = cap, t->stride = stride;
+    if (whole) rd(t->entries, t->was, (uint64_t)count * stride);
+    else
+        for (uint32_t i = 0; i < count; i++) rd(t->entries + (uint64_t)ENTRY_BYTES * i + VALUE_AT, &t->was[i], 1);
+    return 1;
+}
+
+// The bool table (and, for the log, the others), found and checked once a save runs; 0 until then or on another version.
+static int ready(int with_others) {
+    if (F.ok) return 1;
+    if (!RT_V143) return 0;
+    uint64_t p = 0, vt = 0;
+    if (!rd(kFlagsGlobal, &p, 8) || !p || !rd(p + 8, &vt, 8) || vt != kBoolVtable || !table_at(p + 8, &F.b, 0)) return 0;
+    for (int k = -8; with_others && k <= 16 && F.nother < MAX_TABLES; k++)
+        if (k && table_at(p + 8 + (int64_t)k * TABLE_STRIDE, &F.other[F.nother], 1)) {
+            rt_log("flags: table %+d: %u entries of %u bytes", k, F.other[F.nother].count, F.other[F.nother].stride);
+            F.nother++;
+        }
+    rt_log("flags: %u bool flags at %#llx (map %#llx, %u slots)", F.b.count, (unsigned long long)F.b.entries,
+           (unsigned long long)F.b.map, F.b.cap);
+    return F.ok = 1;
+}
+
+// A flag's entry number in the bool table, 0 when the map has none.
+static uint32_t number_of(uint32_t hash) {
+    for (uint32_t i = 0, s = hash % F.b.cap; i < F.b.cap; i++, s = s + 1 == F.b.cap ? 0 : s + 1) {
+        uint32_t pair[2];
+        if (!rd(F.b.map + 8ull * s, pair, 8) || !pair[1]) return 0;
+        if (pair[0] == hash) return pair[1] < F.b.count ? pair[1] : 0;
+    }
+    return 0;
+}
+
+int game_flag_get(uint32_t hash) {
+    plat_mutex_lock(&lock);
+    int v = -1;
+    uint32_t k;
+    uint8_t b;
+    if (F.ok && (k = number_of(hash)) && rd(F.b.entries + (uint64_t)ENTRY_BYTES * k + VALUE_AT, &b, 1)) v = b != 0;
+    plat_mutex_unlock(&lock);
+    return v;
+}
+
+// ---- names: "IsGet.<actor>" for every actor of the RomFS, sorted by hash
+typedef struct { uint32_t hash; char name[52]; } Named;
+static Named *g_items;
+static int g_nitems;
+
+static int cmp_named(const void *a, const void *b) {
+    uint32_t x = ((const Named *)a)->hash, y = ((const Named *)b)->hash;
+    return x < y ? -1 : x > y;
+}
+
+static void load_names(void) {
+    uint64_t n = romfs_file_count(), off, size;
+    if (!n || !(g_items = malloc(sizeof *g_items * 20000))) return;
+    static const char pre[] = "Pack/Actor/", suf[] = ".pack.zs";
+    for (uint64_t i = 0; i < n && g_nitems < 20000; i++) {
+        const char *p = romfs_entry(i, &off, &size);
+        size_t len = p ? strlen(p) : 0;
+        if (len <= sizeof pre + sizeof suf - 2 || strncmp(p, pre, sizeof pre - 1) || strcmp(p + len - (sizeof suf - 1), suf)) continue;
+        size_t nl = len - (sizeof pre - 1) - (sizeof suf - 1);
+        if (nl >= sizeof g_items[0].name || memchr(p + sizeof pre - 1, '/', nl)) continue;
+        Named *e = &g_items[g_nitems++];
+        memcpy(e->name, p + sizeof pre - 1, nl), e->name[nl] = 0;
+        char flag[80];
+        snprintf(flag, sizeof flag, "IsGet.%s", e->name);
+        e->hash = mmh3(flag);
+    }
+    qsort(g_items, (size_t)g_nitems, sizeof *g_items, cmp_named);
+    rt_log("flags: %d actor names for the item flags", g_nitems);
+}
+
+const char *game_flag_item(uint32_t hash) {
+    int lo = 0, hi = g_nitems - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        if (g_items[mid].hash == hash) return g_items[mid].name;
+        if (g_items[mid].hash < hash) lo = mid + 1;
+        else hi = mid - 1;
+    }
+    return NULL;
+}
+
+int game_flags_since(uint64_t *cursor, GameFlagChange *out, int max) {
+    plat_mutex_lock(&lock);
+    if (*cursor + RING < F.head) *cursor = F.head - RING;   // fell behind: the oldest kept
+    int n = 0;
+    for (; *cursor < F.head && n < max; ++*cursor) out[n++] = F.ring[*cursor % RING];
+    plat_mutex_unlock(&lock);
+    return n;
+}
+
+// ---- the watcher, and the research log
+static FILE *g_log;
+
+static void log_line(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void log_line(const char *fmt, ...) {
+    if (!g_log) return;
+    char clock[16] = "";
+    time_t now = time(NULL);   // the wall clock, for matching notes taken while playing
+    struct tm tm;
+#ifdef _WIN32
+    if (!localtime_s(&tm, &now)) strftime(clock, sizeof clock, "%H:%M:%S", &tm);
+#else
+    if (localtime_r(&now, &tm)) strftime(clock, sizeof clock, "%H:%M:%S", &tm);
+#endif
+    float p[3] = {NAN, NAN, NAN}, frame;
+    char anim[64] = "";
+    game_player_pos(p);
+    game_player_anim(anim, sizeof anim, &frame);
+    fprintf(g_log, "%s\t%lld\t%.1f\t%.1f\t%.1f\t%s\t", clock, (long long)(frame_step_world_us() / 1000), p[0], p[1], p[2], anim);
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(g_log, fmt, ap);
+    va_end(ap);
+    fputc('\n', g_log);
+}
+
+static void watch(void *arg) {
+    (void)arg;
+    while (frame_step_world_us() < 5000000) plat_sleep_ms(500);
+    load_names();
+    static GameFlagChange batch[RING];
+    static uint8_t *buf;
+    static uint64_t cap;
+    for (;; plat_sleep_ms(POLL_MS)) {
+        plat_mutex_lock(&lock);
+        int ok = ready(g_log != NULL);
+        plat_mutex_unlock(&lock);
+        if (!ok) continue;
+        int n = 0;
+        for (uint32_t k = 1; k < F.b.count; k++) {
+            uint8_t b;
+            if (!rd(F.b.entries + (uint64_t)ENTRY_BYTES * k + VALUE_AT, &b, 1) || b == F.b.was[k]) continue;
+            if (n < RING) batch[n++] = (GameFlagChange){F.b.hash_of[k], k, F.b.was[k], b};
+            F.b.was[k] = b;
+        }
+        if (n) {
+            plat_mutex_lock(&lock);
+            if (n > BURST) F.ring[F.head++ % RING] = (GameFlagChange){0, 0, 0, 0};   // a reload: one mark
+            else
+                for (int i = 0; i < n; i++) F.ring[F.head++ % RING] = batch[i];
+            plat_mutex_unlock(&lock);
+            for (int i = 0; i < n && g_log; i++) {
+                const char *name = game_flag_item(batch[i].hash);
+                log_line("bool\t%08x\t%u\t%u\t%u\t%s%s", batch[i].hash, batch[i].entry, batch[i].old, batch[i].now,
+                         name ? "IsGet." : "", name ? name : "");
+            }
+        }
+        for (int t = 0; g_log && t < F.nother; t++) {   // the other tables: each entry's 4-byte words after the vtable
+            Table *T = &F.other[t];
+            uint64_t bytes = (uint64_t)T->count * T->stride;
+            if (cap < bytes && !(buf = realloc(buf, cap = bytes))) cap = 0;
+            if (!buf || !rd(T->entries, buf, bytes)) continue;
+            int logged = 0;
+            for (uint32_t k = 0; k < T->count; k++) {
+                const uint8_t *was = T->was + (uint64_t)k * T->stride, *now = buf + (uint64_t)k * T->stride;
+                if (!memcmp(was, now, T->stride)) {
+                    if (T->runs && T->runs[k] < 8) T->runs[k] = 0;   // a quiet poll; a ticking entry stays left out
+                    continue;
+                }
+                if (T->runs && T->runs[k] < 255) T->runs[k]++;
+                if (T->runs && T->runs[k] == 8) log_line("table%d\t%08x\t%u\tticking: left out from now on", t, T->hash_of[k], k);
+                if ((T->runs && T->runs[k] >= 8) || logged >= 64) continue;
+                for (uint32_t o = 8; o + 4 <= T->stride; o += 4) {
+                    uint32_t a, b;
+                    memcpy(&a, was + o, 4), memcpy(&b, now + o, 4);
+                    if (a == b) continue;
+                    log_line("table%d\t%08x\t%u\t+%u\t%d\t%d", t, T->hash_of[k], k, o, (int32_t)a, (int32_t)b);
+                    logged++;
+                }
+            }
+            memcpy(T->was, buf, bytes);
+        }
+        if (g_log) fflush(g_log);
+    }
+}
+
+void game_flags_start(void) {
+    static volatile int32_t started;
+    if (plat_cas32(&started, 1, 0) != 0 || !RT_V143) return;
+    const char *e = cfg_get("TOTK_FLAG_LOG");
+    if (e && !strcmp(e, "1")) {
+        char path[1200];
+        snprintf(path, sizeof path, "%s/flag-log.tsv", rt_config()->profile);
+        if ((g_log = fopen(path, "a")))
+            fprintf(g_log, "# clock\tworld_ms\tx\ty\tz\tanim\tkind\thash\tentry\told/offset\tnew/old\t(new)/name\n");
+    }
+    if (!plat_thread_spawn(watch, NULL, "flags", 0)) rt_log("flags: no thread for the watcher");
+}

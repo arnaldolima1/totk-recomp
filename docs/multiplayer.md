@@ -62,6 +62,7 @@ space. Nothing is encrypted or authenticated beyond the room's password: rooms a
 | game | `VOICE` | an Opus frame, base64 (20 ms of 48 kHz mono) |
 | game | `POS` | x, y, z: the player's position in metres (centimetres given), yaw: the way Link faces (radians from +z towards +x, empty when unread), t: the game's clock in ms, anim: the animation Link plays (1.4.3, empty when unread), quat, sfx, body: his real body pose (1.4.3, base64url, empty when unread); while moving, turning or changing animation, else each second (one each 50 ms at most) |
 | game | `MARK` | x, y, z: a marker where the player stands |
+| game | `ACT` | `item`, actor: an item Link got for the first time (1.4.3, its `IsGet.<actor>` flag; a few a second at most) |
 | game | `PING` | (every 2 s: the round trip to its `PONG` is the ping shown over the friends' list; the room drops a game silent for 120 s) |
 | room | `WELCOME` | protocol, room name |
 | room | `ERROR` | code (`version`, `password`, `name`, `full`), text |
@@ -72,7 +73,7 @@ space. Nothing is encrypted or authenticated beyond the room's password: rooms a
 | room | `VOICE` | player, the frame as received (to everyone but its sender) |
 | room | `POS` | player, x, y, z, yaw, t, anim, quat, sfx, body (to everyone else; the last place alone to a player who joins) |
 | room | `MARK` | player, x, y, z (to everyone, its player too; markers under 15 minutes old to a player who joins) |
-| room | `EVENT` | kind (`join`, `leave`, `challenge`, `shrines`, `lightroots`, `towers`, `koroks`, `hearts`, `death`, `warp`), text (Portuguese), player, step, total, unix time, and `old` on the last 60 events a player gets when they join |
+| room | `EVENT` | kind (`join`, `leave`, `challenge`, `shrines`, `lightroots`, `towers`, `koroks`, `hearts`, `death`, `warp`, `chest`, `item`; an `item` event's step is the actor), text (Portuguese), player, step, total, unix time, and `old` on the last 60 events a player gets when they join |
 | room | `CHALLENGES` | count, then per track: figure, the room's total, tiers reached, four targets |
 | room | `CHALLENGE` | figure (or `done`), the room's total, target, text (the closest tier, for older games) |
 | room | `PONG` | |
@@ -154,9 +155,18 @@ What Link wears is read live too (`game_player_armor`: the model parts listed at
 The room keeps a log (`tools/mp_server.py` `Room.event`): who joined and left, the group's challenges, a player's
 figures going up between two `STATUS` lines (a shrine, a lightroot, a tower, Korok seeds, heart containers; the figures
 come from the evaluated save, so these follow the game's saves) and what their Link's animation in `POS` lines shows
-(`Nml_Die*` and `Swim_Die`: died; `WarpHeightIn`: fast travel). A newer game words the kinds it knows in the menu's
+(`Nml_Die*` and `Swim_Die`: died; `WarpHeightIn`: fast travel; `Nml_Get*`, Link holding up what a chest gave: opened a
+chest), and the items a player's game says they got for the first time (`ACT item`; a power when the actor is one of
+`POWERS`: Ultrahand, Recall, Autobuild, the camera). A newer game words the kinds it knows in the menu's
 language (`net_mp.c` `event_text`) and lists them, with friends' unlocks, on the Multiplayer tab's Log page
 (`ui/menu.cpp` `mp_page_log`); the past events a newcomer gets show there without notices.
+
+On 1.4.3 the game reads its bool flags while it runs (`runtime/game_flags.c`, found with the research probe
+`runtime/gmd.c`): a global of the main module leads to the flag manager's bool table (21414 flags of 24 bytes, the
+value at byte 22) and its hash map (hash % capacity, linear probing). Flag names are MurmurHash3 (x86, 32 bits, seed 0)
+of names such as `IsGet.<actor>`, set the first time Link gets that actor's item; the game hashes every actor of its
+RomFS so (`game_flag_item`). A watcher thread keeps the changes for the room's thread, a reload's burst of hundreds as
+one mark. `TOTK_FLAG_LOG=1` logs every change, the other value tables' too, to `<profile>/flag-log.tsv`.
 
 The ping over the friends' list is the round trip of a `PING` (every 2 s) to its `PONG`.
 

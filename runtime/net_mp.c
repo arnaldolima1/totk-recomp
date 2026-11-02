@@ -125,7 +125,9 @@ static void add_line(int kind, const char *from, const char *text, const char *a
 
 // An EVENT line's text in this game's language for the kinds it knows (tools/mp_server.py Room.event: kind, the room's
 // text, the player, the step, the total), else the room's own text.
-static void event_text(const char *kind, const char *who, int step, int total, const char *room_text, char *out, size_t cap) {
+static void event_text(const char *kind, const char *who, const char *arg, int total, const char *room_text, char *out,
+                       size_t cap) {
+    int step = atoi(arg);
     static const struct { const char *kind; UiTextId one, many; } kinds[] = {
         {"shrines", UI_MENU_MP_EV_SHRINES_1, UI_MENU_MP_EV_SHRINES_N},
         {"lightroots", UI_MENU_MP_EV_LIGHTROOTS_1, UI_MENU_MP_EV_LIGHTROOTS_N},
@@ -136,9 +138,27 @@ static void event_text(const char *kind, const char *who, int step, int total, c
         {"warp", UI_MENU_MP_EV_WARP, UI_MENU_MP_EV_WARP},
         {"join", UI_MENU_MP_EV_JOIN, UI_MENU_MP_EV_JOIN},
         {"leave", UI_MENU_MP_EV_LEAVE, UI_MENU_MP_EV_LEAVE},
+        {"chest", UI_MENU_MP_EV_CHEST, UI_MENU_MP_EV_CHEST},
+    };
+    static const struct { const char *actor; UiTextId name; } powers[] = {   // tools/mp_server.py POWERS
+        {"Obj_UltraHand", UI_MENU_MP_POWER_ULTRAHAND}, {"Obj_ReverseRecorder", UI_MENU_MP_POWER_RECALL},
+        {"Obj_AutoBuilder", UI_MENU_MP_POWER_AUTOBUILD}, {"Obj_Camera", UI_MENU_MP_POWER_CAMERA},
     };
     snprintf(out, cap, "%s", room_text);
     if (!who[0]) return;
+    for (size_t i = 0; !strcmp(kind, "item") && i < sizeof powers / sizeof *powers; i++)
+        if (!strcmp(arg, powers[i].actor)) {
+            snprintf(out, cap, menu_text(UI_MENU_MP_EV_POWER), who, menu_text(powers[i].name));
+            return;
+        }
+    if (!strcmp(kind, "item") && arg[0]) {   // the actor's name, its underscores as spaces
+        char item[64];
+        size_t k = 0;
+        for (; arg[k] && k + 1 < sizeof item; k++) item[k] = arg[k] == '_' ? ' ' : arg[k];
+        item[k] = 0;
+        snprintf(out, cap, menu_text(UI_MENU_MP_EV_ITEM), who, item);
+        return;
+    }
     for (size_t i = 0; i < sizeof kinds / sizeof *kinds; i++) {
         if (strcmp(kind, kinds[i].kind)) continue;
         if (kinds[i].one == kinds[i].many) snprintf(out, cap, menu_text(kinds[i].one), who);
@@ -453,7 +473,7 @@ static void on_line(char *line, Sock s) {
     } else if (!strcmp(f[0], "EVENT") && n >= 3) {   // EVENT kind text [player step total when [old]]
         char text[320];
         const char *who = n >= 4 ? f[3] : "";
-        event_text(f[1], who, n >= 5 ? atoi(f[4]) : 0, n >= 6 ? atoi(f[5]) : 0, f[2], text, sizeof text);
+        event_text(f[1], who, n >= 5 ? f[4] : "", n >= 6 ? atoi(f[5]) : 0, f[2], text, sizeof text);
         int64_t when = n >= 7 && f[6][0] ? strtoll(f[6], NULL, 10) : now_unix();
         int old = n >= 8 && !strcmp(f[7], "old"), again = 0;
         for (int i = 0; old && i < log_count; i++)   // the room's past events again (after a reconnection): once
@@ -567,6 +587,24 @@ static void session(const char *server) {
             const char *status[] = {"STATUS", "", v[0], v[1], v[2], v[3], v[4], v[5]};
             alive = send_line(s, 8, status);
             sent_gen = gen;
+        }
+        // the items Link gets for the first time (game_flags.c: their "IsGet.<actor>" flags), for the room's log; what
+        // happened before joining is not news, nor what a reload sets again (a burst, left out by the watcher)
+        static uint64_t flag_cursor;
+        static int flag_drained;
+        GameFlagChange fch[64];
+        int nf;
+        if (!flag_drained) {
+            while (game_flags_since(&flag_cursor, fch, 64) == 64) {}
+            flag_drained = 1, nf = 0;
+        } else {
+            nf = game_flags_since(&flag_cursor, fch, 64);
+        }
+        for (int i = 0, sent = 0; alive && i < nf && sent < 4; i++) {
+            const char *item = fch[i].hash && !fch[i].old && fch[i].now ? game_flag_item(fch[i].hash) : NULL;
+            if (!item) continue;
+            const char *act[] = {"ACT", "item", item};
+            alive = send_line(s, 3, act), sent++;
         }
         // the armor Link wears: read live from the game each second (game_player_armor), sent when it changes; where
         // that cannot be read (another game version), what the last save read says
@@ -788,6 +826,7 @@ void mp_tick(void) {
     if (plat_cas32(&started, 1, 0) == 0) {
         if (!plat_thread_spawn(thread_main, NULL, "multiplayer", 0)) rt_log("mp: no thread for the multiplayer client");
         gmd_start();   // gmd.c: the shared-progress research probe, when TOTK_GMD_PROBE asks for it
+        game_flags_start();   // game_flags.c: the flags' watcher (items got for the first time; TOTK_FLAG_LOG)
         anim_probe_start();   // anim_probe.c: where Link's animation is named, when TOTK_ANIM_PROBE asks for it
     }
 }
