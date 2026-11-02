@@ -9,9 +9,13 @@
 // Where: each carried item is an actor with a model object of its own; the model object's +0x90 points at its name
 // (Weapon_Sword_103.Weapon_Sword_103, the model file's) and its [+0x458]+0x8 at its skinning palette: per entry a
 // row-major 3x4 as the game draws it this frame (the first the model's place; a bow's string bends by the others), in
-// the render origin's frame like Link's body (frame_rate.c game_player_body). No fixed path from Link's actor leads to those objects (anim_probe.c TOTK_ANIM_PROBE=models found
-// a different one each run), so a background search finds them by name: the name's text in the heap, then the model
-// objects pointing at it, the one nearest Link kept. It runs when the item changes or the kept object stops matching.
+// the render origin's frame like Link's body (frame_rate.c game_player_body). No fixed path from Link's actor leads to
+// those objects (anim_probe.c TOTK_ANIM_PROBE=models found a different one each run), so a background search finds them
+// by name: the name's text in the heap, then the model objects pointing at it, the one nearest Link kept. It runs when
+// the item changes or the kept object stops matching, on a thread of its own that pauses between
+// stretches of memory (it reads gigabytes); after a search that finds nothing the next waits twice as long, up to a
+// minute, and a name's text, which stays put, is looked for once. Each model draws about a render origin of its own
+// on the same 10 m grid as Link's body (the item's and the body's can be a cell apart), so places compare modulo 10 m.
 // The model's name is the library's (link_figure_gear_model: the actor's pack's ModelInfo; Weapon_Sword_168, the
 // Wooden Stick, shows Weapon_Sword_103.Weapon_Sword_103); without the library, any model named "<actor>.".
 #include <math.h>
@@ -24,7 +28,7 @@
 #include "link_figure.h"
 #include "platform/platform.h"
 
-enum { KINDS = LF_GEAR, MAX_TEXTS = 64, CHUNK = 1 << 20, RETRY_MS = 3000 };
+enum { KINDS = LF_GEAR, MAX_TEXTS = 64, CHUNK = 1 << 20, RETRY_MS = 3000, RETRY_MAX_MS = 60000, PAUSE_EVERY = 4 };
 static const char *const kKind[KINDS] = {"Weapon", "Shield", "Bow", "Arrow"};
 
 static struct {
@@ -33,6 +37,9 @@ static struct {
     int entries;           // the palette entries its vertices use (link_figure_gear_model), 1 without the library
     uint64_t found;        // its model object, 0 not found yet
     uint64_t tried_ms;     // the last search for it
+    int fails;             // searches in a row that found nothing (each doubles the wait)
+    uint64_t texts[MAX_TEXTS];   // where its name's text was found (the search's first pass, kept)
+    int ntexts;
 } slot[KINDS];
 static PlatMutex lock = PLAT_MUTEX_INIT;
 static volatile int32_t searching;
@@ -78,8 +85,10 @@ static int link_frame(float local[3], float r[9], float body0[3]) {
     return best <= 25;
 }
 
+static float wrap10(float d) { return d - 10.0f * rintf(d / 10.0f); }   // a difference modulo the 10 m grid
+
 static float dist2(const float g[12], const float c[3]) {
-    float dx = g[3] - c[0], dy = g[7] - c[1], dz = g[11] - c[2];
+    float dx = wrap10(g[3] - c[0]), dy = wrap10(g[7] - c[1]), dz = wrap10(g[11] - c[2]);
     return dx * dx + dy * dy + dz * dz;
 }
 
@@ -99,15 +108,27 @@ static void search(void *arg) {
     // only when the heap has no text
     uint64_t ranges[2][2] = {{hb, hs}, {L->alias.base, L->alias.size}};
     static uint64_t texts[KINDS][MAX_TEXTS];
-    int ntexts[KINDS] = {0};
+    int ntexts[KINDS] = {0}, need_text = 0;
+    plat_mutex_lock(&lock);
+    for (int k = 0; k < KINDS; k++) {   // the texts found before, while they still hold the name
+        if (!want[k][0]) continue;
+        for (int t = 0; t < slot[k].ntexts; t++) {
+            char got[66];
+            size_t n = strlen(want[k]) + (want[k][strlen(want[k]) - 1] != '.');
+            if (n < sizeof got && rd(slot[k].texts[t], got, n) && !memcmp(got, want[k], n)) texts[k][ntexts[k]++] = slot[k].texts[t];
+        }
+        need_text |= !ntexts[k];
+    }
+    plat_mutex_unlock(&lock);
     char pat[KINDS][66];
     size_t plen[KINDS];
-    for (int k = 0; k < KINDS; k++)   // a whole name with its end, or the prefix
-        if ((plen[k] = strlen(want[k])) != 0) memcpy(pat[k], want[k], plen[k] + 1), plen[k] += want[k][plen[k] - 1] != '.';
+    for (int k = 0; k < KINDS; k++)   // a whole name with its end, or the prefix; none when its texts are known
+        if ((plen[k] = ntexts[k] ? 0 : strlen(want[k])) != 0) memcpy(pat[k], want[k], plen[k] + 1), plen[k] += want[k][plen[k] - 1] != '.';
     uint64_t t0 = plat_now_ms();
-    int any = 0;
-    for (int r = 0; r < 2 && !(r == 1 && any); r++)   // the texts
+    int any = 0, chunks = 0;
+    for (int r = 0; r < 2 && need_text && !(r == 1 && any); r++)   // the texts
         for (uint64_t c = ranges[r][0]; c + 64 < ranges[r][0] + ranges[r][1]; c += CHUNK) {
+            if (++chunks % PAUSE_EVERY == 0) plat_sleep_ms(1);   // the game's threads share the memory bus
             uint64_t n = ranges[r][0] + ranges[r][1] - c < CHUNK + 64 ? ranges[r][0] + ranges[r][1] - c : CHUNK + 64;
             if (!plat_mem_readable(c, n)) continue;
             const uint8_t *p = (const uint8_t *)(uintptr_t)c;
@@ -129,6 +150,7 @@ static void search(void *arg) {
     int have_frame = link_frame(local, rot, body0);
     for (int r = 0; r < 1 && have_frame && hi; r++)   // the model objects pointing at them (+0x90), in the heap
         for (uint64_t c = ranges[r][0]; c < ranges[r][0] + ranges[r][1]; c += CHUNK) {
+            if (++chunks % PAUSE_EVERY == 0) plat_sleep_ms(1);
             uint64_t n = ranges[r][0] + ranges[r][1] - c < CHUNK ? ranges[r][0] + ranges[r][1] - c : CHUNK;
             if (!plat_mem_readable(c, n)) continue;
             const uint64_t *w = (const uint64_t *)(uintptr_t)c;
@@ -145,8 +167,13 @@ static void search(void *arg) {
             }
         }
     plat_mutex_lock(&lock);
-    for (int k = 0; k < KINDS; k++)
-        if (best[k] && !strcmp(slot[k].model, want[k])) slot[k].found = best[k];
+    for (int k = 0; k < KINDS; k++) {
+        if (!want[k][0] || strcmp(slot[k].model, want[k])) continue;   // nothing asked, or the item changed meanwhile
+        slot[k].ntexts = ntexts[k];
+        memcpy(slot[k].texts, texts[k], sizeof slot[k].texts);
+        if (best[k]) slot[k].found = best[k], slot[k].fails = 0;
+        else slot[k].fails++;
+    }
     plat_mutex_unlock(&lock);
     for (int k = 0; k < KINDS; k++)
         if (want[k][0])
@@ -177,7 +204,7 @@ int game_player_gear(GameGear *out, int max) {
             }
         }
         if (strcmp(name, slot[k].actor)) {
-            memcpy(slot[k].actor, name, sizeof name), slot[k].found = 0, slot[k].tried_ms = 0;
+            memcpy(slot[k].actor, name, sizeof name), slot[k].found = 0, slot[k].tried_ms = 0, slot[k].fails = 0, slot[k].ntexts = 0;
             char m[48];
             slot[k].entries = 1;
             if (link_figure_gear_model(name, m, &slot[k].entries)) snprintf(slot[k].model, sizeof slot[k].model, "%s", m);
@@ -202,12 +229,16 @@ int game_player_gear(GameGear *out, int max) {
             }
         }
         if (!slot[k].found) {
-            if (now - slot[k].tried_ms >= RETRY_MS) need = 1, slot[k].tried_ms = now;
+            uint64_t wait = (uint64_t)RETRY_MS << (slot[k].fails < 5 ? slot[k].fails : 5);
+            if (now - slot[k].tried_ms >= (wait < RETRY_MAX_MS ? wait : RETRY_MAX_MS)) need = 1, slot[k].tried_ms = now;
             continue;
         }
         out[k].n = ne;
+        float cell[3] = {g[3] - body0[0] - wrap10(g[3] - body0[0]), g[7] - body0[1] - wrap10(g[7] - body0[1]),
+                         g[11] - body0[2] - wrap10(g[11] - body0[2])};   // the item's render origin's offset from the body's
         for (int e = 0; e < ne; e++) {
-            const float *ge = g + 12 * e;
+            float *ge = g + 12 * e;
+            ge[3] -= cell[0], ge[7] -= cell[1], ge[11] -= cell[2];
             float *o = out[k].m[e];
             for (int i = 0; i < 3; i++) {   // R^T (G - [0 | place]), as game_player_body
                 for (int j = 0; j < 3; j++) o[4 * i + j] = r[i] * ge[j] + r[3 + i] * ge[4 + j] + r[6 + i] * ge[8 + j];

@@ -215,7 +215,11 @@ layer of his animation is `Bow_Attack_Charge`. Each item is an actor whose model
 model file's, which the actor's pack's ModelInfo gives: `Weapon_Sword_168`, the Wooden Stick, shows
 `Weapon_Sword_103`) has a skinning palette at `[+0x458]+0x8`: the item as the game draws it this frame, in the hand or
 on the back. No fixed path from Link's actor leads there, so a background search finds the model object by its name's
-text in the heap and keeps it while it matches. The palette's entries go in the field relative to the bone the item
+text in the heap and keeps it while it matches. It runs only while someone else is in the room, pauses between
+stretches of memory, waits twice as long after each search that finds nothing (up to a minute), and compares places
+modulo the 10 m grid the game draws each model about (an item's render origin can be a cell away from the body's); a
+search that ran again and again for that reason cost 0.5.0 a third of its frame rate in a room. `TOTK_MP_GEAR=0` turns
+the gear off, `ab` in the B blocks of `TOTK_AB`; `TOTK_FIGURE_GEAR=0` draws figures without it. The palette's entries go in the field relative to the bone the item
 hangs from (the right or left wrist or the upper back, whichever is nearest), so the figure's own bone carries it: a
 bow's string bends by its own entries. `profile/link-armor.bin` holds the weapons' models too (the installer's
 `link_figure` step).

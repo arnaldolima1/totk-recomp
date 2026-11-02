@@ -1215,7 +1215,16 @@ static void session(const char *server) {
                 char body[(LF_BODY_BYTES + 2) / 3 * 4 + 1];
                 link_body_encode(pal, game_player_body(pal, 89), body, sizeof body);
                 char gear[1000];
-                gear_text(gear, sizeof gear, pal, body[0] ? 89 : 0);
+                // what Link carries, while someone else is in the room to see it (finding it reads the heap);
+                // TOTK_MP_GEAR=0 (a test switch) never, =ab in the B blocks of TOTK_AB only
+                static int gear_mode = -1;
+                if (gear_mode < 0) gear_mode = rt_knob("MP_GEAR", "1");
+                int gear_off = !RT_KNOB_ON(gear_mode);
+                plat_mutex_lock(&lock);
+                int others = view.nplayers > 1;
+                plat_mutex_unlock(&lock);
+                if (gear_off || !others) gear[0] = 0;
+                else gear_text(gear, sizeof gear, pal, body[0] ? 89 : 0);
                 if (alive) alive = send_pos(s, p, yaw, q, (int64_t)now, anim, frame, sfx, body, body[0] ? gear : "");
                 snprintf(sent_anim, sizeof sent_anim, "%s", anim);
                 if (q[3] <= 1) memcpy(sent_q, q, sizeof q);

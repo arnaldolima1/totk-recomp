@@ -2288,7 +2288,10 @@ static void world_tags(const MenuTarget *t, const MpView &v, float scale, bool (
                 g.yaw = 0;
                 // with the real pose the body's own turn is in it: the animation's turn (figure_animate) stays out
                 link_figure_orient(p.rot, p.has_body ? 0 : fs_->turn, g.rot);
-                g.fig = link_figure_dressed_gear(p.look, p.gear);   // what the friend wears (LOOK lines) and carries (POS)
+                static const char no_gear[LF_GEAR][48] = {};
+                static int gear_off = -1;   // TOTK_FIGURE_GEAR=0 (a test switch): figures carry nothing
+                if (gear_off < 0) gear_off = cfg_get("TOTK_FIGURE_GEAR") && !strcmp(cfg_get("TOTK_FIGURE_GEAR"), "0");
+                g.fig = link_figure_dressed_gear(p.look, gear_off ? no_gear : p.gear);   // what the friend wears (LOOK) and carries (POS)
                 g.has_body = p.has_body;
                 if (p.has_body) memcpy(g.body, &p.body, sizeof g.body);
                 g.hair[0] = col.x * 0.9f + 0.08f, g.hair[1] = col.y * 0.9f + 0.08f, g.hair[2] = col.z * 0.9f + 0.08f;
