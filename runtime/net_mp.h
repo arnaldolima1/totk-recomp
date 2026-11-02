@@ -31,6 +31,7 @@ typedef struct {
     float frames[3];        // its frame: from + (to - from) u, to below from when a loop started over (net_mp.c place_on)
     float rot[4];           // a friend's Link's whole rotation (x, y, z, w; game_player_quat), from the yaw when not sent
     char look[3][48];       // the armor pieces the player wears (head, upper, lower; "" none), from LOOK lines
+    char gear[LF_GEAR][48]; // what a friend carries (link_figure.h LF_GEAR_*: weapon, shield, bow; "" none), POS lines
     int has_body;           // body: a friend's real pose (POS lines' last field), between the samples as the place is
     LinkBody body;
     int slot;               // 0..MP_SLOTS-1 from the room's SLOTS line, -1 before it came (an older server)

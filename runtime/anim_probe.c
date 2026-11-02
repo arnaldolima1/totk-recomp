@@ -847,8 +847,10 @@ static void model_probe(void *arg) {
     g_alias = mem_layout()->alias.base, g_alias_size = mem_layout()->alias.size;
     uint64_t actor = game_player_actor(), unit = actor ? rd_ptr(actor + 0x238) : 0;
     if (!actor || !unit) return;
+    const char *de = getenv("TOTK_MODEL_DEPTH");
+    int max_depth = de && *de ? atoi(de) : 3;
     // every model object (palette by +0x458, +0x8) up to three steps from the actor, each palette once
-    static uint64_t seen_pal[256];
+    static uint64_t seen_pal[4096];
     int nseen = 0;
     memset(g_seen, 0, sizeof *g_seen * SEEN_SLOTS);
     int n = 0;
@@ -869,17 +871,27 @@ static void model_probe(void *arg) {
                 while (c < 512 && plat_mem_read(pal + 48 * (uint64_t)c, m, 48) && is_transform(0, m)) c++;
                 int dup = 0;
                 for (int k = 0; k < nseen; k++) dup |= seen_pal[k] == pal;
-                if (c >= 4 && !dup && nseen < 256) {
+                if (c >= 1 && !dup && nseen < 4096) {
                     seen_pal[nseen++] = pal;
                     char text[200];
                     size_t m2 = (size_t)snprintf(text, sizeof text, "actor");
                     int chain[8], cc = 0;
                     for (int q = i; q > 0 && cc < 8; q = g_nodes[q].parent) chain[cc++] = q;
                     for (int q = cc - 1; q >= 0; q--) m2 += (size_t)snprintf(text + m2, sizeof text - m2, "->%#x", g_nodes[chain[q]].off);
-                    rt_log("models: %s->%#x model, palette %#llx x%d", text, w * 8, (unsigned long long)pal, c);
+                    float m0[12] = {0};
+                    plat_mem_read(pal, m0, 48);
+                    char mname[64] = "";
+                    uint64_t np = rd_ptr(v + 0x90);
+                    if (np && plat_mem_read(np, mname, sizeof mname - 1)) mname[63] = 0;
+                    for (int q = 0; q < 63; q++)
+                        if (mname[q] && (mname[q] < 0x20 || mname[q] > 0x7e)) mname[q] = 0;
+                    const char *want = getenv("TOTK_MODEL_NAME");
+                    if (!want || !*want || !strncmp(mname, want, strlen(want)))
+                        rt_log("models: %s->%#x model %#llx '%s', palette %#llx x%d, first at %.2f %.2f %.2f", text, w * 8,
+                               (unsigned long long)v, mname, (unsigned long long)pal, c, m0[3], m0[7], m0[11]);
                 }
             }
-            if (nd.depth + 1 >= 3 || n >= MAX_NODES || !seen_add(v)) continue;
+            if (nd.depth + 1 >= max_depth || n >= MAX_NODES || !seen_add(v)) continue;
             g_nodes[n++] = (Node){v, i, (uint16_t)(w * 8), (uint8_t)(nd.depth + 1)};
         }
     }
@@ -983,6 +995,10 @@ void anim_probe_start(void) {
     if (plat_cas32(&started, 1, 0) != 0) return;
     const char *e = cfg_get("TOTK_ANIM_PROBE");
     if (!e || !*e || !strcmp(e, "0")) return;
+    if (!strcmp(e, "lifewatch")) {
+        if (!plat_thread_spawn((void (*)(void *))(void *)life_watch_start, NULL, "life watch", 0)) rt_log("life watch: no thread");
+        return;
+    }
     if (!strcmp(e, "life")) {
         if (!plat_thread_spawn(life_probe, NULL, "life probe", 0)) rt_log("life probe: no thread");
         return;

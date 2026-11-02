@@ -348,6 +348,7 @@ void rt_boot(void) {
     frame_step_init();
     res_init();
     cheats_init();   // after the patch sets: a cheat's set follows its setting
+    hit_hook_init();
     cb_addr[0] = hostfn_register("<rtld loader_ready>", cb_loader_ready);
     cb_addr[1] = hostfn_register("<rtld module_inits>", cb_module_inits);
     cb_addr[2] = hostfn_register("<rtld module_finis>", cb_module_finis);

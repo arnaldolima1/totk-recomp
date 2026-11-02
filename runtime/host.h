@@ -296,7 +296,7 @@ typedef struct {
     const void *fig;                 // the LinkFigure to draw (link_figure_dressed), NULL the base one
     float hair[3];                   // sRGB 0..1
     int has_body;                    // body: the friend's real pose, a LinkBody (link_figure.h) as floats; the
-    float body[238];                 // animation then moves only the bones it lacks
+    float body[582];                 // animation then moves only the bones it lacks
 } GfxFigure;
 int gfx_figures_wanted(void);
 void gfx_figures_set(const GfxFigure *f, int n);
@@ -307,6 +307,7 @@ int game_player_pose(float xyz[3], float *yaw);            // the same with the 
                                                            // NAN when unreadable)
 uint64_t game_player_actor(void);                          // the Player actor's guest address, 0 when none (anim_probe.c)
 int game_player_anim(char *out, size_t cap, float *frame);   // the animation Link plays and its frame (1.4.3), 1 when read
+int game_player_anim_layers(char out[][64], int max);       // frame_rate.c: every layer's animation (1.4.3)
 int game_player_body(float *out, int max);                 // Link's skinning palette in his actor space (1.4.3),
                                                            // max x 12 floats; the entries read, 0 none
 // The game's bool flags while it runs (game_flags.c, 1.4.3): a flag by its hash (-1 unknown, else 0 or 1); the changes
@@ -319,6 +320,8 @@ int game_flags_since(uint64_t *cursor, GameFlagChange *out, int max);
 const char *game_flag_item(uint32_t hash);
 uint32_t game_flag_hash(const char *name);                  // a flag's or an enum value's name hashed as the game does
 int game_enum_get(uint32_t hash, uint32_t *value);
+int game_int_array_get(uint32_t hash, int i, int32_t *value);   // element i of an int array flag
+int game_str_array_get(uint32_t hash, int i, char out[64]);       // element i of a String64 array flag
 int game_flag_set(uint32_t hash, int value);
 int game_int_get(uint32_t hash, int32_t *value);           // an int flag (PlayerStatus.Life: quarter hearts), 1 when read
 int game_int_set(uint32_t hash, int32_t value);            // written (TOTK_INT_SET tests it), 1 when done               // a bool flag written (TOTK_FLAG_SET tests it), 1 when done         // an enum flag's value (the hash of its name), 1 when read
@@ -326,8 +329,19 @@ void game_flags_start(void);
 // Link's life in quarter hearts (1.4.3; max from PlayerStatus.MaxLife), 1 when read; and written (1 when done).
 int game_player_life(int *quarters, int *max_quarters);
 int game_player_life_set(int quarters);
+uint64_t game_player_life_addr(void);                     // where that life word is, 0 not found
+void hit_hook_init(void);                                  // hit_hook.c: before hostfn_seal, after rt_patches_init
+int hit_hook_strike(const float from[3], int quarters);    // a strike on Link from there through the game's damage step
+                                                           // (its reaction); 0 when the hook is not there
+void life_watch_start(void);                               // life_watch.c: TOTK_ANIM_PROBE=lifewatch
+uint64_t rt_lifted_function(uintptr_t rip);                // main.c: the lifted function holding a host code address, 0 none
 void actor_spawn_tick(Cpu *c);                             // actor_spawn.c: TOTK_SPAWN's actors, from the present
 int game_resident_actors(char out[][48], int max);         // names of the resident actors (anim_probe.c)
+typedef struct { char model[48]; int n; float m[12][12]; } GameGear;   // a carried item (its actor) and its n palette
+                                                           // entries (row-major 3x4) in Link's actor space
+int game_player_gear(GameGear *out, int max);              // game_gear.c: what Link carries, by link_figure.h LF_GEAR_* (model
+                                                           // "" none or not found yet), in hand or on his back; the count of
+                                                           // out filled; 1.4.3
 int game_player_armor(char out[3][48]);                   // what Link wears now: head, upper, lower (1.4.3)
 int game_player_quat(float q[4]);                         // Link's whole rotation, a unit quaternion (x, y, z, w)
 int game_player_voices(char out[][16], int max, uint64_t slot[16]);   // the voice clips Link started (1.4.3)

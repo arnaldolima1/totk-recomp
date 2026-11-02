@@ -60,9 +60,10 @@ space. Nothing is encrypted or authenticated beyond the room's password: rooms a
 | game | `CHAT` | text |
 | game | `ACH` | achievement id, name, rarity |
 | game | `VOICE` | an Opus frame, base64 (20 ms of 48 kHz mono) |
-| game | `POS` | x, y, z: the player's position in metres (centimetres given), yaw: the way Link faces (radians from +z towards +x, empty when unread), t: the game's clock in ms, anim: the animation Link plays (1.4.3, empty when unread), quat, sfx, body: his real body pose (1.4.3, base64url, empty when unread); while moving, turning or changing animation, else each second (one each 50 ms at most) |
+| game | `POS` | x, y, z: the player's position in metres (centimetres given), yaw: the way Link faces (radians from +z towards +x, empty when unread), t: the game's clock in ms, anim: the animation Link plays (1.4.3, empty when unread), quat, sfx, body: his real body pose (1.4.3, base64url, empty when unread), gear: what he carries (1.4.3, per item `actor@bone:entries`, `|` between items); while moving, turning or changing animation, else each second (one each 50 ms at most) |
+| game | `DUEL` | `1` or `0`: the duel on or off in this game |
 | game | `MARK` | x, y, z: a marker where the player stands |
-| game | `ACT` | `item`, actor: an item Link got for the first time (1.4.3, its `IsGet.<actor>` flag); `quest`, quest, step, the step it left: a quest's step changed (1.4.3, its `Step_<quest>` enum); a few a second at most |
+| game | `ACT` | `item`, actor: an item Link got for the first time (1.4.3, its `IsGet.<actor>` flag); `quest`, quest, step, the step it left: a quest's step changed (1.4.3, its `Step_<quest>` enum); `hit`, attacker, quarter hearts / `duel`, attacker / `block`, attacker: a friend's duel strike hit, won or was stopped by the shield; a few a second at most |
 | game | `QUESTS` | quest:step pairs of numbers, comma-separated: the quests under way or done (their place in `profile/quests.tsv`, the step's place among NotReady, the quest's steps, Complete); when it changes, every 2 s at most |
 | game | `PING` | (every 2 s: the round trip to its `PONG` is the ping shown over the friends' list; the room drops a game silent for 120 s) |
 | room | `WELCOME` | protocol, room name |
@@ -72,10 +73,11 @@ space. Nothing is encrypted or authenticated beyond the room's password: rooms a
 | room | `CHAT` | player, text |
 | room | `ACH` | player, achievement id, name, rarity |
 | room | `VOICE` | player, the frame as received (to everyone but its sender) |
-| room | `POS` | player, x, y, z, yaw, t, anim, quat, sfx, body (to everyone else; the last place alone to a player who joins) |
+| room | `POS` | player, x, y, z, yaw, t, anim, quat, sfx, body, gear (to everyone else; the last place alone to a player who joins) |
+| room | `DUEL` | player, `1` or `0` (to everyone else; everyone's to a player who joins) |
 | room | `MARK` | player, x, y, z (to everyone, its player too; markers under 15 minutes old to a player who joins) |
 | room | `QUESTS` | player, their list (to everyone else; everyone's to a player who joins) |
-| room | `EVENT` | kind (`join`, `leave`, `challenge`, `shrines`, `lightroots`, `towers`, `koroks`, `hearts`, `death`, `warp`, `chest`, `item`, `quest`; an `item` event's step is the actor, a `quest` event's quest:step:the step it left), text (Portuguese), player, step, total, unix time, and `old` on the last 60 events a player gets when they join |
+| room | `EVENT` | kind (`join`, `leave`, `challenge`, `shrines`, `lightroots`, `towers`, `koroks`, `hearts`, `death`, `warp`, `chest`, `item`, `quest`, `hit`, `duel`, `block`; an `item` event's step is the actor, a `quest` event's quest:step:the step it left), text (Portuguese), player, step, total, unix time, and `old` on the last 60 events a player gets when they join |
 | room | `CHALLENGES` | count, then per track: figure, the room's total, tiers reached, four targets |
 | room | `CHALLENGE` | figure (or `done`), the room's total, target, text (the closest tier, for older games) |
 | room | `PONG` | |
@@ -189,6 +191,34 @@ game's `ActorMgr::requestCreateActorAsync` for an actor in front of him) while `
 kept the words that followed the GameData flag `PlayerStatus.Life`. That flag only mirrors the life: the game writes it
 as the life changes and never reads it back. `game_player_life_set` writes the life itself, and the hearts follow
 (`TOTK_LIFE_SET` tests it).
+
+The duel (setting `mp_duel`, off by default; a `DUEL` line tells the room): each friend with it on can take life from
+this game's Link with their strikes (`runtime/net_mp.c` `duel_tick`). A strike begins when the friend's animation in
+their `POS` lines is an attack (`Sword_Attack`, `Lsword_Attack`, `Spear_Attack`, `Sword_Blunt_Attack`; a charged one
+twice, from the air half again); 150 ms on it hits when they stand within reach (1.9 m for a sword, 2.4 m for a
+two-handed one, 2.8 m for a spear), at most 2 m above or below, facing Link. Link's raised shield (a `*_Guard*` layer
+of his animation, `frame_rate.c` `game_player_anim_layers`) toward the friend stops it (`ACT block`). A hit goes
+through the game's own damage step (`runtime/hit_hook.c`, the patch set `hithook`): Link's damage step
+(main+0x2f9910) gathers the attacks that touched him into a hit list and hands it to main+0x315dd4, which turns each
+record into damage, the reaction animation and the knock-back; the patch replaces that call with a host function that
+adds a record built like an enemy's (a Chuchu's, read with `TOTK_ANIM_PROBE=lifewatch`, which watches the life word
+with the debug registers) for the strike's quarter hearts and direction, then makes the call. No attacker object is
+needed. The step runs for every actor of the player's kind on job threads at once, so the record goes in only on the
+call for Link (`x19`). A strike that would take the last quarter leaves one, the life comes back full 1.2 s later and
+the room is told the friend won (`ACT duel`): nobody really dies. `TOTK_HIT_TEST=<seconds>` strikes Link from 1.5 m at
+those world times.
+
+What Link carries is sent too (`runtime/game_gear.c`, the `POS` line's gear field): the weapon, shield and bow he
+has equipped (the GameData pouch: `Pouch.<Weapon|Shield|Bow>.EquipIndex` is the slot in use, an int array, and
+`Pouch.<kind>.Content.Name` its actor, a String64 array; `game_flags.c` reads both tables), and the arrow while a
+layer of his animation is `Bow_Attack_Charge`. Each item is an actor whose model object (its name at `+0x90`, the
+model file's, which the actor's pack's ModelInfo gives: `Weapon_Sword_168`, the Wooden Stick, shows
+`Weapon_Sword_103`) has a skinning palette at `[+0x458]+0x8`: the item as the game draws it this frame, in the hand or
+on the back. No fixed path from Link's actor leads there, so a background search finds the model object by its name's
+text in the heap and keeps it while it matches. The palette's entries go in the field relative to the bone the item
+hangs from (the right or left wrist or the upper back, whichever is nearest), so the figure's own bone carries it: a
+bow's string bends by its own entries. `profile/link-armor.bin` holds the weapons' models too (the installer's
+`link_figure` step).
 
 The ping over the friends' list is the round trip of a `PING` (every 2 s) to its `PONG`.
 

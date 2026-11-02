@@ -24,6 +24,7 @@ import asyncio
 import collections
 import json
 import os
+import re
 import socket
 import time
 from pathlib import Path
@@ -69,6 +70,9 @@ def clean(s, limit=500):
     return str(s).replace('\t', ' ').replace('\r', ' ').replace('\n', ' ')[:limit]
 
 
+GEAR_FIELD = re.compile(r'[A-Za-z0-9_:;,.|@-]*')   # a POS line's gear field (runtime/net_mp.c gear_text)
+
+
 def line(*fields, limit=500):
     """A protocol line; each field at most limit characters (a POS line's body pose is longer than chat may be)."""
     return ('\t'.join(clean(f, limit) for f in fields) + '\n').encode('utf-8')
@@ -90,6 +94,7 @@ class Player:
         self.anim_at = {}          # event kind: when its animation last counted
         self.acts = []             # when the last ACT lines came (a few a second at most)
         self.quests = ''           # the last QUESTS line's list: quest:step numbers of the quests under way or done
+        self.duel = False          # the duel is on in their game (DUEL lines)
 
 
 class Room:
@@ -248,6 +253,9 @@ async def handle(room, reader, writer):
                 for q in room.players:   # and what everyone wears, for their figures
                     if q is not p and q.name and q.look:
                         await room.send(p, line('LOOK', q.name, *q.look))
+                for q in room.players:   # and who has the duel on
+                    if q is not p and q.name and q.duel:
+                        await room.send(p, line('DUEL', q.name, '1'))
                 for q in room.players:   # and where everyone stands in the quests
                     if q is not p and q.name and q.quests:
                         await room.send(p, line('QUESTS', q.name, q.quests, limit=3000))
@@ -288,9 +296,11 @@ async def handle(room, reader, writer):
                     # their Link's real body pose (runtime/link_figure.c link_body_encode: base64url, a fixed length)
                     body = f[9] if len(f) > 9 and len(f[9]) <= 1024 and f[9].isascii() and \
                         f[9].replace('-', '').replace('_', '').isalnum() else ''
+                    # what their Link carries (runtime/net_mp.c gear_text: "actor:qx,qy,qz,qw,x,y,z" per item, '|')
+                    gear = f[10] if len(f) > 10 and len(f[10]) <= 1000 and GEAR_FIELD.fullmatch(f[10]) else ''
                     extra = [f'{float(f[4]):.3f}' if len(f) > 4 and f[4] else '',
                              str(int(f[5])) if len(f) > 5 and f[5] else '', anim,
-                             quat, sfx, body]
+                             quat, sfx, body, gear]
                     while extra and not extra[-1]:   # an older game's line stays as short as it came
                         extra.pop()
                 except ValueError:
@@ -305,6 +315,9 @@ async def handle(room, reader, writer):
                     p.anim = base
                 await room.broadcast(line('POS', p.name, *p.pos, *extra, limit=1024) if any(extra) else
                                      line('POS', p.name, *p.pos), skip=p)
+            elif kind == 'DUEL' and len(f) >= 2 and p.name:   # the duel on or off in a player's game, to everyone else
+                p.duel = f[1] == '1'
+                await room.broadcast(line('DUEL', p.name, '1' if p.duel else '0'), skip=p)
             elif kind == 'QUESTS' and len(f) >= 2 and p.name:   # where a player stands in the quests, to everyone else
                 # quest:step pairs of numbers (the game's quest list, tools/item_names.py --quests), comma-separated
                 if len(f[1]) <= 3000 and all(c in '0123456789:,' for c in f[1]):
@@ -338,6 +351,19 @@ async def handle(room, reader, writer):
                     text = f'{p.name} ganhou o poder {POWERS[f[2]]}.' if f[2] in POWERS else \
                         f'{p.name} pegou {f[2]} pela primeira vez.'
                     await room.event('item', text, p.name, f[2])
+                # hit <attacker> <quarter hearts> / duel <attacker>: a friend's strike took life from this player, or
+                # would have taken the last of it (the duel won: their life came back full); block <attacker>: the
+                # player's raised shield stopped it
+                elif f[1] in ('hit', 'duel', 'block') and len(f) >= 3 and len(p.acts) < 10 and \
+                        any(q.name == f[2] and q is not p for q in room.players):
+                    p.acts.append(now)
+                    if f[1] == 'hit':
+                        q = f[3] if len(f) > 3 and f[3].isdigit() else '0'
+                        await room.event('hit', f'{f[2]} acertou {p.name}.', f[2], f'{p.name}:{q}')
+                    elif f[1] == 'block':
+                        await room.event('block', f'{p.name} defendeu o golpe de {f[2]}.', p.name, f[2])
+                    else:
+                        await room.event('duel', f'{f[2]} venceu {p.name} no duelo!', f[2], p.name)
                 # quest <quest> <step> <the step it left>: a quest's step changed (its Step_<quest> enum): from
                 # NotReady or Ready (offered) it began, at Complete it is done
                 elif f[1] == 'quest' and len(f) >= 5 and len(p.acts) < 10 and all(

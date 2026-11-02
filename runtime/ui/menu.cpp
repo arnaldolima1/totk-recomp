@@ -86,7 +86,7 @@ typedef struct {
     const void *fig;                 // the LinkFigure to draw (link_figure_dressed), NULL the base one
     float hair[3];                   // sRGB 0..1
     int has_body;                    // body: the friend's real pose, a LinkBody (link_figure.h) as floats; the
-    float body[238];                 // animation then moves only the bones it lacks
+    float body[582];                 // animation then moves only the bones it lacks
 } GfxFigure;
 int gfx_figures_wanted(void);
 void gfx_figures_set(const GfxFigure *f, int n);
@@ -865,6 +865,7 @@ static void tab_sound(float scale) {
     static const char *const mark_keys[] = {"g", "b", "h", "n", "off"};
     const char *mark_names[] = {"G", "B", "H", "N", menu_text(UI_MENU_OFF)};
     opt_choice_list("TOTK_MP_MARK_KEY", UI_MENU_MP_MARK_KEY, mark_keys, mark_names, 5, UI_MENU_MP_MARK_KEY_DESC);
+    opt_toggle("TOTK_MP_DUEL", UI_MENU_MP_DUEL, UI_MENU_MP_DUEL_DESC);
     opt_end();
 }
 
@@ -2287,7 +2288,7 @@ static void world_tags(const MenuTarget *t, const MpView &v, float scale, bool (
                 g.yaw = 0;
                 // with the real pose the body's own turn is in it: the animation's turn (figure_animate) stays out
                 link_figure_orient(p.rot, p.has_body ? 0 : fs_->turn, g.rot);
-                g.fig = link_figure_dressed(p.look);   // what the friend wears (net_mp.c LOOK lines)
+                g.fig = link_figure_dressed_gear(p.look, p.gear);   // what the friend wears (LOOK lines) and carries (POS)
                 g.has_body = p.has_body;
                 if (p.has_body) memcpy(g.body, &p.body, sizeof g.body);
                 g.hair[0] = col.x * 0.9f + 0.08f, g.hair[1] = col.y * 0.9f + 0.08f, g.hair[2] = col.z * 0.9f + 0.08f;

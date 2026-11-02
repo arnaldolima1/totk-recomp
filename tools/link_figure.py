@@ -34,7 +34,10 @@ entry is the bone's pose times its inverse bind, a rigid one the pose itself.
 With --armor the tool also writes the armor library the runtime dresses each friend's figure from
 (runtime/link_figure.c link_figure_dressed). Strings are a u8 length and its bytes; a group list is a u8 count, then
 per group its name, a u8 count and those material names. b'LNKA', u32 version 2, u32 model count, u32 piece count;
-the body's material groups (the Player's EquipmentUserParam); per piece (every Armor_*_{Head,Upper,Lower} actor) its
+the body's material groups (the Player's EquipmentUserParam); per piece (every Armor_*_{Head,Upper,Lower} actor, then
+every Weapon_{Sword,Lsword,Spear,Shield,Bow}_* actor and NormalArrow, whose model's vertices are in its own space and weighted over the
+entries of its skinning palette (0 for a rigid shape; a bow's string bends by its entries), for the runtime to give it
+bones of its own) its
 name (48 bytes), i32 its model (-1 none), u8 count and the names of the groups it hides, then its own model's groups
 (its ArmorParam); then per model its name (48 bytes; the first is Link_Body, Link's own model), u32 vertex count, u32
 triangle count, u32 atlas side, u32 ASTC picture count, u32 the atlas's zstd size, u16 material count and their
@@ -162,7 +165,9 @@ class Mesh:
 
     def add(self, m, keep, joined):
         """The shapes of model m (those keep names by prefix, every one for None), its bones mapped to the joined
-        skeleton's by joined."""
+        skeleton's by joined. joined None: a carried item's own way, each vertex on the entry of the model's skinning
+        palette that moves it (a smooth shape's matrix_to_bone index, 0 for a rigid one), as the game's palette for the
+        model (runtime/game_gear.c) lists them."""
         sk = m['skeleton']
         own = worlds(sk, None)
         m2b = sk['matrix_to_bone']
@@ -182,18 +187,18 @@ class Mesh:
                 p = p[:3]
                 if s['skin'] == 0:
                     self.verts.append(apply(own[s['bone']], p))
-                    self.weights.append([(joined[s['bone']], 1.0)])
+                    self.weights.append([(joined[s['bone']] if joined else 0, 1.0)])
                 elif s['skin'] == 1:
                     bone = m2b[int(I[k][0])]
                     self.verts.append(apply(own[bone], p))
-                    self.weights.append([(joined[bone], 1.0)])
+                    self.weights.append([(joined[bone] if joined else 0, 1.0)])
                 else:   # smooth skinning: the position is already in model space
                     self.verts.append(p)
                     ws = []
                     for j in range(min(s['skin'], len(I[k]))):
                         w = (Wt[k][j] if j < len(Wt[k]) else 0.0) if Wt else (1.0 if j == 0 else 0.0)
                         if w > 0:
-                            ws.append((joined[m2b[int(I[k][j])]], w))
+                            ws.append((joined[m2b[int(I[k][j])]] if joined else int(I[k][j]), w))
                     total = sum(w for _, w in ws) or 1.0
                     self.weights.append([(b, w / total) for b, w in ws][:4])
             mat = m['materials'][s['material']]
@@ -544,6 +549,27 @@ def armor_actors(romfs, dicts):
     return out
 
 
+WEAPON_ACTOR = r'Pack/Actor/(Weapon_(?:Sword|Lsword|Spear|Shield|Bow)_\d+[A-Za-z_]*|NormalArrow)\.pack\.zs$'
+
+
+def weapon_actors(romfs, dicts):
+    """{actor: model file name} of every weapon, shield and bow (Pack/Actor/Weapon_{Sword,...,Bow}_*) and the arrow (NormalArrow): its
+    pack's ModelInfo, as for armor (Weapon_Sword_168, the Wooden Stick, shows Weapon_Sword_103.Weapon_Sword_103)."""
+    from achievements import read_byml
+    out = {}
+    for path in sorted(romfs.idx):
+        m = re.match(WEAPON_ACTOR, path)
+        if not m:
+            continue
+        infos = {k.split('/')[-1].split('.')[0]: v for k, v in sarc_members(unzstd_file(romfs, dicts, path)).items()
+                 if '/ModelInfo/' in k}
+        doc = infos.get(m.group(1)) or (next(iter(infos.values())) if len(infos) == 1 else None)
+        info = read_byml(doc) if doc else {}
+        if info.get('ModelProjectName') and info.get('FmdbName'):
+            out[m.group(1)] = f"{info['ModelProjectName']}.{info['FmdbName']}"
+    return out
+
+
 def pstr(t):
     b = t.encode()[:255]
     return bytes([len(b)]) + b
@@ -561,6 +587,7 @@ def build_armor(models, romfs, skel, actors, out_path, params=None, body=()):
     name (a bone the figure lacks, a cape's or a tassel's, moves with its nearest ancestor the figure has)."""
     from compression import zstd
     entries = [('Link_Body', BODY)] + [(n, [(n, None)]) for n in sorted(set(actors.values()))]
+    weapon_models = {model for actor, model in actors.items() if actor.startswith(('Weapon_', 'NormalArrow'))}
     blobs, index = [], {}
     for name, parts in entries:
         mesh = Mesh()
@@ -568,6 +595,9 @@ def build_armor(models, romfs, skel, actors, out_path, params=None, body=()):
             for part, keep in parts:
                 for m in load(models, part)['models']:
                     bones = m['skeleton']['bones']
+                    if name in weapon_models:   # in its own space, on its palette's entries (bones of its own at run time)
+                        mesh.add(m, keep, None)
+                        continue
                     joined = []
                     for b in bones:
                         k = b
@@ -627,8 +657,9 @@ def prepare(romfs, mcsharp, work, armor=False):
     work.mkdir(parents=True, exist_ok=True)
     dicts = zstd_dicts(romfs)
     names = [name for name, _ in PARTS]
-    if armor:   # every model a worn piece can show, and the body's parts
+    if armor:   # every model a worn piece or a carried weapon can show, and the body's parts
         names += [n for n, _ in BODY] + sorted(set(armor_actors(romfs, dicts).values()))
+        names += sorted(set(weapon_actors(romfs, dicts).values()))
     for name in dict.fromkeys(names):
         data = romfs.read(f'Model/{name}.bfres.mc')
         if data is None:
@@ -675,8 +706,8 @@ def main(argv):
           f'({len(astc)} ASTC), {len(anims)} animations -> {argv[3]}')
     if armor_out:
         dicts = zstd_dicts(romfs)
-        build_armor(Path(argv[1]), romfs, skel, armor_actors(romfs, dicts), armor_out, armor_params(romfs, dicts),
-                    body_groups(romfs, dicts))
+        build_armor(Path(argv[1]), romfs, skel, {**armor_actors(romfs, dicts), **weapon_actors(romfs, dicts)}, armor_out,
+                    armor_params(romfs, dicts), body_groups(romfs, dicts))
     if len(argv) > 4:
         preview(argv[4], verts, tris, classes)
 

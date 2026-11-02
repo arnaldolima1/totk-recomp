@@ -991,3 +991,10 @@ site cascade main 6fabb8 52a83408 @page:x8 b9404108   # mov w8, #20.0  -> ldr w8
 site cascade main 6fac40 52a84408 @page:x8 b9404508   # mov w8, #40.0  -> ldr w8, [page+68]
 site cascade main 6facc8 52a85408 @page:x8 b9404908   # mov w8, #80.0  -> ldr w8, [page+72]
 site cascade main 6fad4c 52a86408 @page:x8 b9404d08   # mov w8, #160.0 -> ldr w8, [page+76]
+
+# The player's hit hook (runtime/hit_hook.c switches the set on once it has put its address in page +104). The
+# player's damage step (main+0x2f9910) gathers the attacks that touched Link into his hit record and then hands that
+# record to main+0x315dd4, which turns it into damage, reaction and knock-back. Between the two the hook may fill the
+# record with a friend's duel strike, so the game's own reaction plays. x16 is free at a call.
+set hithook  TOTK_HIT_HOOK       0
+site hithook main 2fa954 94006d20 @page:x16 f9403610 d63f0200   # bl 0x315dd4 -> ldr x16, [page+104]; blr x16

@@ -15,13 +15,15 @@ of the 2 MiB-aligned module slot free); the runtime commits it and owns its cont
 +0..15 the frame-rate step (runtime/frame_rate.c), +16..55 the output, swapchain and scene sizes
 (runtime/resolution.c res_init), +56..59 the camera's aspect ratio (runtime/resolution.c res_init, set aspect), +60..63
 the field-of-view factor (runtime/resolution.c res_fov_live, set fov), +92..95 the sun shadow map size
-(runtime/resolution.c shadow_init, set shadow). A new set takes words outside these.
+(runtime/resolution.c shadow_init, set shadow), +104..111 the address of the player's hit hook (runtime/hit_hook.c,
+set hithook). A new set takes words outside these.
 
 The replacement words are lifted at the site's address in place of the original instruction, and the generated C reads
 `if (rt_patch_on[<set>]) { replacement } else { original }`: one byte load and a branch per executed site. Several
 sets may patch one address (cheats that write different values there): `if (a) {..} else if (b) {..} else {..}`, the
 first set in file order wins. The original may be any instruction but br, blr and ret; a replacement's last word may be
-a bl (lifted with the site's return address), a b or b.cond / cbz / tbz (its target joins the function's labels when
+a bl or a blr (lifted with the site's return address; a blr goes through rt_dispatch, so it reaches a host
+function whose address the runtime keeps in the patch page), a b or b.cond / cbz / tbz (its target joins the function's labels when
 inside it) or a ret; earlier words must not branch. Every alternative of a site writes the same flags. The generator
 writes patches.h (set names, switches, the page address) next to layout.h for the runtime.
 

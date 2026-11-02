@@ -421,7 +421,7 @@ static void skin_verts(const LinkFigure *f, const float *m0, const float *m1, fl
 // is dressed from it (link_figure_dressed): Link's model, then the head, upper and lower pieces they wear, or the bare
 // ones where they wear none (a head piece carries its own hair; Armor_999_Head is the bare head's), less what the
 // pieces worn hide.
-enum { LIB_MODEL_HEAD = 68, DRESS_W = 2048, DRESS_H = 1024, DRESS_CACHE = 8, DRESS_PARTS = 4 };
+enum { LIB_MODEL_HEAD = 68, DRESS_W = 2048, DRESS_H = 1536, DRESS_CACHE = 8, DRESS_PARTS = 4 + LF_GEAR };
 typedef struct {
     char name[48];
     uint32_t nverts, ntris, side, nastc, zsize, nmats;
@@ -476,9 +476,18 @@ static int group_has(const uint8_t *groups, const uint8_t *g, const uint8_t *mat
     return 0;
 }
 
-static int lib_load(void) {
-    if (lib.tried) return lib.nmodels > 0;
-    lib.tried = 1;
+static int lib_load_locked(void);
+static int lib_load(void) {   // the room's thread (game_gear.c) and the menu's both ask
+    static PlatMutex once = PLAT_MUTEX_INIT;
+    if (__atomic_load_n(&lib.tried, __ATOMIC_ACQUIRE)) return lib.nmodels > 0;
+    plat_mutex_lock(&once);
+    int ok = lib.tried ? lib.nmodels > 0 : lib_load_locked();
+    __atomic_store_n(&lib.tried, 1, __ATOMIC_RELEASE);
+    plat_mutex_unlock(&once);
+    return ok;
+}
+
+static int lib_load_locked(void) {
     char path[1200];
     snprintf(path, sizeof path, "%s/link-armor.bin", rt_config()->profile);
     uint64_t n = 0;
@@ -605,16 +614,64 @@ static const uint8_t *lib_atlas(ArmorModel *a) {
     return a->atlas = px;
 }
 
+int link_figure_gear_model(const char *actor, char out[48], int *entries) {
+    const ArmorPiece *pc = actor && (!strncmp(actor, "Weapon_", 7) || !strcmp(actor, "NormalArrow")) && lib_load() ? lib_piece(actor) : NULL;
+    if (!pc) return 0;
+    const ArmorModel *a = &lib.models[pc->model];
+    memcpy(out, a->name, 48);
+    out[47] = 0;
+    int most = 0;   // the highest palette entry a vertex leans on
+    for (uint64_t i = 0; i < 4ull * a->nverts; i++) {
+        int bone = a->skin[4 * i] | a->skin[4 * i + 1] << 8, w = a->skin[4 * i + 2] | a->skin[4 * i + 3] << 8;
+        if (w && bone > most) most = bone;
+    }
+    *entries = most + 1 < LF_GEAR_BONES ? most + 1 : LF_GEAR_BONES;
+    return 1;
+}
+
 const LinkFigure *link_figure_dressed(const char look[3][48]) {
+    static const char none[LF_GEAR][48];
+    return link_figure_dressed_gear(look, none);
+}
+
+// The gear's bones (LinkFigure gear_bone0): appended to the skeleton, each under the bone the game holds the item by
+// (a weapon and an arrow in the right hand, a shield and a bow in the left), one per entry of the item's model's
+// skinning palette, its local transform the identity,
+// so a model in its own space hangs from that bone; a body pose with the item's place puts it there instead.
+static int add_gear_bones(LinkFigure *f) {
+    static const char *const hold[LF_GEAR] = {"Weapon_R", "Weapon_L", "Weapon_L", "Weapon_R"};
+    uint32_t nb = f->nbones, n = nb + LF_GEAR * LF_GEAR_BONES;
+    int32_t *parent = malloc(4ull * n);
+    float *bind = malloc(36ull * n), *inv = malloc(48ull * n);
+    char *names = calloc(n, 32);
+    if (!parent || !bind || !inv || !names) return free(parent), free(bind), free(inv), free(names), 0;
+    memcpy(parent, f->parent, 4ull * nb), memcpy(bind, f->bind, 36ull * nb), memcpy(inv, f->inv_bind, 48ull * nb);
+    if (f->bone_names) memcpy(names, f->bone_names, 32ull * nb);
+    for (int g = 0; g < LF_GEAR * LF_GEAR_BONES; g++) {
+        uint32_t b = nb + (uint32_t)g;
+        parent[b] = link_figure_bone(f, hold[g / LF_GEAR_BONES]);
+        static const float still[9] = {1, 1, 1, 0, 0, 0, 0, 0, 0}, id[12] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
+        memcpy(bind + 9 * b, still, sizeof still), memcpy(inv + 12 * b, id, sizeof id);
+        snprintf(names + 32 * b, 32, "Gear_%d_%d", g / LF_GEAR_BONES, g % LF_GEAR_BONES);
+    }
+    f->parent = parent, f->bind = bind, f->inv_bind = inv, f->bone_names = names, f->gear_bone0 = nb, f->nbones = n;
+    return 1;
+}
+
+const LinkFigure *link_figure_dressed_gear(const char look[3][48], const char gear[LF_GEAR][48]) {
     const LinkFigure *base = link_figure();
-    if (!base || !base->parent || (!look[0][0] && !look[1][0] && !look[2][0]) || !lib_load()) return base;
+    int any = look[0][0] || look[1][0] || look[2][0];
+    for (int g = 0; g < LF_GEAR; g++) any |= gear[g][0] != 0;
+    if (!base || !base->parent || !any || !lib_load()) return base;
     static struct {
-        char key[3][48];
+        char key[3 + LF_GEAR][48];
         LinkFigure *fig;
     } cache[DRESS_CACHE];
     static int ncache, next;
+    char key[3 + LF_GEAR][48];
+    memcpy(key, look, 3 * 48), memcpy(key + 3, gear, LF_GEAR * 48);
     for (int i = 0; i < ncache; i++)
-        if (!memcmp(cache[i].key, look, sizeof cache[i].key)) return cache[i].fig;
+        if (!memcmp(cache[i].key, key, sizeof key)) return cache[i].fig;
     // the pieces worn, a bare one where none (the ponytail, the chest's strap, the underwear), as the game wears them
     static const char *const bare[3] = {"Armor_999_Head", "Armor_Default_Upper", "Armor_Default_Lower"};
     const ArmorPiece *worn[3];
@@ -624,6 +681,7 @@ const LinkFigure *link_figure_dressed(const char look[3][48]) {
     }
     // the parts: Link's model, then the pieces
     const ArmorPiece *own[DRESS_PARTS] = {NULL, worn[0], worn[1], worn[2]};
+    for (int g = 0; g < LF_GEAR; g++) own[4 + g] = gear[g][0] ? lib_piece(gear[g]) : NULL;
     int part[DRESS_PARTS] = {lib_model("Link_Body"), -1, -1, -1};
     for (int k = 1; k < DRESS_PARTS; k++) part[k] = own[k] ? own[k]->model : -1;
     uint32_t nv = 0, nt = 0;
@@ -632,6 +690,7 @@ const LinkFigure *link_figure_dressed(const char look[3][48]) {
     LinkFigure *f = calloc(1, sizeof *f);
     if (!f || !nv || !nt) return free(f), base;
     *f = *base;   // the skeleton and the animations are the base figure's
+    if (!add_gear_bones(f)) f->gear_bone0 = 0;
     f->verts = malloc(12ull * nv), f->skin = malloc(16ull * nv), f->tris = malloc(12ull * nt), f->cls = malloc(nt);
     f->uvs = malloc(24ull * nt), f->normals = malloc(12ull * nt), f->albedo = calloc(1, 4ull * DRESS_W * DRESS_H);
     if (!f->verts || !f->skin || !f->tris || !f->cls || !f->uvs || !f->normals || !f->albedo) {
@@ -639,8 +698,10 @@ const LinkFigure *link_figure_dressed(const char look[3][48]) {
         return base;
     }
     // the atlas: Link's model's 1024 on the left, then the head, upper and lower 512 each in the right half's
-    // quadrants (x, y, side in texels)
-    static const uint32_t place[DRESS_PARTS][3] = {{0, 0, 1024}, {1024, 0, 512}, {1536, 0, 512}, {1024, 512, 512}};
+    // quadrants, the weapon, shield and bow 512 each along the bottom row (x, y, side in texels)
+    static const uint32_t place[DRESS_PARTS][3] = {{0, 0, 1024},       {1024, 0, 512},   {1536, 0, 512}, {1024, 512, 512},
+                                                   {0, 1024, 512},     {512, 1024, 512}, {1024, 1024, 512},
+                                                   {1536, 1024, 512}};
     uint32_t v0 = 0, t0 = 0;
     for (int k = 0; k < DRESS_PARTS; k++) {
         if (part[k] < 0) continue;
@@ -649,6 +710,12 @@ const LinkFigure *link_figure_dressed(const char look[3][48]) {
         memcpy(f->skin + 8ull * v0, a->skin, 16ull * a->nverts);
         for (uint32_t i = 0; i < 8 * a->nverts; i += 2)   // a bone beyond the skeleton: the root
             if (f->skin[8ull * v0 + i] >= f->nbones) f->skin[8ull * v0 + i] = 0;
+        if (k >= 4)   // a carried item: in its own space, its palette's entries on its own bones
+            for (uint32_t i = 0; i < 8 * a->nverts; i += 2) {
+                uint32_t e = a->skin[2ull * i] | (uint32_t)a->skin[2ull * i + 1] << 8;
+                f->skin[8ull * v0 + i] =
+                    f->gear_bone0 ? (uint16_t)(f->gear_bone0 + (uint32_t)(k - 4) * LF_GEAR_BONES + (e < LF_GEAR_BONES ? e : 0)) : 0;
+            }
         uint32_t side = a->side < place[k][2] ? a->side : place[k][2];   // a larger one is cut to its slot
         float qx = (float)place[k][0] / DRESS_W, qy = (float)place[k][1] / DRESS_H;
         float sx = (float)a->side / DRESS_W, sy = (float)a->side / DRESS_H;
@@ -678,9 +745,10 @@ const LinkFigure *link_figure_dressed(const char look[3][48]) {
     face_normals(f, nv, nt);
     // a slot reused: its old figure stays (the renderer may still hold it this frame), at most DRESS_CACHE kept
     int slot = ncache < DRESS_CACHE ? ncache++ : next++ % DRESS_CACHE;
-    memcpy(cache[slot].key, look, sizeof cache[slot].key);
+    memcpy(cache[slot].key, key, sizeof cache[slot].key);
     cache[slot].fig = f;
-    rt_log("link armor: dressed a figure in '%s' '%s' '%s' (%u triangles)", look[0], look[1], look[2], nt);
+    rt_log("link armor: dressed a figure in '%s' '%s' '%s' carrying '%s' '%s' '%s' '%s' (%u triangles)", look[0], look[1],
+           look[2], gear[0], gear[1], gear[2], gear[3], nt);
     return f;
 }
 
@@ -779,6 +847,7 @@ int link_body_decode(const char *text, LinkBody *out) {
     }
     for (int j = 0; j < 2; j++)
         for (int k = 0; k < 3; k++) out->t[j][k] = v[4 * LF_BODY_N + 3 * j + k] / 1000.0f;
+    memset(out->gear_n, 0, sizeof out->gear_n);   // the POS line's gear field fills them (net_mp.c)
     return 1;
 }
 
@@ -792,7 +861,57 @@ void link_body_lerp(const LinkBody *a, const LinkBody *b, float t, LinkBody *out
     }
     for (int j = 0; j < 2; j++)
         for (int k = 0; k < 3; k++) out->t[j][k] = a->t[j][k] + (b->t[j][k] - a->t[j][k]) * t;
+    for (int g = 0; g < LF_GEAR; g++) {   // each item between the two places, or where the nearer sample has it
+        const LinkBody *n = t < 0.5f ? a : b;
+        out->gear_n[g] = n->gear_n[g], out->gear_anchor[g] = n->gear_anchor[g];
+        memcpy(out->gear_q[g], n->gear_q[g], sizeof out->gear_q[g]), memcpy(out->gear_t[g], n->gear_t[g], sizeof out->gear_t[g]);
+        if (a->gear_n[g] != b->gear_n[g] || a->gear_anchor[g] != b->gear_anchor[g]) continue;
+        for (int e = 0; e < (int)n->gear_n[g] && e < LF_GEAR_BONES; e++) {
+            const float *qa = a->gear_q[g][e], *qb = b->gear_q[g][e];
+            float *qo = out->gear_q[g][e], d = 0, l = 0;
+            for (int k = 0; k < 4; k++) d += qa[k] * qb[k];
+            for (int k = 0; k < 4; k++) qo[k] = qa[k] * (1 - t) + qb[k] * (d < 0 ? -t : t), l += qo[k] * qo[k];
+            l = sqrtf(l);
+            for (int k = 0; k < 4; k++) qo[k] /= l > 1e-6f ? l : 1;
+            for (int k = 0; k < 3; k++) out->gear_t[g][e][k] = a->gear_t[g][e][k] + (b->gear_t[g][e][k] - a->gear_t[g][e][k]) * t;
+        }
+    }
 }
+
+void link_figure_quat_of(const float *m, float q[4]) { quat_of(m, q); }
+void link_figure_mul34(const float *a, const float *b, float *out) { mul34(a, b, out); }
+
+static const char *const kAnchor[LF_ANCHORS] = {"Wrist_R", "Wrist_L", "Spine_2"};
+
+static void inv34(const float *m, float *o) {   // a 3x4's inverse (its 3x3 by cofactors)
+    float a = m[0], b = m[1], c = m[2], d = m[4], e = m[5], f = m[6], g = m[8], h = m[9], i = m[10];
+    float det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g), k = fabsf(det) > 1e-12f ? 1 / det : 0;
+    o[0] = (e * i - f * h) * k, o[1] = (c * h - b * i) * k, o[2] = (b * f - c * e) * k;
+    o[4] = (f * g - d * i) * k, o[5] = (a * i - c * g) * k, o[6] = (c * d - a * f) * k;
+    o[8] = (d * h - e * g) * k, o[9] = (b * g - a * h) * k, o[10] = (a * e - b * d) * k;
+    for (int r = 0; r < 3; r++) o[4 * r + 3] = -(o[4 * r] * m[3] + o[4 * r + 1] * m[7] + o[4 * r + 2] * m[11]);
+}
+
+int link_gear_anchor(const float *pal, int npal, const float g[12], float inv[12]) {
+    const LinkFigure *f = link_figure();
+    if (!f || !f->npalm || !f->parent) return -1;
+    int best = -1;
+    float bestd = 1e9f, pose[12];
+    for (int a = 0; a < LF_ANCHORS; a++) {
+        int b = link_figure_bone(f, kAnchor[a]), e = -1;
+        for (int k = 0; b >= 0 && k < npal && k < (int)f->npalm && e < 0; k++)
+            if (f->palm_bone[k] == b) e = k;
+        if (e < 0) continue;
+        float p[12], bind[12];
+        if (f->palm_rigid[e]) memcpy(p, pal + 12 * e, sizeof p);
+        else inv34(f->inv_bind + 12 * b, bind), mul34(pal + 12 * e, bind, p);   // the entry is pose x inverse bind
+        float dx = g[3] - p[3], dy = g[7] - p[7], dz = g[11] - p[11], d = dx * dx + dy * dy + dz * dz;
+        if (d < bestd) bestd = d, best = a, memcpy(pose, p, sizeof pose);
+    }
+    if (best >= 0) inv34(pose, inv);
+    return best;
+}
+void link_figure_mat_of(const float q[4], float *m) { mat_of(q, m); }
 
 void link_figure_pose_body(const LinkFigure *f, int anim, float frame, const LinkBody *body, float *out) {
     if (!f->npalm || !f->parent || anim < 0 || anim >= f->nanims || f->anims[anim].mats) {
@@ -838,6 +957,33 @@ void link_figure_pose_body(const LinkFigure *f, int anim, float frame, const Lin
                                world[12 * p + 4 * i + 3];
         }
         memcpy(world + 12 * b, w, 48);
+    }
+    for (int g = 0; f->gear_bone0 && g < LF_GEAR; g++) {   // the gear where the friend's game draws it, from its bone
+        int a = (int)body->gear_anchor[g], hb = a >= 0 && a < LF_ANCHORS ? link_figure_bone(f, kAnchor[a]) : -1;
+        for (int e = 0; hb >= 0 && e < (int)body->gear_n[g] && e < LF_GEAR_BONES; e++) {
+            uint32_t bo = f->gear_bone0 + (uint32_t)(g * LF_GEAR_BONES + e);
+            if (bo >= nb) continue;
+            float rel[12];
+            mat_of(body->gear_q[g][e], rel);
+            rel[3] = body->gear_t[g][e][0], rel[7] = body->gear_t[g][e][1], rel[11] = body->gear_t[g][e][2];
+            mul34(world + 12 * hb, rel, world + 12 * bo);
+        }
+    }
+    int nock = f->gear_bone0 ? link_figure_bone(f, "Weapon_R") : -1, grip = f->gear_bone0 ? link_figure_bone(f, "Weapon_L") : -1;
+    if (nock >= 0 && grip >= 0 && f->gear_bone0 + LF_GEAR_ARROW * LF_GEAR_BONES < nb) {
+        // the arrow on the string: its model runs along +z from its nock, so from the drawing hand toward the bow's
+        float *w = world + 12 * (f->gear_bone0 + LF_GEAR_ARROW * LF_GEAR_BONES), z[3], x[3], y[3], up[3] = {0, 1, 0}, l = 0;
+        for (int i = 0; i < 3; i++) z[i] = world[12 * grip + 4 * i + 3] - world[12 * nock + 4 * i + 3], l += z[i] * z[i];
+        if (l > 1e-6f) {
+            l = sqrtf(l);
+            for (int i = 0; i < 3; i++) z[i] /= l;
+            x[0] = up[1] * z[2] - up[2] * z[1], x[1] = up[2] * z[0] - up[0] * z[2], x[2] = up[0] * z[1] - up[1] * z[0];
+            float lx = sqrtf(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
+            if (lx < 1e-4f) x[0] = 1, x[1] = x[2] = 0, lx = 1;
+            for (int i = 0; i < 3; i++) x[i] /= lx;
+            y[0] = z[1] * x[2] - z[2] * x[1], y[1] = z[2] * x[0] - z[0] * x[2], y[2] = z[0] * x[1] - z[1] * x[0];
+            for (int i = 0; i < 3; i++) w[4 * i] = x[i], w[4 * i + 1] = y[i], w[4 * i + 2] = z[i], w[4 * i + 3] = world[12 * nock + 4 * i + 3];
+        }
     }
     for (uint32_t b = 0; b < nb; b++) mul34(world + 12 * b, f->inv_bind + 12 * b, mats + 12 * b);
     skin_verts(f, mats, mats, 0, out);

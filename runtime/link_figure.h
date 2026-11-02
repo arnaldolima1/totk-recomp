@@ -49,7 +49,16 @@ typedef struct {
     uint32_t npalm;
     uint16_t *palm_bone;
     uint8_t *palm_rigid;
+    // a dressed figure carrying gear (link_figure_dressed_gear): from bone gear_bone0, LF_GEAR_BONES bones per item
+    // (LF_GEAR_*), one per entry of its model's skinning palette, each under the hand bone the game holds it in (its
+    // local transform the identity); 0 none
+    uint32_t gear_bone0;
 } LinkFigure;
+// What a friend carries (net_mp.c POS lines, game_gear.c): the weapon, the shield, the bow and the arrow on its
+// string, in this order; up to LF_GEAR_BONES palette entries each (a bow's string bends by its own).
+enum { LF_GEAR_WEAPON, LF_GEAR_SHIELD, LF_GEAR_BOW, LF_GEAR_ARROW, LF_GEAR, LF_GEAR_BONES = 12 };
+// The bones an item hangs from (link_gear_anchor): the right wrist, the left wrist, the upper back.
+enum { LF_ANCHOR_WRIST_R, LF_ANCHOR_WRIST_L, LF_ANCHOR_BACK, LF_ANCHORS };
 // A friend's real body pose (net_mp.c POS lines): the rotations of the palette entries LF_BODY_ENTRY lists, each
 // entry's skinning matrix in the friend's actor space (x right, y up, z forward about their feet), and the
 // translations of the two whose bones head the body's chains (Spine_1 and Waist), in metres.
@@ -57,6 +66,10 @@ enum { LF_BODY_N = 58, LF_BODY_BYTES = LF_BODY_N * 8 + 12 };
 typedef struct {
     float q[LF_BODY_N][4];   // unit quaternions x, y, z, w
     float t[2][3];           // entries 0 and 65
+    // the gear as the friend's game draws it, in hand or on the back (game_gear.c): per LF_GEAR_* the palette entries
+    // sent (0 none), the bone they hang from (LF_ANCHOR_*) and each one's rotation (unit quaternion) and translation
+    // in that bone's space, so the item follows the figure's own hand or back
+    float gear_n[LF_GEAR], gear_anchor[LF_GEAR], gear_q[LF_GEAR][LF_GEAR_BONES][4], gear_t[LF_GEAR][LF_GEAR_BONES][3];
 } LinkBody;
 extern const uint8_t LF_BODY_ENTRY[LF_BODY_N];
 // The palette entries (count x 12 floats, row-major 3x4, actor space) as the POS line's text: LF_BODY_BYTES packed
@@ -77,6 +90,20 @@ int link_figure_find(const LinkFigure *f, const char *name);   // the animation 
 // <profile>/link-armor.bin: the base figure's skeleton and animations with the pieces' meshes and an atlas of their
 // own (2048 x 1024); the base figure when none are named or there is no library. Kept for the session (up to 8 at a time).
 const LinkFigure *link_figure_dressed(const char look[3][48]);
+// The same carrying gear (LF_GEAR_* actor names, Weapon_Sword_168; "" none): each item's model from the library on
+// bones of its own (LinkFigure gear_bone0), in the hand when the body pose has no place for it. The atlas is 2048 x 1536.
+const LinkFigure *link_figure_dressed_gear(const char look[3][48], const char gear[LF_GEAR][48]);
+// The model an item's actor shows (Weapon_Sword_103.Weapon_Sword_103 for Weapon_Sword_168), from the library, and
+// how many palette entries its vertices use (*entries, up to LF_GEAR_BONES); 0 none.
+int link_figure_gear_model(const char *actor, char out[48], int *entries);
+// The bone an item hangs from: of the LF_ANCHOR_* bones as Link's body palette (game_player_body, npal entries in his
+// actor space) poses them, the one nearest the item's place g (row-major 3x4, the same space); *inv gets that bone's
+// pose inverted, to take the item's entries into the bone's space. -1 without the figure.
+int link_gear_anchor(const float *pal, int npal, const float g[12], float inv[12]);
+void link_figure_mul34(const float *a, const float *b, float *out);   // row-major 3x4 product a b
+// A row-major 3x4's rotation as a unit quaternion (x, y, z, w), and back (translation 0).
+void link_figure_quat_of(const float *m, float q[4]);
+void link_figure_mat_of(const float q[4], float *m);
 // Turns posed vertices (model space, about the feet) by the row-major 3x3 m into the world's axes.
 void link_figure_rotate(const LinkFigure *f, float *verts, const float m[9]);
 // The figure's rotation: the friend's (a unit quaternion x, y, z, w; net_mp.h MpPlayer rot), then turn radians about

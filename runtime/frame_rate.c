@@ -343,6 +343,38 @@ int game_player_voices(char out[][16], int max, uint64_t slot[16]) {
 // frame that slot plays is the float at the player's +0x58: the game starts some animations past their first frame
 // (a back flip at 5.3), plays them at its own rate (a run at 1.5 times) and leaves some before their last (the flip
 // at 19.5 of 30, when the landing takes over). *frame gets it, NAN when unread.
+// The FSKA name a slot of the anim player points at (u16 length then text, or the text), 0 none.
+static int fska_name(uint64_t fska, char *out, size_t cap) {
+    char magic[4], text[66];
+    uint64_t name = 0;
+    out[0] = 0;
+    if (!fska || !read_guest(fska, magic, 4) || memcmp(magic, "FSKA", 4) || !(name = read_ptr(fska + 8)) || !read_guest(name, text, 64))
+        return 0;
+    text[64] = text[65] = 0;
+    for (int skip = 2; skip >= 0; skip -= 2) {
+        const char *t = text + skip;
+        size_t len = 0;
+        while (len < 62 && (t[len] == '_' || (t[len] >= '0' && t[len] <= '9') || (t[len] >= 'A' && t[len] <= 'Z') ||
+                            (t[len] >= 'a' && t[len] <= 'z')))
+            len++;
+        if (len < 3 || t[len] || len >= cap || (skip && (uint8_t)text[0] + ((uint8_t)text[1] << 8) != len)) continue;
+        memcpy(out, t, len), out[len] = 0;
+        return 1;
+    }
+    return 0;
+}
+
+// The animations of all of Link's layers (the anim player's slots every 0xb0 from +0x80: the main one, then the
+// upper body's pose, the face, the voice...), as game_player_anim reads the first; the count read into out.
+int game_player_anim_layers(char out[][64], int max) {
+    uint64_t actor = RT_V143 ? player_actor() : 0, m = actor ? read_ptr(actor + 0x238) : 0;
+    uint64_t c = m ? read_ptr(m + 0xc8) : 0, player = c ? read_ptr(c + 0x118) : 0;
+    int n = 0;
+    for (int k = 0; player && k < 8 && n < max; k++)
+        if (fska_name(read_ptr(player + 0x80 + 0xb0 * (uint64_t)k), out[n], 64)) n++;
+    return n;
+}
+
 int game_player_anim(char *out, size_t cap, float *frame) {
     out[0] = 0;
     *frame = NAN;
@@ -421,6 +453,8 @@ static uint64_t life_word(void) {
         return 0;
     return l + 0x298;
 }
+
+uint64_t game_player_life_addr(void) { return life_word(); }
 
 int game_player_life(int *quarters, int *max_quarters) {
     uint64_t a = life_word();

@@ -63,7 +63,8 @@ typedef struct {
     char sfx[MP_SFX_MAX];   // the voice clips Link started then, comma-separated ("" none)
     int sfx_taken;          // mp_take_sfx gave them out
     int has_body;           // the sender's real body pose came (link_body_decode)
-    LinkBody body;
+    LinkBody body;          // with the gear's places (gear_parse)
+    char gear[LF_GEAR][48]; // what the sender carries (LF_GEAR_* actors, "" none)
 } PosSample;
 // t: the sender's clock (ms); yaw NAN when not sent; anim the animation Link plays, "" when not sent
 static struct {
@@ -344,6 +345,25 @@ static void event_text(const char *kind, const char *who, const char *arg, int t
             snprintf(out, cap, menu_text(UI_MENU_MP_EV_POWER), who, menu_text(powers[i].name));
             return;
         }
+    if (!strcmp(kind, "hit") && arg[0]) {   // victim:quarter hearts
+        char victim[MP_NAME_MAX + 8], hearts[16];
+        snprintf(victim, sizeof victim, "%s", arg);
+        char *colon = strchr(victim, ':');
+        int q = colon ? atoi(colon + 1) : 0;
+        if (colon) *colon = 0;
+        if (q % 4) snprintf(hearts, sizeof hearts, "%d,%d", q / 4, (q % 4) * 25);
+        else snprintf(hearts, sizeof hearts, "%d", q / 4);
+        snprintf(out, cap, menu_text(UI_MENU_MP_EV_HIT), who, victim, hearts);
+        return;
+    }
+    if (!strcmp(kind, "block") && arg[0]) {   // the attacker whose strike the shield stopped
+        snprintf(out, cap, menu_text(UI_MENU_MP_EV_BLOCK), who, arg);
+        return;
+    }
+    if (!strcmp(kind, "duel") && arg[0]) {   // the loser
+        snprintf(out, cap, menu_text(UI_MENU_MP_EV_DUEL), who, arg);
+        return;
+    }
     if (!strcmp(kind, "quest") && arg[0]) {   // quest:step - begun, a step further, or done
         char id[96];
         snprintf(id, sizeof id, "%s", arg);
@@ -382,6 +402,131 @@ void mp_local_notice(const char *text) {
     plat_mutex_lock(&lock);
     add_line(MP_LINE_EVENT, "", text, "", "", 1);
     plat_mutex_unlock(&lock);
+}
+
+// ---- the duel (TOTK_MP_DUEL): friends who have it on too take life from this game's Link with their strikes. Each
+// friend's animation (POS lines) is followed: a strike begins when an attack animation starts (or starts over); 150 ms
+// on, while it is still under way, it hits when the friend stands within the weapon's reach of Link, at most 2 m above
+// or below, and faces him (within 70 degrees). One hit a strike; the damage by weapon. A shield raised (a layer of
+// Link's animation *_Guard*, game_player_anim_layers) toward the friend (within 80 degrees of his facing) stops it:
+// no damage, the room is told. The hit goes through the game's
+// own damage step (hit_hook.c), so Link reacts as to an enemy's blow; without the hook the life is written. When the
+// life would reach zero the strike leaves him one quarter, the life comes back full 1.2 s later and the room is told
+// the friend won: nobody really dies.
+static struct { char name[MP_NAME_MAX]; int on; } friend_duel[MP_MAX_PLAYERS];
+static int duel_sent = -1;   // whether this game's duel is on, as the room last heard (-1: not told on this connection)
+
+typedef struct { const char *prefix; int quarters; float reach; } Strike;
+static const Strike kStrikes[] = {
+    {"Lsword_Attack", 6, 2.4f}, {"Spear_Attack", 4, 2.8f}, {"Sword_Blunt_Attack", 4, 1.9f}, {"Sword_Attack", 4, 1.9f},
+};
+
+static const Strike *strike_of(const char *anim, int *quarters) {
+    for (size_t i = 0; i < sizeof kStrikes / sizeof *kStrikes; i++)
+        if (!strncmp(anim, kStrikes[i].prefix, strlen(kStrikes[i].prefix))) {
+            int q = kStrikes[i].quarters;
+            if (strstr(anim, "Charge")) q *= 2;                                    // a charged strike: twice
+            else if (strstr(anim, "Jump") || strstr(anim, "Fall")) q = q * 3 / 2;   // from the air: half again
+            *quarters = q;
+            return &kStrikes[i];
+        }
+    return NULL;
+}
+
+static int duel_on(const char *name) {
+    for (int i = 0; i < MP_MAX_PLAYERS; i++)
+        if (friend_duel[i].name[0] && !strcmp(friend_duel[i].name, name)) return friend_duel[i].on;
+    return 0;
+}
+
+static void set_duel(const char *name, int on) {   // under the lock
+    int slot = -1, free_slot = -1;
+    for (int i = 0; i < MP_MAX_PLAYERS; i++) {
+        if (!strcmp(friend_duel[i].name, name)) slot = i;
+        if (!friend_duel[i].name[0] && free_slot < 0) free_slot = i;
+    }
+    if (slot < 0) slot = free_slot >= 0 ? free_slot : 0;
+    field(friend_duel[slot].name, sizeof friend_duel[0].name, name);
+    friend_duel[slot].on = on;
+}
+
+static void place_at(int k, uint64_t now, float pos[3], float vel[3], float *yaw, char anim[MP_ANIM_MAX], float rot[4],
+                     float frames[3], LinkBody *body, int *has_body);
+
+static int send_line(Sock s, int nfields, const char *const *fields);
+
+// Each friend's strike under way: its animation, when it began, whether it has hit. The room's thread, each POS tick.
+static int duel_tick(Sock s, uint64_t now) {
+    static struct { char name[MP_NAME_MAX], anim[MP_ANIM_MAX]; float frame; uint64_t began; int hit, quarters; float reach; } sw[MP_MAX_PLAYERS];
+    static uint64_t refill_at;   // a lost duel: when the life comes back full
+    if (refill_at && now >= refill_at) {
+        int life = 0, max_life = 0;
+        if (game_player_life(&life, &max_life)) game_player_life_set(max_life > 0 ? max_life : 12);
+        refill_at = 0;
+    }
+    if (!cfg_bool("TOTK_MP_DUEL")) return 1;
+    float me[3], my_yaw;
+    if (!game_player_pose(me, &my_yaw)) return 1;
+    for (int k = 0; k < MP_MAX_PLAYERS; k++) {
+        float pos[3], vel[3], yaw = NAN, rot[4] = {0, 0, 0, 1}, frames[3];
+        char anim[MP_ANIM_MAX], name[MP_NAME_MAX];
+        plat_mutex_lock(&lock);
+        int live = friend_pos[k].name[0] && friend_pos[k].n > 0 && now - friend_pos[k].at_ms < POS_STALE_MS &&
+                   duel_on(friend_pos[k].name);
+        if (live) {
+            place_at(k, now, pos, vel, &yaw, anim, rot, frames, NULL, NULL);
+            snprintf(name, sizeof name, "%s", friend_pos[k].name);
+        }
+        plat_mutex_unlock(&lock);
+        if (!live) continue;
+        int quarters = 0;
+        const Strike *st = strike_of(anim, &quarters);
+        float frame = isfinite(frames[0]) ? frames[0] : 0;
+        if (strcmp(sw[k].name, name)) memset(&sw[k], 0, sizeof sw[k]), snprintf(sw[k].name, sizeof sw[k].name, "%s", name);
+        if (!st) {
+            sw[k].anim[0] = 0;
+            continue;
+        }
+        if (strcmp(anim, sw[k].anim) || frame + 1 < sw[k].frame) {   // a strike begins (or begins again)
+            snprintf(sw[k].anim, sizeof sw[k].anim, "%s", anim);
+            sw[k].began = now, sw[k].hit = 0, sw[k].quarters = quarters, sw[k].reach = st->reach;
+        }
+        sw[k].frame = frame;
+        if (sw[k].hit || now - sw[k].began < 150) continue;
+        // within reach, and facing Link: the friend's forward (their rotation's local +z) against the way to him
+        float dx = me[0] - pos[0], dz = me[2] - pos[2], dist = sqrtf(dx * dx + dz * dz);
+        float qx = rot[0], qy = rot[1], qz = rot[2], qw = rot[3];
+        float fx = 2 * (qx * qz + qw * qy), fz = 1 - 2 * (qx * qx + qy * qy), fl = sqrtf(fx * fx + fz * fz);
+        if (dist > sw[k].reach || fabsf(me[1] - pos[1]) > 2.0f || fl < 1e-3f) continue;
+        if (dist > 0.3f && (fx * dx + fz * dz) / (fl * dist) < 0.34f) continue;   // cos 70 degrees
+        sw[k].hit = 1;
+        char lay[8][64];
+        int nl = game_player_anim_layers(lay, 8), guard = 0;
+        for (int i = 0; i < nl && i < 3; i++) guard |= strstr(lay[i], "_Guard") != NULL;
+        if (guard && isfinite(my_yaw) && dist > 0.1f && (-dx * sinf(my_yaw) - dz * cosf(my_yaw)) / dist > 0.17f) {   // cos 80
+            const char *act[] = {"ACT", "block", name};
+            if (!send_line(s, 3, act)) return 0;
+            rt_log("mp: duel: %s's %s blocked (%.1f m)", name, sw[k].anim, dist);
+            continue;
+        }
+        int life = 0, max_life = 0;
+        if (!game_player_life(&life, &max_life)) continue;
+        char q[16];
+        snprintf(q, sizeof q, "%d", sw[k].quarters);
+        if (life - sw[k].quarters <= 0) {   // the duel lost: a last blow to one quarter, the life back full, the room told
+            if (hit_hook_strike(pos, life > 1 ? life - 1 : 0)) refill_at = now + 1200;
+            else game_player_life_set(max_life > 0 ? max_life : 12);
+            const char *act[] = {"ACT", "duel", name};
+            if (!send_line(s, 3, act)) return 0;
+        } else {
+            if (!hit_hook_strike(pos, sw[k].quarters)) game_player_life_set(life - sw[k].quarters);
+            const char *act[] = {"ACT", "hit", name, q};
+            if (!send_line(s, 4, act)) return 0;
+        }
+        rt_log("mp: duel: %s's %s hit (%.1f m): %d -> %d quarters", name, sw[k].anim, dist, life,
+               life - sw[k].quarters <= 0 ? max_life : life - sw[k].quarters);
+    }
+    return 1;
 }
 
 // The prologue is over: Link has woken on the Great Sky Island in the newest save. Rooms are for the open game, so
@@ -430,9 +575,9 @@ static int send_line(Sock s, int nfields, const char *const *fields) {
 // milliseconds, the animation Link plays and its frame (game_player_anim: "Name:frame", "" when unread), his whole
 // rotation (game_player_quat:
 // "x,y,z,w", "" when unread), the voice clips he started since the last line (game_player_voices, comma-separated) and
-// his real body pose (game_player_body as link_body_encode packs it, "" when unread).
+// his real body pose (game_player_body as link_body_encode packs it, "" when unread) and what he carries (gear_text).
 static int send_pos(Sock s, const float p[3], float yaw, const float q[4], int64_t t, const char *anim, float frame,
-                    const char *sfx, const char *body) {
+                    const char *sfx, const char *body, const char *gear) {
     char x[24], y[24], z[24], w[24], tt[24], qs[64], an[MP_ANIM_MAX + 16];
     if (anim[0] && isfinite(frame)) snprintf(an, sizeof an, "%s:%.2f", anim, frame);
     else snprintf(an, sizeof an, "%s", anim);
@@ -442,8 +587,80 @@ static int send_pos(Sock s, const float p[3], float yaw, const float q[4], int64
     snprintf(tt, sizeof tt, "%lld", (long long)t);
     if (q[3] <= 1) snprintf(qs, sizeof qs, "%.4f,%.4f,%.4f,%.4f", q[0], q[1], q[2], q[3]);
     else qs[0] = 0;
-    const char *pos[] = {"POS", x, y, z, w, tt, an, qs, sfx, body};
-    return send_line(s, body[0] ? 10 : 9, pos);
+    const char *pos[] = {"POS", x, y, z, w, tt, an, qs, sfx, body, gear};
+    return send_line(s, gear[0] ? 11 : body[0] ? 10 : 9, pos);
+}
+
+// What Link carries (game_player_gear) as a POS line's field: per LF_GEAR_* item "actor@a:e;e;..." where a is the bone
+// it hangs from (link_gear_anchor, LF_ANCHOR_*) and each e a palette entry in that bone's space "qx,qy,qz,qw,x,y,z"
+// (rotation, place in millimetres); "actor" alone for the arrow (the figure draws it on the string); "" for none, all
+// joined by '|'. An item not found yet stays out (no guess in the wrong hand); one lost for a moment keeps its last
+// place on its bone while the game looks for it again. pal: Link's body palette (npal entries, actor space).
+static void gear_text(char *out, size_t cap, const float *pal, int npal) {
+    static GameGear g[LF_GEAR];
+    static struct { char actor[48]; int anchor, n; float rel[LF_GEAR_BONES][12]; } last[LF_GEAR];
+    int n = game_player_gear(g, LF_GEAR), any = 0;
+    size_t len = 0;
+    out[0] = 0;
+    for (int k = 0; k < LF_GEAR && len + 2 < cap; k++) {
+        if (k) out[len++] = '|', out[len] = 0;
+        if (k >= n || !g[k].model[0]) continue;
+        if (k == LF_GEAR_ARROW) {
+            len += (size_t)snprintf(out + len, cap - len, "%s", g[k].model);
+            any = 1;
+            continue;
+        }
+        float inv[12];
+        int anchor = g[k].n > 0 && npal > 0 ? link_gear_anchor(pal, npal, g[k].m[0], inv) : -1;
+        if (anchor >= 0) {   // into the bone's space, kept
+            snprintf(last[k].actor, sizeof last[k].actor, "%s", g[k].model);
+            last[k].anchor = anchor, last[k].n = g[k].n;
+            for (int e = 0; e < g[k].n; e++) link_figure_mul34(inv, g[k].m[e], last[k].rel[e]);
+        } else if (strcmp(last[k].actor, g[k].model) || !last[k].n)
+            continue;   // not found yet
+        len += (size_t)snprintf(out + len, cap - len, "%s@%d:", last[k].actor, last[k].anchor);
+        for (int e = 0; e < last[k].n && len + 48 < cap; e++) {
+            float qq[4];
+            const float *m = last[k].rel[e];
+            link_figure_quat_of(m, qq);
+            len += (size_t)snprintf(out + len, cap - len, "%s%.3f,%.3f,%.3f,%.3f,%d,%d,%d", e ? ";" : "", qq[0], qq[1], qq[2], qq[3],
+                                    (int)lrintf(m[3] * 1000), (int)lrintf(m[7] * 1000), (int)lrintf(m[11] * 1000));
+        }
+        if (len >= cap) len = cap - 1;
+        any = 1;
+    }
+    if (!any) out[0] = 0;
+}
+
+// A POS line's gear field into names (LF_GEAR_* actors, "" none) and the body's gear places. An entry with the
+// actor alone (a game or a test that sends no body pose) names the item: the figure holds it in the hand.
+static void gear_parse(const char *text, char names[LF_GEAR][48], LinkBody *body) {
+    memset(names, 0, LF_GEAR * 48);
+    memset(body->gear_n, 0, sizeof body->gear_n);
+    const char *p = text;
+    for (int k = 0; k < LF_GEAR && p; k++) {
+        const char *end = strchr(p, '|'), *colon = strchr(p, ':');
+        size_t len = end ? (size_t)(end - p) : strlen(p);
+        if (colon && end && colon > end) colon = NULL;
+        size_t nl = colon ? (size_t)(colon - p) : len;
+        const char *at = memchr(p, '@', nl);   // the bone it hangs from
+        body->gear_anchor[k] = at ? (float)atoi(at + 1) : -1;
+        if (at) nl = (size_t)(at - p);
+        if (nl < 48) memcpy(names[k], p, nl);
+        for (const char *e = colon ? colon + 1 : NULL; e && (!end || e < end) && body->gear_n[k] < LF_GEAR_BONES;) {
+            float v[4];
+            int mm[3], i = (int)body->gear_n[k];
+            if (sscanf(e, "%f,%f,%f,%f,%d,%d,%d", &v[0], &v[1], &v[2], &v[3], &mm[0], &mm[1], &mm[2]) != 7) break;
+            float l = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2] + v[3] * v[3]);
+            if (!(l > 0.5f && l < 1.5f) || abs(mm[0]) > 5000 || abs(mm[1]) > 5000 || abs(mm[2]) > 5000) break;
+            for (int c = 0; c < 4; c++) body->gear_q[k][i][c] = v[c] / l;
+            for (int c = 0; c < 3; c++) body->gear_t[k][i][c] = mm[c] / 1000.0f;
+            body->gear_n[k] = (float)(i + 1);
+            e = strchr(e, ';');
+            if (e) e++;
+        }
+        p = end ? end + 1 : NULL;
+    }
 }
 
 // host[:port] into a connected socket, or SOCK_BAD with *why set.
@@ -547,6 +764,8 @@ static void on_line(char *line, Sock s) {
             for (int k = 0; k < 4; k++) smp.q[k] = q[k] / ql;
         if (n >= 10) field(smp.sfx, sizeof smp.sfx, f[9]);
         smp.has_body = n >= 11 && link_body_decode(f[10], &smp.body);
+        memset(smp.gear, 0, sizeof smp.gear);
+        if (n >= 12) gear_parse(f[11], smp.gear, &smp.body);
         static int body_logged;
         if (smp.has_body && !body_logged++) rt_log("mp: %s's game sends their Link's body pose", f[1]);
         static int bad_logged;
@@ -689,6 +908,8 @@ static void on_line(char *line, Sock s) {
         for (int i = 0; old && i < log_count; i++)   // the room's past events again (after a reconnection): once
             again |= log_lines[i].kind == MP_LINE_EVENT && log_lines[i].when == when && !strcmp(log_lines[i].text, text);
         if (!again) add_line_at(MP_LINE_EVENT, who, text, "", "", !old, when);
+    } else if (!strcmp(f[0], "DUEL") && n >= 3) {   // DUEL player 0|1: whether a friend has the duel on
+        set_duel(f[1], f[2][0] == '1');
     } else if (!strcmp(f[0], "QUESTS") && n >= 3) {   // QUESTS player q:k,...: where a friend stands in the quests
         set_quests(f[1], f[2]);   // (these lines are handled under the lock)
     } else if (!strcmp(f[0], "CHALLENGE") && n >= 5) {
@@ -732,6 +953,7 @@ static void session(const char *server) {
     snprintf(view.me, sizeof view.me, "%s", me);
     plat_mutex_unlock(&lock);
     rt_log("mp: connected to %s as %s", server, name);
+    duel_sent = -1;   // the new connection is told
     unsigned sent_gen = 0, sent_look = 0, ver = cfg_version();
     char settings[512], now_settings[512];
     conn_settings(settings, sizeof settings);
@@ -933,6 +1155,12 @@ static void session(const char *server) {
                 ach_mp_add("voice", 1);
             }
         }
+        if (alive && cfg_bool("TOTK_MP_DUEL") != duel_sent) {
+            duel_sent = cfg_bool("TOTK_MP_DUEL");
+            const char *dl[] = {"DUEL", duel_sent ? "1" : "0"};
+            alive = send_line(s, 2, dl);
+        }
+        if (alive && plat_now_ms() - pos_at >= POS_EVERY_MS) alive = duel_tick(s, plat_now_ms());
         if (alive && plat_now_ms() - pos_at >= POS_EVERY_MS) {   // this game's place while it moves (or each second)
             float p[3], yaw = NAN;
             uint64_t now = plat_now_ms();
@@ -982,11 +1210,13 @@ static void session(const char *server) {
                 // after standing still, the place of the tick before goes first with its own time: the friend's game
                 // then sees the stop last until the step began, not a slow slide over the whole pause
                 if (sent_at && now - sent_at > 2 * POS_EVERY_MS && prev.t > (int64_t)sent_at)
-                    alive = send_pos(s, prev.pos, prev.yaw, prev.q, prev.t, prev.anim, prev.frame, "", "");
+                    alive = send_pos(s, prev.pos, prev.yaw, prev.q, prev.t, prev.anim, prev.frame, "", "", "");
                 static float pal[89 * 12];   // the body's palette up to the last entry sent (LF_BODY_ENTRY)
                 char body[(LF_BODY_BYTES + 2) / 3 * 4 + 1];
                 link_body_encode(pal, game_player_body(pal, 89), body, sizeof body);
-                if (alive) alive = send_pos(s, p, yaw, q, (int64_t)now, anim, frame, sfx, body);
+                char gear[1000];
+                gear_text(gear, sizeof gear, pal, body[0] ? 89 : 0);
+                if (alive) alive = send_pos(s, p, yaw, q, (int64_t)now, anim, frame, sfx, body, body[0] ? gear : "");
                 snprintf(sent_anim, sizeof sent_anim, "%s", anim);
                 if (q[3] <= 1) memcpy(sent_q, q, sizeof q);
                 memcpy(sent_pos, p, sizeof p);
@@ -1215,12 +1445,16 @@ void mp_view(MpView *out) {
     for (int i = 0; i < out->nplayers; i++) {   // the friends' positions, while fresh
         MpPlayer *p = &out->players[i];
         p->has_pos = 0, p->yaw = NAN, p->anim[0] = 0, p->rot[0] = p->rot[1] = p->rot[2] = 0, p->rot[3] = 1, p->has_body = 0;
+        memset(p->gear, 0, sizeof p->gear);
         p->frames[0] = p->frames[1] = NAN, p->frames[2] = 0;
         memset(p->vel, 0, sizeof p->vel);
         for (int k = 0; k < MP_MAX_PLAYERS; k++)
             if (friend_pos[k].name[0] && !strcmp(friend_pos[k].name, p->name) && now - friend_pos[k].at_ms < POS_STALE_MS &&
-                friend_pos[k].n > 0)
+                friend_pos[k].n > 0) {
                 p->has_pos = 1, place_at(k, now, p->pos, p->vel, &p->yaw, p->anim, p->rot, p->frames, &p->body, &p->has_body);
+                const PosSample *last = &friend_pos[k].ring[(friend_pos[k].head + POS_RING - 1) % POS_RING];
+                memcpy(p->gear, last->gear, sizeof p->gear);
+            }
         if (!strcmp(p->name, me) && view.me_has_pos) memcpy(p->pos, view.me_pos, sizeof p->pos), p->has_pos = 1;
         memset(p->look, 0, sizeof p->look);
         for (int k = 0; k < MP_MAX_PLAYERS; k++)

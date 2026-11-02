@@ -32,7 +32,7 @@
 #include "platform/platform.h"
 
 static const uint64_t kFlagsGlobal = 0x7003ad66b0ull, kBoolVtable = 0x70039403d0ull;
-enum { INT_TABLE = 2, INT_BYTES = 40, INT_VALUE_AT = 28, ENUM_TABLE = 6, ENUM_BYTES = 56, ENUM_VALUE_AT = 28, ENTRY_BYTES = 24, VALUE_AT = 22, MAX_FLAGS = 200000, RING = 4096, BURST = 24, POLL_MS = 250, TABLE_STRIDE = 0x60,
+enum { IA_TABLE = 3, IA_BYTES = 64, SA_TABLE = 17, SA_BYTES = 144, SA_ELEM = 0x50, INT_TABLE = 2, INT_BYTES = 40, INT_VALUE_AT = 28, ENUM_TABLE = 6, ENUM_BYTES = 56, ENUM_VALUE_AT = 28, ENTRY_BYTES = 24, VALUE_AT = 22, MAX_FLAGS = 200000, RING = 4096, BURST = 24, POLL_MS = 250, TABLE_STRIDE = 0x60,
        MAX_TABLES = 24 };
 
 typedef struct {   // one table of the manager
@@ -48,6 +48,7 @@ static struct {
     Table b;                  // the bool table
     Table e;                  // the enum table (a quest's step: Step_<quest>), count 0 when it was not found
     Table n;                  // the int table (PlayerStatus.Life...), count 0 when it was not found
+    Table ia, sa;             // the int array and String64 array tables (Pouch.Weapon.EquipIndex, ...Content.Name)
     Table other[MAX_TABLES];  // the others, for the log
     int nother;
     GameFlagChange ring[RING];
@@ -120,6 +121,10 @@ static int ready(int with_others) {
         rt_log("flags: no int table where 1.4.3 has it");
         memset(&F.n, 0, sizeof F.n);
     }
+    // the arrays: int arrays three tables on (64-byte entries: +0x20 the element count, +0x28 the elements), String64
+    // arrays 17 on (144-byte entries: +0x70 the count, +0x78 the elements, 0x50 bytes each with the text at +0xc)
+    if (!table_at(p + 8 + IA_TABLE * TABLE_STRIDE, &F.ia, 1) || F.ia.stride != IA_BYTES) memset(&F.ia, 0, sizeof F.ia);
+    if (!table_at(p + 8 + SA_TABLE * TABLE_STRIDE, &F.sa, 1) || F.sa.stride != SA_BYTES) memset(&F.sa, 0, sizeof F.sa);
     for (int k = -8; with_others && k <= 16 && F.nother < MAX_TABLES; k++)
         if (k && table_at(p + 8 + (int64_t)k * TABLE_STRIDE, &F.other[F.nother], 1)) {
             rt_log("flags: table %+d: %u entries of %u bytes", k, F.other[F.nother].count, F.other[F.nother].stride);
@@ -185,6 +190,49 @@ int game_int_set(uint32_t hash, int32_t value) {
     return ok;
 }
 
+// TOTK_ARRAY_PROBE=<name>[,<name>...] (research): which of the manager's tables holds those flags, and their entries'
+// words, with what the pointer-like words lead to, once after a save loads.
+static void array_probe(void) {
+    const char *e = cfg_get("TOTK_ARRAY_PROBE");
+    uint64_t p = 0;
+    if (!e || !*e || !rd(kFlagsGlobal, &p, 8) || !p) return;
+    char names[512];
+    snprintf(names, sizeof names, "%s", e);
+    for (char *n = strtok(names, ","); n; n = strtok(NULL, ",")) {
+        uint32_t h = mmh3(n);
+        int found = 0;
+        for (int k = -8; k <= 30; k++) {
+            Table t = {0};
+            if (!table_at(p + 8 + (int64_t)k * TABLE_STRIDE, &t, 1)) continue;
+            uint32_t i = number_of(&t, h);
+            if (i) {
+                found = 1;
+                uint64_t w[24] = {0};
+                rd(t.entries + (uint64_t)t.stride * i, w, t.stride < 192 ? t.stride : 192);
+                for (int j = 8; j * 8 < (int)t.stride && j < 24; j += 4)
+                    rt_log("array probe:   words %d..: %llx %llx %llx %llx", j, (unsigned long long)w[j], (unsigned long long)w[j + 1],
+                           (unsigned long long)w[j + 2], (unsigned long long)w[j + 3]);
+                rt_log("array probe: %s (%08x) table %d (%u entries of %u bytes) entry %u: %llx %llx %llx %llx %llx %llx %llx %llx", n, h,
+                       k, t.count, t.stride, i, (unsigned long long)w[0], (unsigned long long)w[1], (unsigned long long)w[2],
+                       (unsigned long long)w[3], (unsigned long long)w[4], (unsigned long long)w[5], (unsigned long long)w[6],
+                       (unsigned long long)w[7]);
+                for (int j = 1; j < 24 && j * 8 < (int)t.stride; j++) {
+                    if (w[j] >> 32 != 1 && w[j] >> 32 != 2) continue;   // heap-like
+                    uint8_t b[160];
+                    if (!rd(w[j] & ~7ull, b, sizeof b)) continue;
+                    char hex[3 * 64 + 1], txt[161];
+                    for (int q = 0; q < 64; q++) snprintf(hex + 3 * q, 4, "%02x ", b[q]);
+                    for (int q = 0; q < 160; q++) txt[q] = b[q] >= 32 && b[q] < 127 ? (char)b[q] : '.';
+                    txt[160] = 0;
+                    rt_log("array probe:   word %d -> %s| %s", j, hex, txt);
+                }
+            }
+            free(t.hash_of), free(t.was), free(t.runs);
+        }
+        if (!found) rt_log("array probe: %s (%08x) in no table", n, h);
+    }
+}
+
 // TOTK_FLAG_SET=<hash>=<0|1>[,...] (a test switch): those bool flags written once the table is found after a save loads.
 static void test_sets(void) {
     const char *ie = cfg_get("TOTK_INT_SET");   // TOTK_INT_SET=<name or hash>=<value>: an int flag, the same way
@@ -209,6 +257,31 @@ static void test_sets(void) {
         if (!game_flag_set((uint32_t)h, v)) rt_log("flags: %08lx is no bool flag of this game", h);
         p = *end == ',' ? end + 1 : NULL;
     }
+}
+
+// Element i of an int array flag (Pouch.Weapon.EquipIndex: the pouch slot of the weapon in hand, -1 none).
+int game_int_array_get(uint32_t hash, int i, int32_t *value) {
+    plat_mutex_lock(&lock);
+    uint32_t k, count = 0;
+    uint64_t at = 0;
+    int ok = F.ok && F.ia.count && i >= 0 && (k = number_of(&F.ia, hash)) &&
+             rd(F.ia.entries + (uint64_t)IA_BYTES * k + 0x20, &count, 4) && (uint32_t)i < count &&
+             rd(F.ia.entries + (uint64_t)IA_BYTES * k + 0x28, &at, 8) && rd(at + 4ull * (uint64_t)i, value, 4);
+    plat_mutex_unlock(&lock);
+    return ok;
+}
+
+// Element i of a String64 array flag (Pouch.Weapon.Content.Name: the actor in each pouch slot).
+int game_str_array_get(uint32_t hash, int i, char out[64]) {
+    plat_mutex_lock(&lock);
+    uint32_t k, count = 0;
+    uint64_t at = 0;
+    int ok = F.ok && F.sa.count && i >= 0 && (k = number_of(&F.sa, hash)) &&
+             rd(F.sa.entries + (uint64_t)SA_BYTES * k + 0x70, &count, 4) && (uint32_t)i < count &&
+             rd(F.sa.entries + (uint64_t)SA_BYTES * k + 0x78, &at, 8) && rd(at + (uint64_t)SA_ELEM * (uint64_t)i + 0xc, out, 64);
+    plat_mutex_unlock(&lock);
+    if (ok) out[63] = 0;
+    return ok;
 }
 
 int game_enum_get(uint32_t hash, uint32_t *value) {
@@ -317,7 +390,7 @@ static void watch(void *arg) {
         int was_ok = F.ok, ok = ready(g_log != NULL);
         plat_mutex_unlock(&lock);
         if (!ok) continue;
-        if (!was_ok) test_sets();
+        if (!was_ok) test_sets(), array_probe();
         int n = 0;
         for (uint32_t k = 1; k < F.b.count; k++) {
             uint8_t b;

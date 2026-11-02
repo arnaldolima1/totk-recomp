@@ -260,13 +260,13 @@ class Emitter:
 
     def replacements(self, a):
         """The lifted words of each alternative of the patched site a, in set order. Only the last word of an
-        alternative may branch (bl, b, b.cond / cbz / tbz, ret)."""
+        alternative may branch (bl, blr, b, b.cond / cbz / tbz, ret)."""
         out = []
         for _, words in self.patched[a]:
             lifted = [self.mod.lifter.lift(w, a) for w in words]
             for j, r in enumerate(lifted):
                 last = j == len(lifted) - 1
-                if r.kind != 'op' and not (last and r.kind in ('bl', 'b', 'bcond', 'ret')):
+                if r.kind != 'op' and not (last and r.kind in ('bl', 'blr', 'b', 'bcond', 'ret')):
                     raise patches.PatchError(f'{a:#x}: replacement word {words[j]:08x} is a {r.kind}')
             out.append(lifted)
         return out
@@ -317,7 +317,7 @@ class Emitter:
                 effects.append(self.patched_effect(ins, a))
                 for words in self.replacements(a):
                     r = words[-1]
-                    if r.kind == 'bl':
+                    if r.kind in ('bl', 'blr'):
                         calls.add(i)
                     elif r.kind in ('b', 'bcond') and not entry <= r.target < end:
                         exits.add(i)
@@ -340,7 +340,7 @@ class Emitter:
         if any(e[1] != alts[0][1] for e in alts):
             raise patches.PatchError(f'{a:#x}: the alternatives write different flags ({[e[1] for e in alts]})')
         reads = any(e[0] for e in alts)
-        if (alts[0][1] or reads) and (ins.kind == 'bl' or any(w[-1].kind == 'bl' for w in self.replacements(a))):
+        if (alts[0][1] or reads) and (ins.kind == 'bl' or any(w[-1].kind in ('bl', 'blr') for w in self.replacements(a))):
             raise patches.PatchError(f'{a:#x}: a patched call that uses flags')
         return reads, alts[0][1]
 
@@ -419,6 +419,8 @@ class Emitter:
                 return op(i, r.code)
             if r.kind == 'bl':
                 return call(r.target, a)
+            if r.kind == 'blr':
+                return f'c->pc = {r.target}; c->x[30] = {hx(a + 4)}; {spill}rt_dispatch(c);{reload_call}'
             if r.kind == 'b':
                 return jump(r.target, i)
             if r.kind == 'bcond':
